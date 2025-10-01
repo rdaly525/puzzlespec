@@ -1,0 +1,7 @@
+Goals:
+    Specify a concrete game
+
+
+
+# Tasks:
+    - function to unfreeze/copy a rulest by creating a new instance of it
