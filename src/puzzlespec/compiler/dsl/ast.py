@@ -8,9 +8,16 @@ TExpr = tp.TypeVar('TExpr', bound="Expr")
 KExpr = tp.TypeVar('KExpr', bound="Expr")
 VExpr = tp.TypeVar('VExpr', bound="Expr")
 
-def IntParam(name: str, implicit: bool = False) -> IntExpr:
-    node = ir.Param(name)
-    return wrap(node, irT.Int)
+def Param(name: str, T: irT.BaseType) -> Expr:
+    assert T in (irT.Bool, irT.Int)
+    node = ir._Param(name, T)
+    return wrap(node, T)
+
+def IntParam(name: str) -> IntExpr:
+    return Param(name, irT.Int)
+
+def BoolParam(name: str) -> BoolExpr:
+    return Param(name, irT.Bool)
 
 @dataclass
 class Expr:
@@ -32,7 +39,7 @@ class IntExpr(Expr):
                 raise ValueError(f"Expected int or Lit, got {val}")
         try:
             val = int(val)
-            return IntExpr(ir.Lit(val), irT.Int)
+            return IntExpr(ir.Lit(val, irT.Int), irT.Int)
         except:
             raise ValueError(f"Expected Int expression. Got {val}")
 
@@ -107,7 +114,7 @@ class BoolExpr(Expr):
                 raise ValueError(f"Expected bool or Lit, got {val}")
         if isinstance(val, (bool, int)):
             val = bool(val)
-            return BoolExpr(ir.Lit(val), irT.Bool)
+            return BoolExpr(ir.Lit(val, irT.Bool), irT.Bool)
         raise ValueError(f"Expected Bool expression. Got {val}")
 
     def __invert__(self) -> BoolExpr:
@@ -166,21 +173,21 @@ class CellIdxExpr(Expr): ...
 
 
 def make_lambda(fn: tp.Callable[[TExpr], VExpr], paramT: irT.Type_) -> 'LambdaExpr[TExpr, VExpr]':
-    bv_node = ir.BoundVar()
-    bv_expr = tp.cast(TExpr, wrap(bv_node, paramT))
+    bv_node = ir._BoundVarPlaceholder()
+    bv_expr = tp.cast(paramT, wrap(bv_node, paramT))
     ret_expr = fn(bv_expr)
-    lambda_node = ir.Lambda(bv_node, ret_expr.node)
+    lambda_node = ir._LambdaPlaceholder(bv_node, ret_expr.node, paramT)
     return tp.cast(LambdaExpr, wrap(lambda_node, irT.ArrowT(paramT, ret_expr.T)))
 
 def make_lambda_dict(fn: tp.Callable[[KExpr, VExpr], TExpr], keyT: irT.Type_, valT: irT.Type_) -> 'LambdaExpr[irT.TupleT[KExpr, VExpr], TExpr]':
-    bv_k = ir.BoundVar()
-    bv_v = ir.BoundVar()
-    bv_k_expr = tp.cast(KExpr, wrap(bv_k, keyT))
-    bv_v_expr = tp.cast(VExpr, wrap(bv_v, valT))
+    bv_node = ir._BoundVarPlaceholder()
+    paramT = irT.TupleT(keyT, valT)
+    bv_expr = tp.cast(paramT, wrap(bv_node, paramT))
+    bv_k_expr = bv_expr[0]
+    bv_v_expr = bv_expr[1]
     ret_expr = fn(bv_k_expr, bv_v_expr)
-    param_node = ir.Tuple(bv_k, bv_v)
-    lambda_node = ir.Lambda(param_node, ret_expr.node)
-    return tp.cast(LambdaExpr, wrap(lambda_node, irT.ArrowT(irT.TupleT(keyT, valT), ret_expr.T)))
+    lambda_node = ir._LambdaPlaceholder(bv_node, ret_expr.node, paramT)
+    return tp.cast(LambdaExpr, wrap(lambda_node, irT.ArrowT(paramT, ret_expr.T)))
 
 class ListExpr(Expr, tp.Generic[TExpr]):
     @property
@@ -213,11 +220,6 @@ class ListExpr(Expr, tp.Generic[TExpr]):
         node = ir.Distinct(self.node)
         return tp.cast(BoolExpr, wrap(node, irT.Bool))
 
-    def mask(self, vals: TExpr) -> 'MaskExpr[TExpr]':
-        node = ir.Mask(self.node, vals.node)
-        # Use the list's type as the result; mask selects subset of same list type
-        return tp.cast(MaskExpr[TExpr], wrap(node, self.T))
-
     def concat(self, vals: 'ListExpr[TExpr]') -> 'ListExpr[TExpr]':
         if self.elem_type is not vals.elem_type:
             raise TypeError(f"Cannot concat lists with different element types: {self.elem_type} and {vals.elem_type}")
@@ -245,7 +247,6 @@ class ListExpr(Expr, tp.Generic[TExpr]):
     #    node = ir.ListLen(self.node)
     #    return tp.cast(IntExpr, wrap(node, irT.Int))
 
-class MaskExpr(Expr, tp.Generic[TExpr]): ...
 
 class DictExpr(Expr, tp.Generic[KExpr, VExpr]):
     @property
@@ -270,13 +271,6 @@ class DictExpr(Expr, tp.Generic[KExpr, VExpr]):
         node = ir.Forall(self.node, lambda_expr.node)
         return tp.cast(BoolExpr, wrap(node, irT.Bool))
 
-    def mask(self, vals: Expr) -> MaskExpr[KExpr]:
-        if self.val_type is not irT.Bool:
-            raise ValueError(f"Cannot mask non-bool dict")
-        node = ir.Mask(self.node, vals.node)
-        T = self.key_type
-        return tp.cast(MaskExpr[KExpr], wrap(node, T))
-
     def __invert__(self) -> 'DictExpr[KExpr, VExpr]':
         if self.val_type is not irT.Bool:
             raise ValueError(f"Cannot invert non-bool dict")
@@ -292,7 +286,7 @@ class DictExpr(Expr, tp.Generic[KExpr, VExpr]):
             node = ir.DictGet(self.node, key.node)
             return tp.cast(VExpr, wrap(node, self.val_type))
         else:
-            raise ValueError(f"key must be Type {self.key_type} or [{self.key_type}]")
+            raise ValueError(f"key must be Type {self.key_type} or [{self.key_type}], but is {key.T}")
 
     def __len__(self) -> IntExpr:
         node = ir.DictLength(self.node)

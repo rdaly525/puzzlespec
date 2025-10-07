@@ -2,10 +2,11 @@ from puzzlespec import get_puzzle
 #from puzzlespec import set_clues
 from puzzlespec.compiler.dsl import ir, ir_types as irT
 from puzzlespec.compiler.passes import Context, PassManager, analyses as A, transforms as T
+import numpy as np
 
 Unruly = get_puzzle("unruly")
 def t0():
-    assert Unruly.is_frozen()
+    assert 0
     params = Unruly.params
     assert 'nR' in params
     assert 'nC' in params
@@ -15,7 +16,17 @@ def t0():
     decision_vars = Unruly.decision_vars
     assert 'color' in decision_vars
     # Returns a new ruleset object with concretized parameters. (Unruly object is unmodified)
-    
+    assert len(Unruly.param_constraints.node._children)==4
+    assert len(Unruly.gen_constraints.node._children)==0
+    assert len(Unruly.decision_constraints.node._children)==3
+
+    print("Param constraints!")
+    print(Unruly.pretty(Unruly.param_constraints))
+    print("Gen constraints!")
+    print(Unruly.pretty(Unruly.gen_constraints))
+    print("Decision constraints!")
+    print(Unruly.pretty(Unruly.decision_constraints))
+
     game = Unruly.set_params(nR=4)
     assert 'nC' in game.params
     assert 'nR' not in game.params
@@ -26,27 +37,13 @@ def t0():
 t0()
 
 def t1():
-    _game = Unruly.set_params(nR=4, nC=4)
-    assert _game.params == {}
-    _gen_vars = _game.gen_vars
-    assert 'given_mask' in _gen_vars
-    assert 'given_vals' in _gen_vars
+    game = Unruly.set_params(nR=4, nC=4)
+    assert game.params == {}
+    gen_vars = game.gen_vars
+    assert 'given_mask' in gen_vars
+    assert 'given_vals' in gen_vars
 
-    # Cannot set vals of a variable
-    given_mask = _gen_vars['given_mask']
-    try:
-        given_mask[(0,0)] = 1
-        assert False
-    except:
-        pass
-    
     # Change game into clue setter mode
-    game_gen = _game.clue_setter()
-    gen_vars = game_gen.gen_vars
-    assert gen_vars is not _gen_vars
-    given_mask = gen_vars['given_mask']
-    given_vals = gen_vars['given_mask']
-
     # helper function to set the clues
     # 1 1 0 0 
     # 0 1 0 1
@@ -59,28 +56,33 @@ def t1():
     # X X X X
     
     clues = "11..0.0.0......."
-    for i, v in enumerate(clues):
-        r = i // 4
-        c = i % 4
-        if v != '.':
-            v = int(v)
-            game_gen += given_mask[(r,c)] == True
-            game_gen += given_vals[(r,c)] == v
-        else:
-            game_gen += given_mask[(r,c)] == False
-
+    with game.clue_setter() as cs:
+        # clue setter mode has access to all the gen_var variables as attributes
+        # initialize all the given_vals to be 0 and given_mask to be false
+        cs.given_vals.set(np.zeros(shape=(4,4)))
+        cs.given_mask.set(np.zeros(shape=(4,4)))
+        for i, v in enumerate(clues):
+            r = i // 4
+            c = i % 4
+            if v != '.':
+                v = int(v)
+                cs.given_mask[(r,c)] = True
+                cs.given_vals[(r,c)] = v
+    
+    # This will do the final substituiton of the genvars
+    game_with_clues = cs.finalize()
 
 
 
 def t2():
     ctx = Context()
-    ctx.add(A.TypeEnv_(p.tenv))
+    ctx.add(A.TypeEnv_(Unruly.tenv))
     ctx.add(T.ParamValues(nR=4, nC=4))
 
     # Run a representative pipeline on the rules conjunction
-    root = p.rules.as_expr().node
+    root = Unruly.rules.as_expr().node
     pm = PassManager(
-        A.RolesPass(p),
+        A.RolesPass(Unruly),
         T.ParamSubPass(),
         T.ConcretizeVarsPass(),
         T.ConcretizeCollectionsPass(),

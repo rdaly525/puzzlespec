@@ -21,32 +21,43 @@ class Node:
         fields.update(kwargs)
         return type(self)(*new_children, **fields)
 
-class FreeVar(Node):
-    _fields = ("name",)
-    def __init__(self, name: str):
-        self.name = name
+class VarRef(Node):
+    _fields = ("sid",)
+    def __init__(self, sid: int):
+        self.sid = sid
         super().__init__()
 
 class BoundVar(Node):
+    _fields = ('idx') # De Bruijn index
+    def __init__(self, idx: int):
+        self.idx = idx
+        super().__init__()
+
+class _BoundVarPlaceholder(Node):
     def __init__(self):
         super().__init__()
 
 # Literal value
 class Lit(Node):
-    _fields = ("value",)
-    def __init__(self, value: tp.Any):
-        self.value = value
+    _fields = ("value", "T")
+    def __init__(self, value: tp.Any, T: irT.Type_):
+        assert T in (irT.Bool, irT.Int)
+        self.T = T
+        self.value = T.cast_as(value)
         super().__init__()
 
 # User-defined parameter
-class Param(Node):
-    _fields = ("name",)
-    def __init__(self, name: str):
+# Uniquified by 'name'.
+# Eventually gets transformed into a normal VarRef with a 'P' role
+class _Param(Node):
+    _fields = ("name", "T")
+    def __init__(self, name: str, T: irT.Type_):
+        assert T in (irT.Bool, irT.Int)
         self.name = name
+        self.T = T
         super().__init__()
 
 # Base Type operators
-
 class Eq(Node):
     def __init__(self, a: Node, b: Node):
         super().__init__(a, b)
@@ -75,6 +86,10 @@ class Conj(Node):
 class Disj(Node):
     def __init__(self, *args: Node):
         super().__init__(*args)
+
+class Neg(Node):
+    def __init__(self, a: Node):
+        super().__init__(a)
 
 class Add(Node):
     def __init__(self, a: Node, b: Node):
@@ -129,23 +144,14 @@ class Tuple(Node):
 # Concrete list
 class List(Node):
     def __init__(self, *elements: Node):
-        super().__init__(len(elements), *elements)
+        super().__init__(*elements)
 
 # Represents a symbolic list
 class ListTabulate(Node):
     def __init__(self, size: Node, fun: Node):
         super().__init__(size, fun)
 
-# Represents a symbolic list of variables 
-# (semantically equivalent to ListTabulate with a lambda producing a fresh var)
-class VarList(Node):
-    _fields = ("name",) 
-    def __init__(self, size: Node, name: str):
-        self.name = name
-        super().__init__(size)
-
 # Operations on lists
-
 class ListGet(Node):
     def __init__(self, list: Node, idx: Node):
         super().__init__(list, idx)
@@ -195,16 +201,7 @@ class DictTabulate(Node):
     def __init__(self, keys: Node, fun: Node):
         super().__init__(keys, fun)
 
-# A symbolic dict of variables
-class VarDict(Node):
-    _fields = ("name",)
-
-    def __init__(self, keys: Node, name: str):
-        self.name = name
-        super().__init__(keys)
-
 # Operators on dicts
-
 class DictGet(Node):
     def __init__(self, dict: Node, key: Node):
         super().__init__(dict, key)
@@ -260,11 +257,30 @@ class GridNumCols(Node):
         super().__init__(grid)
 
 
-# Other operators
+# Grid cell selection helpers (for tactics/spec ergonomics)
+class GridCellAt(Node):
+    """Select the unique cell at the intersection of a row list and a col list.
+
+    Children:
+      - row_cells: Node (list of cell indices)
+      - col_cells: Node (list of cell indices)
+    """
+
+    def __init__(self, row_cells: Node, col_cells: Node):
+        super().__init__(row_cells, col_cells)
+
+## Higher Order Operators
+class _LambdaPlaceholder(Node):
+    _fields = ('paramT',)
+    def __init__(self, bound_var: Node, body: Node, paramT: irT.Type_):
+        self.paramT = paramT
+        super().__init__(bound_var, body)
 
 class Lambda(Node):
-    def __init__(self, bound_var: Node, body: Node):
-        super().__init__(bound_var, body)
+    _fields = ('paramT',)
+    def __init__(self, body: Node, paramT: irT.Type_):
+        self.paramT = paramT
+        super().__init__(body)
 
 class Sum(Node):
     def __init__(self, vals: Node):
@@ -281,27 +297,3 @@ class Forall(Node):
 class Map(Node):
     def __init__(self, domain: Node, fun: Node):
         super().__init__(domain, fun)
-
-#class Mask(Node):
-#    def __init__(self, mask: Node, vals: Node):
-#        super().__init__(mask, vals)
-
-
-# Grid cell selection helpers (for tactics/spec ergonomics)
-class GridCellAt(Node):
-    """Select the unique cell at the intersection of a row list and a col list.
-
-    Children:
-      - row_cells: Node (list of cell indices)
-      - col_cells: Node (list of cell indices)
-    """
-
-    def __init__(self, row_cells: Node, col_cells: Node):
-        super().__init__(row_cells, col_cells)
-
-
-
-def pretty_print(node: Node, indent: int = 0):
-    print("  " * indent + node.__class__.__name__)
-    for child in node:
-        pretty_print(child, indent + 1)

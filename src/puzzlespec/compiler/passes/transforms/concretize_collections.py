@@ -4,7 +4,7 @@ import typing as tp
 
 from ..pass_base import Transform, handles
 from ...dsl import ir
-from .const_prop import ConstPropPass
+from .const_fold import ConstFoldPass
 
 
 def _subst_multi(node: ir.Node, mapping: tp.Dict[ir.Node, ir.Node]) -> ir.Node:
@@ -35,7 +35,7 @@ class ConcretizeCollectionsPass(Transform):
 
     def __init__(self) -> None:
         super().__init__()
-        self._const = ConstPropPass()
+        self._const = ConstFoldPass()
 
     @handles(ir.Map)
     def _(self, node: ir.Map) -> ir.Node:

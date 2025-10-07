@@ -2,12 +2,20 @@ from . import ast, ir_types as irT
 from . import ir
 import typing as tp
 
-class Topology: pass
+class Topology:
+    def terms(self) -> tp.List[ast.Expr]:
+        ...
 
 class Grid2D(Topology):
     def __init__(self, nR: ast.IntOrExpr, nC: ast.IntOrExpr):
         self.nR = ast.IntExpr.make(nR)
         self.nC = ast.IntExpr.make(nC)
+
+    def copy(self):
+        return Grid2D(self.nR, self.nC)
+
+    def terms(self):
+        return [self.nR, self.nC]
 
     def index_grid(self, mode:str) -> ast.GridExpr[ast.Expr]:
         if mode == "C":

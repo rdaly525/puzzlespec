@@ -1,6 +1,12 @@
+from __future__ import annotations
+from multiprocessing import Value
+from re import T
 from ..pass_base import Context, AnalysisObject, Analysis, handles
-from ...dsl import ir, ast, ir_types as irT, spec
+from ...dsl import ir, ast, ir_types as irT
 import typing as tp
+
+if tp.TYPE_CHECKING:
+    from ...dsl import spec
 
 
 class TypeEnv_(AnalysisObject):
@@ -8,8 +14,8 @@ class TypeEnv_(AnalysisObject):
         self.env = env
 
 class TypeValues(AnalysisObject):
-    def __init__(self):
-        self.mapping: tp.Dict[ir.Node, irT.Type_] = {}
+    def __init__(self, mapping):
+        self.mapping: tp.Dict[ir.Node, irT.Type_] = mapping
 
 class TypeInferencePass(Analysis):
     requires = (TypeEnv_,)
@@ -20,38 +26,48 @@ class TypeInferencePass(Analysis):
 
     def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
         # Use concrete mapping for fast lookup
-        self.var_types: tp.Dict[str, irT.Type_] = ctx.get(TypeEnv_).env.vars
+        self.tenv: tp.Dict[int, irT.Type_] = ctx.get(TypeEnv_).env
         self.node_types: tp.Dict[ir.Node, irT.Type_] = {}
+        self.bctx = []
         # Walk and populate
         self.visit(root)
         # Package result
-        tv = TypeValues()
-        tv.mapping = self.node_types
-        return tv
+        tv = TypeValues(self.node_types)
+        ctx.add(tv)
+        return root
 
-    def _visit_children(self, node: ir.Node) -> None:
-        for child in node._children:
-            self.visit(child)
+    # Should not see these because the should have been removed when adding constraint to spec
+    @handles(ir._LambdaPlaceholder)
+    @handles(ir._BoundVarPlaceholder)
+    def _(self, node: ir.Node): 
+        raise ValueError("SHOULD NOT BE HERE")
 
-    @handles(ir.FreeVar)
-    def visit_free_var(self, var: ir.FreeVar):
-        if var.name in self.var_types:
-            self.node_types[var] = self.var_types[var.name]
-        else:
-            raise TypeError(f"Variable {var.name} not found in type environment")
+    @handles(ir.VarRef)
+    def _(self, var: ir.VarRef):
+        assert var.sid in self.tenv
+        self.node_types[var] = self.tenv[var.sid]
         return var
+
+    @handles(ir.Lambda)
+    def _(self, lam: ir.Lambda):
+        self.bctx.append(lam.paramT)
+        self.visit_children(lam)
+        self.bctx.pop()
+        argT = lam.paramT
+        resT = self.node_types[lam._children[0]]
+        lamT = irT.ArrowT(argT, resT)
+        self.node_types[lam] = lamT
+        return lam
 
     @handles(ir.BoundVar)
     def visit_bound_var(self, var: ir.BoundVar):
-        # Bound variable types are assigned contextually when visiting enclosing lambdas
-        # If encountered outside such a context, this is a type error
-        if var not in self.node_types:
-            raise TypeError("Encountered untyped bound variable outside of lambda context")
+        assert var.idx < len(self.bctx)
+        self.node_types[var] = self.bctx[-(var.idx+1)]
         return var
 
-    @handles(ir.And, ir.Or, ir.Implies)
-    def visit_bool_binary_op(self, op: ir.Node):
-        self._visit_children(op)
+    @handles(ir.Not, ir.And, ir.Or, ir.Implies, ir.Conj, ir.Disj)
+    def visit_bool_op(self, op: ir.Node):
+        self.visit_children(op)
         # Check children are bool
         for child in op._children:
             if self.node_types[child] != irT.Bool:
@@ -59,28 +75,10 @@ class TypeInferencePass(Analysis):
         self.node_types[op] = irT.Bool
         return op
 
-    @handles(ir.Conj)
-    def _(self, op: ir.Conj):
-        self._visit_children(op)
-        for child in op._children:
-            if self.node_types[child] is not irT.Bool:
-                raise TypeError(f"Child {child} of {op} is not Bool")
-        self.node_types[op] = irT.Bool
-        return op
-
-    @handles(ir.Disj)
-    def _(self, op: ir.Disj):
-        self._visit_children(op)
-        for child in op._children:
-            if self.node_types[child] is not irT.Bool:
-                raise TypeError(f"Child {child} of {op} is not Bool")
-        self.node_types[op] = irT.Bool
-        return op
-
     # Visit int, int -> int ops
     @handles(ir.Add, ir.Sub, ir.Mul, ir.Div, ir.Mod)
-    def visit_int_binary_op(self, op: ir.Node):
-        self._visit_children(op)
+    def visit_int_to_int(self, op: ir.Node):
+        self.visit_children(op)
         # Check children are int
         for child in op._children:
             if self.node_types[child] != irT.Int:
@@ -90,8 +88,8 @@ class TypeInferencePass(Analysis):
     
     # Visit int, int -> bool ops
     @handles(ir.Gt, ir.GtEq, ir.Lt, ir.LtEq)
-    def visit_int_comparison_op(self, op: ir.Node):
-        self._visit_children(op)
+    def visit_int_to_bool(self, op: ir.Node):
+        self.visit_children(op)
         # Check children are int
         for child in op._children:
             if self.node_types[child] != irT.Int:
@@ -102,7 +100,7 @@ class TypeInferencePass(Analysis):
     # Equality
     @handles(ir.Eq)
     def visit_equality(self, op: ir.Node):
-        self._visit_children(op)
+        self.visit_children(op)
         # Check children are same type
         for child in op._children:
             if self.node_types[child] != self.node_types[op._children[0]]:
@@ -113,59 +111,26 @@ class TypeInferencePass(Analysis):
     # Tuples
     @handles(ir.Tuple)
     def visit_tuple(self, op: ir.Tuple):
-        self._visit_children(op)
+        self.visit_children(op)
         self.node_types[op] = irT.TupleT(*(self.node_types[c] for c in op._children))
         return op
     
     # Literals and simple nodes
     @handles(ir.Lit)
     def _(self, node: ir.Lit):
-        val = node.value
-        if isinstance(val, bool):
-            self.node_types[node] = irT.Bool
-        elif isinstance(val, int):
-            self.node_types[node] = irT.Int
-        else:
-            raise TypeError(f"Unsupported literal type: {type(val)}")
+        self.node_types[node] = node.T
         return node
 
-    @handles(ir.Param)
-    def _(self, node: ir.Param):
-        # Params are integer-typed in this DSL
-        self.node_types[node] = irT.Int
+    @handles(ir._Param)
+    def _(self, node: ir._Param):
+        self.node_types[node] = node.T
         return node
-
-    @handles(ir.Not)
-    def _(self, node: ir.Not):
-        for child in node._children:
-            self.visit(child)
-        child = node._children[0]
-        if self.node_types[child] is not irT.Bool:
-            raise TypeError("Not expects Bool operand")
-        self.node_types[node] = irT.Bool
-        return node
-
-    # Helper: infer lambda with a given argument type
-    def _infer_lambda(self, lam: ir.Lambda, argT: irT.Type_) -> irT.ArrowT:
-        bound_var = lam._children[0]
-        body = lam._children[1]
-        if not isinstance(bound_var, ir.BoundVar):
-            raise TypeError("Lambda first child must be a BoundVar")
-        # Assign bound var type in this context
-        self.node_types[bound_var] = argT
-        # Infer body type
-        self.visit(body)
-        resT = self.node_types[body]
-        lamT = irT.ArrowT(argT, resT)
-        self.node_types[lam] = lamT
-        return lamT
 
     # Lists
     @handles(ir.List)
     def _(self, node: ir.List):
         # children: (length, elem0, elem1, ...)
-        for child in node._children:
-            self.visit(child)
+        self.visit_children(node)
         if len(node._children) == 0:
             raise TypeError("List literal missing length child")
         length_node = node._children[0]
@@ -183,38 +148,23 @@ class TypeInferencePass(Analysis):
 
     @handles(ir.ListTabulate)
     def _(self, node: ir.ListTabulate):
-        # size: Int, fun: Lambda(Int -> T)
+        # size: Int, fun: Int -> V
+        self.visit_children(node)
         size, fun = node._children
-        self.visit(size)
         if self.node_types[size] is not irT.Int:
             raise TypeError("ListTabulate size must be Int")
         if not isinstance(fun, ir.Lambda):
             raise TypeError("ListTabulate expects a Lambda as second child")
-        lamT = self._infer_lambda(fun, irT.Int)
+        lamT = self.node_types[fun]
+        if lamT.argT is not irT.Int:
+            raise TypeError("ListTabulate lambda key must be Int")
         self.node_types[node] = irT.ListT(lamT.resT)
-        return node
-
-    @handles(ir.VarList)
-    def _(self, node: ir.VarList):
-        # size child; declared type from environment by name
-        size = node._children[0]
-        self.visit(size)
-        if self.node_types[size] is not irT.Int:
-            raise TypeError("VarList size must be Int")
-        name = node.name
-        if name not in self.var_types:
-            raise TypeError(f"VarList {name} not found in type environment")
-        T = self.var_types[name]
-        if not isinstance(T, irT.ListT):
-            raise TypeError(f"VarList {name} must have list type; got {T}")
-        self.node_types[node] = T
         return node
 
     @handles(ir.ListGet)
     def _(self, node: ir.ListGet):
+        self.visit_children(node)
         lst, idx = node._children
-        self.visit(lst)
-        self.visit(idx)
         lstT = self.node_types[lst]
         if not isinstance(lstT, irT.ListT):
             raise TypeError("ListGet expects a list as first operand")
@@ -225,8 +175,8 @@ class TypeInferencePass(Analysis):
 
     @handles(ir.ListLength)
     def _(self, node: ir.ListLength):
+        self.visit_children(node)
         lst = node._children[0]
-        self.visit(lst)
         lstT = self.node_types[lst]
         if not isinstance(lstT, irT.ListT):
             raise TypeError("ListLength expects a list")
@@ -235,9 +185,8 @@ class TypeInferencePass(Analysis):
 
     @handles(ir.ListWindow)
     def _(self, node: ir.ListWindow):
+        self.visit_children(node)
         lst, size, stride = node._children
-        for ch in node._children:
-            self.visit(ch)
         if not isinstance(self.node_types[lst], irT.ListT):
             raise TypeError("ListWindow expects a list")
         if self.node_types[size] is not irT.Int or self.node_types[stride] is not irT.Int:
@@ -248,9 +197,8 @@ class TypeInferencePass(Analysis):
 
     @handles(ir.ListConcat)
     def _(self, node: ir.ListConcat):
+        self.visit_children(node)
         a, b = node._children
-        self.visit(a)
-        self.visit(b)
         aT, bT = self.node_types[a], self.node_types[b]
         if not isinstance(aT, irT.ListT) or not isinstance(bT, irT.ListT):
             raise TypeError("ListConcat expects list operands")
@@ -263,10 +211,10 @@ class TypeInferencePass(Analysis):
     @handles(ir.Dict)
     def _(self, node: ir.Dict):
         # Flat children alternating key, value
-        for ch in node._children:
-            self.visit(ch)
+        self.visit_children(node)
         keys = node._children[::2]
         vals = node._children[1::2]
+        assert len(keys) == len(vals) # True by construction
         if len(keys) == 0:
             raise TypeError("Cannot infer type of empty dict literal")
         keyT0 = self.node_types[keys[0]]
@@ -282,39 +230,23 @@ class TypeInferencePass(Analysis):
 
     @handles(ir.DictTabulate)
     def _(self, node: ir.DictTabulate):
+        self.visit_children(node)
         keys, fun = node._children
-        self.visit(keys)
         keysT = self.node_types[keys]
         if not isinstance(keysT, irT.ListT):
             raise TypeError("DictTabulate keys must be a list")
         if not isinstance(fun, ir.Lambda):
             raise TypeError("DictTabulate expects a Lambda as second child")
-        lamT = self._infer_lambda(fun, keysT.elemT)
+        lamT = self.node_types[fun]
+        if lamT.argT != keys.elemT:
+            raise TypeError(f"DictTabulate lambda argument type {lamT.argT} does not match keys list element type {keysT.elemT}")
         self.node_types[node] = irT.DictT(keysT.elemT, lamT.resT)
-        return node
-
-    @handles(ir.VarDict)
-    def _(self, node: ir.VarDict):
-        keys = node._children[0]
-        self.visit(keys)
-        name = node.name
-        if name not in self.var_types:
-            raise TypeError(f"VarDict {name} not found in type environment")
-        T = self.var_types[name]
-        if not isinstance(T, irT.DictT):
-            raise TypeError(f"VarDict {name} must have dict type; got {T}")
-        # Optional: check key list type consistency if available
-        keysT = self.node_types[keys]
-        if isinstance(keysT, irT.ListT) and keysT.elemT is not T.keyT:
-            raise TypeError("VarDict keys element type does not match declared key type")
-        self.node_types[node] = T
         return node
 
     @handles(ir.DictGet)
     def _(self, node: ir.DictGet):
+        self.visit_children(node)
         d, k = node._children
-        self.visit(d)
-        self.visit(k)
         dT = self.node_types[d]
         if not isinstance(dT, irT.DictT):
             raise TypeError("DictGet expects a dict")
@@ -325,22 +257,24 @@ class TypeInferencePass(Analysis):
 
     @handles(ir.DictMap)
     def _(self, node: ir.DictMap):
+        self.visit_children(node)
         d, fun = node._children
-        self.visit(d)
         dT = self.node_types[d]
         if not isinstance(dT, irT.DictT):
             raise TypeError("DictMap expects a dict as first child")
         if not isinstance(fun, ir.Lambda):
             raise TypeError("DictMap expects a Lambda as second child")
-        argT = irT.TupleT(dT.keyT, dT.valT)
-        lamT = self._infer_lambda(fun, argT)
+        expected_argT = irT.TupleT(dT.keyT, dT.valT)
+        lamT = self.node_types[fun]
+        if lamT.argT != expected_argT:
+            raise TypeError(f"DictMap lambda argument type {lamT.argT} does not match dict key/value types {expected_argT}")
         self.node_types[node] = irT.DictT(dT.keyT, lamT.resT)
         return node
 
     @handles(ir.DictLength)
     def _(self, node: ir.DictLength):
+        self.visit_children(node)
         d = node._children[0]
-        self.visit(d)
         if not isinstance(self.node_types[d], irT.DictT):
             raise TypeError("DictLength expects a dict")
         self.node_types[node] = irT.Int
@@ -349,9 +283,7 @@ class TypeInferencePass(Analysis):
     # Grids
     @handles(ir.Grid)
     def _(self, node: ir.Grid):
-        # Concrete grid: infer element type from children if present
-        for ch in node._children:
-            self.visit(ch)
+        self.visit_children(node)
         elems = node._children
         if len(elems) == 0:
             raise TypeError("Cannot infer type of empty grid")
@@ -364,33 +296,27 @@ class TypeInferencePass(Analysis):
 
     @handles(ir.GridTabulate)
     def _(self, node: ir.GridTabulate):
+        self.visit_children(node)
         nR, nC, fun = node._children
-        self.visit(nR)
-        self.visit(nC)
         if self.node_types[nR] is not irT.Int or self.node_types[nC] is not irT.Int:
             raise TypeError("GridTabulate nR and nC must be Int")
         if not isinstance(fun, ir.Lambda):
             raise TypeError("GridTabulate expects a Lambda as third child")
-        lamT = self._infer_lambda(fun, irT.CellIdxT)
+        lamT = self.node_types[fun]
+        if lamT.argT != irT.CellIdxT:
+            raise TypeError(f"GridTabulate lambda argument type {lamT.argT} does not match CellIdxT")
         self.node_types[node] = irT.GridT(lamT.resT, "C")
         return node
 
     @handles(ir.GridEnumNode)
     def _(self, node: ir.GridEnumNode):
+        self.visit_children(node)
         nR, nC = node._children
-        self.visit(nR)
-        self.visit(nC)
         if self.node_types[nR] is not irT.Int or self.node_types[nC] is not irT.Int:
             raise TypeError("GridEnumNode nR and nC must be Int")
         mode = node.mode
         if mode in ("C", "Cells"):
             elemT = irT.CellIdxT
-            T = irT.ListT(elemT)
-        elif mode in ("V", "Verts"):
-            elemT = irT.VertexIdxT
-            T = irT.ListT(elemT)
-        elif mode in ("EH", "EV", "Edges"):
-            elemT = irT.EdgeIdxT
             T = irT.ListT(elemT)
         elif mode in ("Rows", "Cols"):
             # List of lists of cell indices
@@ -402,9 +328,8 @@ class TypeInferencePass(Analysis):
 
     @handles(ir.GridWindowNode)
     def _(self, node: ir.GridWindowNode):
+        self.visit_children(node)
         grid, size_r, size_c, stride_r, stride_c = node._children
-        for ch in node._children:
-            self.visit(ch)
         gridT = self.node_types[grid]
         if not isinstance(gridT, irT.GridT):
             raise TypeError("GridWindowNode expects a grid")
@@ -417,8 +342,8 @@ class TypeInferencePass(Analysis):
 
     @handles(ir.GridNumRows)
     def _(self, node: ir.GridNumRows):
+        self.visit_children(node)
         grid = node._children[0]
-        self.visit(grid)
         if not isinstance(self.node_types[grid], irT.GridT):
             raise TypeError("GridNumRows expects a grid")
         self.node_types[node] = irT.Int
@@ -426,8 +351,8 @@ class TypeInferencePass(Analysis):
 
     @handles(ir.GridNumCols)
     def _(self, node: ir.GridNumCols):
+        self.visit_children(node)
         grid = node._children[0]
-        self.visit(grid)
         if not isinstance(self.node_types[grid], irT.GridT):
             raise TypeError("GridNumCols expects a grid")
         self.node_types[node] = irT.Int
@@ -436,8 +361,8 @@ class TypeInferencePass(Analysis):
     # Higher-order / aggregations
     @handles(ir.Sum)
     def _(self, node: ir.Sum):
+        self.visit_children(node)
         vals = node._children[0]
-        self.visit(vals)
         valsT = self.node_types[vals]
         if not isinstance(valsT, irT.ListT) or (valsT.elemT is not irT.Int and valsT.elemT is not irT.Bool):
             raise TypeError("Sum expects a list of Int or Bool")
@@ -446,8 +371,8 @@ class TypeInferencePass(Analysis):
 
     @handles(ir.Distinct)
     def _(self, node: ir.Distinct):
+        self.visit_children(node)
         vals = node._children[0]
-        self.visit(vals)
         if not isinstance(self.node_types[vals], irT.ListT):
             raise TypeError("Distinct expects a list")
         self.node_types[node] = irT.Bool
@@ -455,8 +380,8 @@ class TypeInferencePass(Analysis):
 
     @handles(ir.Forall)
     def _(self, node: ir.Forall):
+        self.visit_children(node)
         domain, fun = node._children
-        self.visit(domain)
         domT = self.node_types[domain]
         if isinstance(domT, irT.ListT):
             expected_argT = domT.elemT
@@ -466,35 +391,25 @@ class TypeInferencePass(Analysis):
             raise TypeError("Forall domain must be a list or dict")
         if not isinstance(fun, ir.Lambda):
             raise TypeError("Forall expects a Lambda as second child")
-        lamT = self._infer_lambda(fun, expected_argT)
+        lamT = self.node_types[fun]
         if lamT.resT is not irT.Bool:
             raise TypeError("Forall lambda must return Bool")
+        if lamT.argT != domT.elemT:
+            raise TypeError(f"Forall lambda argument type {lamT.argT} does not match domain element type {domT.elemT}")
         self.node_types[node] = irT.Bool
         return node
 
     @handles(ir.Map)
     def _(self, node: ir.Map):
+        self.visit_children(node)
         domain, fun = node._children
-        self.visit(domain)
         domT = self.node_types[domain]
         if not isinstance(domT, irT.ListT):
             raise TypeError("Map expects a list as domain")
         if not isinstance(fun, ir.Lambda):
             raise TypeError("Map expects a Lambda as second child")
-        lamT = self._infer_lambda(fun, domT.elemT)
+        lamT = self.node_types[fun]
+        if lamT.argT != domT.elemT:
+            raise TypeError(f"Map lambda argument type {lamT.argT} does not match domain element type {domT.elemT}")
         self.node_types[node] = irT.ListT(lamT.resT)
         return node
-
-    #@handles(ir.Mask)
-    #def _(self, node: ir.Mask):
-    #    mask, vals = node._children
-    #    self.visit(mask)
-    #    self.visit(vals)
-    #    maskT = self.node_types[mask]
-    #    # Only dict-mask is well-defined in available types; returns key type
-    #    if isinstance(maskT, irT.DictT):
-    #        if maskT.valT is not irT.Bool:
-    #            raise TypeError("Dict mask values must be Bool")
-    #        self.node_types[node] = maskT.keyT
-    #        return node
-    #    raise TypeError("Unsupported mask operand types for current type system")

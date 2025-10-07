@@ -15,6 +15,8 @@ class Context:
         self._store: tp.Dict[tp.Type[AnalysisObject], AnalysisObject] = {}
 
     def add(self, result: object):
+        if type(result) in self._store:
+            raise ValueError(f"Context already contains {type(result)}")
         self._store[type(result)] = result
 
     def get(self, cls: tp.Type[AnalysisObject]) -> AnalysisObject:
@@ -39,6 +41,7 @@ class Pass(ABC):
                 raise TypeError(f"Pass {self.name} requires {r} which is not a subclass of AnalysisObject")
         missing_deps = [r for r in requires if ctx.try_get(r) is None]
         if missing_deps != []:
+            mnames = ", ".join(str(m.__qualname__) for m in missing_deps)
             raise RuntimeError(f"Pass {self.name} requires {missing_deps}")
 
     @abstractmethod
@@ -129,13 +132,16 @@ class Analysis(Pass):
 
         # (optional) also register uniquely named methods still in __dict__
         # in case someone didn’t use @handles but set __handles__ themselves
-        for obj in cls.__dict__.values():
-            types = getattr(obj, "__handles__", ())
-            for t in types:
-                dispatcher.register(t)(obj)
+        #for obj in cls.__dict__.values():
+        #    types = getattr(obj, "__handles__", ())
+        #    for t in types:
+        #        dispatcher.register(t)(obj)
 
     def visit(self, node: ir.Node):
         # Fallback: recurse
+        return self.visit_children(node)
+
+    def visit_children(self, node: ir.Node):
         for child in node._children:
             self.visit(child)
         return node
@@ -144,20 +150,26 @@ class Analysis(Pass):
     def run(self, root: ir.Node, ctx: 'Context') -> AnalysisObject: ...
 
 class Transform(Pass):
+    enable_memoization = False
     
+    def visit_children(self, node) -> tp.Tuple[ir.Node]:
+        return tuple(self.visit(c) for c in node._children)
+
     def visit(self, node: ir.Node) -> ir.Node:
         # Check if we've already transformed this node
-        if node in self._transform_memo:
+        if self.enable_memoization and node in self._transform_memo:
             return self._transform_memo[node]
         
         # Fallback: recurse
-        new_children = tuple(self.visit(c) for c in node._children)
+        new_children = self.visit_children(node)
         result = node if new_children == node._children else node.replace(*new_children)
         
         # Memoize the result
-        self._transform_memo[node] = result
+        if self.enable_memoization:
+            self._transform_memo[node] = result
         return result
 
+    @abstractmethod
     def run(self, root: ir.Node, ctx: 'Context') -> ir.Node:
         # Default implementation: just visit the root
         return self.visit(root)
@@ -192,16 +204,9 @@ class Transform(Pass):
 
         # (optional) also register uniquely named methods still in __dict__
         # in case someone didn't use @handles but set __handles__ themselves
-        for obj in cls.__dict__.values():
-            for t in getattr(obj, "__handles__", ()):
-                dispatcher.register(t)(obj)
-
-    # Shared helper for boolean negation used by some Transform implementations
-    #def _make_not(self, n: Node) -> Node:
-    #    from ..dsl import ir as _ir  # local import to avoid cycles
-    #    if isinstance(n, _ir.Lit):
-    #        return _ir.Lit(not n.value)
-    #    return _ir.Not(n)
+        #for obj in cls.__dict__.values():
+        #    for t in getattr(obj, "__handles__", ()):
+        #        dispatcher.register(t)(obj)
 
     def __call__(self, root: ir.Node, ctx: 'Context') -> ir.Node:
         self.ensure_dependencies(ctx)
@@ -210,6 +215,7 @@ class Transform(Pass):
         return self.run(root, ctx)
 
 class PassManager:
+    verbose = True
     def __init__(self, *passes: Pass):
         self.passes = passes
     
@@ -217,6 +223,18 @@ class PassManager:
         if ctx is None:
             ctx = Context()
         for p in self.passes:
+            if self.verbose:
+                print(f"PM: Running {p.name}")
             new_root = p(root, ctx)
             root = new_root
         return root
+
+    # Does a fixed point iteration
+    def run_fixed(self, root: ir.Node, ctx: 'Context', max_iter: int = 20) -> ir.Node:
+        old_root = root
+        for _ in range(max_iter):
+            new_root = self.run(old_root, ctx)
+            if new_root == old_root:
+                return new_root
+            old_root = new_root
+        raise RuntimeError(f"Fixed point iteration did not converge in {max_iter} iterations")

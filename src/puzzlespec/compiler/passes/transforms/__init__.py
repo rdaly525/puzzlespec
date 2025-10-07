@@ -1,6 +1,6 @@
 #Import all the transform passes
 from .concretize_collections import ConcretizeCollectionsPass
-from .concretize_vars import ConcretizeVarsPass
-from .const_prop import ConstPropPass
-from .param_sub import ParamSubPass, ParamValues
-from .var_sub import VarSubPass, VarValues
+from .const_fold import ConstFoldPass
+from .substitution import SubstitutionPass, SubMapping
+from .resolve_bound_vars import ResolveBoundVars
+from .simplification import AlgebraicSimplificationPass
