@@ -1,9 +1,0 @@
-numpy
-hwtypes
-
-[dev]
-pytest
-pytest-cov
-black
-flake8
-mypy
