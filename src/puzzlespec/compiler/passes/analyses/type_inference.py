@@ -315,12 +315,14 @@ class TypeInferencePass(Analysis):
         if self.node_types[nR] is not irT.Int or self.node_types[nC] is not irT.Int:
             raise TypeError("GridEnumNode nR and nC must be Int")
         mode = node.mode
-        if mode in ("C", "Cells"):
+        if mode in ("Cells",):
             elemT = irT.CellIdxT
             T = irT.ListT(elemT)
         elif mode in ("Rows", "Cols"):
             # List of lists of cell indices
             T = irT.ListT(irT.ListT(irT.CellIdxT))
+        elif mode in ("CellGrid",):
+            T = irT.GridT(irT.CellIdxT, "C")
         else:
             raise TypeError(f"Unknown GridEnumNode mode: {mode}")
         self.node_types[node] = T

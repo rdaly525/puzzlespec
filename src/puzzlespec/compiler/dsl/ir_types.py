@@ -13,33 +13,33 @@ class BaseType(Type_):
 class _Bool(BaseType):
     _pytype = bool
     def __repr__(self):
-        return "Bool"
+        return "𝔹"
     
 Bool = _Bool()
 
 class _Int(BaseType):
     _pytype = int
     def __repr__(self):
-        return "Int"
+        return "ℤ"
 
 Int = _Int()
 
 class _CellIdxT(BaseType):
     _pytype = None
     def __repr__(self):
-        return "CellIdxT"
+        return "𝒞"
 CellIdxT = _CellIdxT()
 
 class _VertexIdxT(BaseType):
     _pytype = None
     def __repr__(self):
-        return "VertexIdx"
+        return "𝒱"
 VertexIdxT = _VertexIdxT()
 
 class _EdgeIdxT(BaseType):
     _pytype = None
     def __repr__(self):
-        return "EdgeIdx"
+        return "𝓔"
 EdgeIdxT = _EdgeIdxT()
 
 class GridT(Type_):
@@ -69,7 +69,7 @@ class TupleT(Type_):
         return cls._cache[key]
     
     def __repr__(self):
-        return f"({', '.join(repr(t) for t in self.elemTs)})"
+        return f"{'x'.join(repr(t) for t in self.elemTs)}"
 
 class ListT(Type_):
     _cache = {}
@@ -97,7 +97,7 @@ class DictT(Type_):
         return cls._cache[key]
     
     def __repr__(self):
-        return f"{{{repr(self.keyT)}: {repr(self.valT)}}}"
+        return f"{{{repr(self.keyT)} ↦ {repr(self.valT)}}}"
 
 class ArrowT(Type_):
     _cache = {}

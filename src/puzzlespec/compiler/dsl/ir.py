@@ -234,6 +234,8 @@ class GridTabulate(Node):
 class GridEnumNode(Node):
     _fields = ("mode",)
     def __init__(self, nR: Node, nC: Node, mode: str):
+        if mode not in ('CellGrid', 'Cells', 'Rows', 'Cols'):
+            raise NotImplementedError(f"{mode} not supported for GridEnum")
         self.mode = mode
         super().__init__(nR, nC)
 
@@ -260,19 +262,6 @@ class GridNumRows(Node):
 class GridNumCols(Node):
     def __init__(self, grid: Node):
         super().__init__(grid)
-
-
-# Grid cell selection helpers (for tactics/spec ergonomics)
-class GridCellAt(Node):
-    """Select the unique cell at the intersection of a row list and a col list.
-
-    Children:
-      - row_cells: Node (list of cell indices)
-      - col_cells: Node (list of cell indices)
-    """
-
-    def __init__(self, row_cells: Node, col_cells: Node):
-        super().__init__(row_cells, col_cells)
 
 ## Higher Order Operators
 class _LambdaPlaceholder(Node):

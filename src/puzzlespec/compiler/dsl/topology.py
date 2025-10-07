@@ -24,8 +24,9 @@ class Grid2D(Topology):
             return ast.wrap(node, irT.GridT(irT.CellIdxT, "C"))
         raise NotImplementedError(f"Grid2D.index_grid: mode={mode} not implemented")
 
+    # Cells
     def C(self) -> ast.ListExpr[ast.Expr]:
-        node = ir.GridEnumNode(self.nR.node, self.nC.node, "C")
+        node = ir.GridEnumNode(self.nR.node, self.nC.node, "Cells")
         T = irT.ListT(irT.CellIdxT)
         return tp.cast(ast.ListExpr[ast.Expr], ast.wrap(node, T))
     
@@ -38,7 +39,15 @@ class Grid2D(Topology):
         node = ir.GridEnumNode(self.nR.node, self.nC.node, "Cols")
         T = irT.ListT(irT.ListT(irT.CellIdxT))
         return tp.cast(ast.ListExpr[ast.ListExpr[ast.Expr]], ast.wrap(node, T))
-    
+
+    def Cells(self, grid=False):
+        if grid:
+            node = ir.GridEnumNode(self.nR.node, self.nC.node, "CellGrid")
+            T = irT.GridT(irT.CellIdxT, "C")
+            return tp.cast(ast.GridExpr[ast.Expr], ast.wrap(node, T))
+        else:
+            return self.C()
+
     def tiles(self, size: tp.Tuple[ast.IntOrExpr, ast.IntOrExpr], stride: tp.Tuple[ast.IntOrExpr, ast.IntOrExpr]) -> ast.ListExpr[ast.GridExpr[ast.Expr]]:
-        id_grid = tp.cast(ast.GridExpr[ast.Expr], self.index_grid("C"))
-        return id_grid.tiles(size, stride)
+        cell_grid = self.Cells(grid=True)
+        return cell_grid.tiles(size, stride)

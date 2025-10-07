@@ -5,7 +5,7 @@ import typing as tp
 
 from ..pass_base import Analysis, AnalysisObject, Context, handles
 from ...dsl import ir, ir_types as irT
-from .type_inference import TypeValues
+from .type_inference import TypeValues, TypeEnv_
 from .sym_table import SymTableEnv_
 
 if tp.TYPE_CHECKING:
@@ -42,20 +42,33 @@ class PrettyPrinterPass(Analysis):
     The result is stored in the context as a `PrettyPrintedExpr` object.
     """
 
-    requires = (TypeValues, SymTableEnv_)
+    requires = (TypeEnv_, SymTableEnv_)
     produces = (PrettyPrintedExpr,)
     name = "pretty_printer"
 
     def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
         # Get analysis results
-        self._types: tp.Dict[ir.Node, irT.Type_] = ctx.get(TypeValues).mapping
+        self.tenv = ctx.get(TypeEnv_).env
         self.sym: 'SymTable' = ctx.get(SymTableEnv_).sym
+        self.p_to_T = {}
+        self.g_to_T = {}
+        self.d_to_T = {}
         self.b_names = []
         self.b_num_col = 0
         self.b_num_elem = 0
 
-        pretty_text = self.visit(root)
-        return PrettyPrintedExpr(pretty_text)
+        constraint_text = self.visit(root)
+        s = "Params:\n"        
+        for pname, T in self.p_to_T.items():
+            s += f"    {pname}: {T}\n"
+        s += "Gen vars:\n"
+        for gname, T in self.g_to_T.items():
+            s += f"    {gname}: {T}\n"
+        s += "Decision vars:\n"
+        for dname, T in self.d_to_T.items():
+            s += f"    {dname}: {T}\n"
+        s += constraint_text
+        return PrettyPrintedExpr(s)
        # Literals and basic nodes
     
     @handles()
@@ -64,10 +77,20 @@ class PrettyPrinterPass(Analysis):
 
     @handles()
     def _(self, node: ir._Param) -> str:
+        self.p_to_T[node.name] = node.T
         return node.name
 
     @handles()
     def _(self, node: ir.VarRef) -> str:
+        e = self.sym[node.sid]
+        name, role = e.name, e.role
+        T = self.tenv[node.sid]
+        if role=='P':
+            self.p_to_T[name] = T
+        elif role=='G':
+            self.g_to_T[name] = T
+        elif role=='D':
+            self.d_to_T[name] = T
         return self.sym.get_name(node.sid)
 
     @handles()
@@ -125,7 +148,7 @@ class PrettyPrinterPass(Analysis):
     @handles()
     def _(self, node: ir.Eq) -> str:
         left, right = self.visit_children(node)
-        return f"({left} == {right})"
+        return f"({left} = {right})"
 
     @handles()
     def _(self, node: ir.Lt) -> str:
@@ -135,7 +158,7 @@ class PrettyPrinterPass(Analysis):
     @handles()
     def _(self, node: ir.LtEq) -> str:
         left, right = self.visit_children(node)
-        return f"({left} <= {right})"
+        return f"({left} ≤ {right})"
 
     @handles()
     def _(self, node: ir.Gt) -> str:
@@ -145,7 +168,7 @@ class PrettyPrinterPass(Analysis):
     @handles()
     def _(self, node: ir.GtEq) -> str:
         left, right = self.visit_children(node)
-        return f"({left} >= {right})"
+        return f"({left} ≥ {right})"
 
     # Logical operators
     @handles()
@@ -307,7 +330,6 @@ class PrettyPrinterPass(Analysis):
     @handles()
     def _(self, node: ir.ListWindow) -> str:
         list_expr, size_expr, stride_expr = self.visit_children(node)
-
         return f"{list_expr}.windows({size_expr},{stride_expr})"
 
     @handles()
@@ -329,22 +351,25 @@ class PrettyPrinterPass(Analysis):
     @handles()
     def _(self, node: ir.GridEnumNode) -> str:
         nR_expr, nC_expr = self.visit_children(node)
-        return node.mode
+        match (node.mode):
+            case "Cells":
+                return "[Cells]"
+            case "Rows" | "Cols":
+                return f"[{node.mode}]"
+            case "CellGrid":
+                return "[[Cells]]"
+            case (_):
+                raise NotImplementedError(f"{node.mode} is not support")
 
     @handles()
     def _(self, node: ir.GridFlatNode) -> str:
         grid_str, = self.visit_children(node)
-        return f"flat({grid_str})"
+        return f"vec({grid_str})"
 
     @handles()
     def _(self, node: ir.GridWindowNode) -> str:
         grid_expr, size_r, size_c, stride_r, stride_c = self.visit_children(node)
         return f"{grid_expr}.tiles({size_r}x{size_c}, {stride_r}x{stride_c})"
-
-    @handles()
-    def _(self, node: ir.GridCellAt) -> str:
-        row_cells, col_cells = self.visit_children(node)
-        return f"C[{row_cells}, {col_cells}]"
 
     @handles()
     def _(self, node: ir.Grid) -> str:

@@ -6,10 +6,10 @@ class TypeEnv:
     def __init__(self):
         self.vars = {} # sid -> T
 
-    def __getitem__(self, sid: int|str) -> irT.Type_:
+    def __getitem__(self, sid: int) -> irT.Type_:
         return self.vars.get(sid, None)
 
-    def __contains__(self, sid: int|str):
+    def __contains__(self, sid: int):
         return sid in self.vars
     
     def add(self, sid: int|str, sort: irT.Type_):
