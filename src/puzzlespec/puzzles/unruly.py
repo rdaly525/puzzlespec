@@ -36,5 +36,13 @@ def build_unruly_spec() -> PuzzleSpec:
     p += grid.rows().forall(lambda row: color[row].sum() == nC // 2)
     p += grid.cols().forall(lambda col: color[col].sum() == nR // 2)
 
+    # No triple of the same color
+    p += grid.rows().forall(
+        lambda row: row.windows(3).forall(
+            lambda w: (color[w].sum() != 3) & (color[w].sum() != 0)))
+    p += grid.cols().forall(
+        lambda col: col.windows(3).forall(
+            lambda w: (color[w].sum() != 3) & (color[w].sum() != 0)))
+
     # Build the final immutable spec
     return p.build()

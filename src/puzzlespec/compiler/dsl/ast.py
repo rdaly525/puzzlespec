@@ -99,8 +99,15 @@ class IntExpr(Expr):
         node = ir.Not(ir.Eq(self.node, other.node))
         return tp.cast(BoolExpr, wrap(node, irT.Bool))
 
+    def __bool__(self) -> bool:
+        raise TypeError("IntExpr cannot be used as a python boolean")
+
     def __repr__(self):
         return f"Int({self.node})"
+
+    # Inclusive bounds
+    def between(self, lo: IntOrExpr, hi: IntOrExpr) -> BoolExpr:
+        return (self >= lo) & (self <= hi)
 
 class BoolExpr(Expr):
     @classmethod
@@ -150,6 +157,9 @@ class BoolExpr(Expr):
         other = BoolExpr.make(other)
         node = ir.Not(ir.Eq(self.node, other.node))
         return tp.cast(BoolExpr, wrap(node, irT.Bool))
+
+    def __bool__(self) -> bool:
+        raise TypeError("BoolExpr cannot be used as a python boolean")
 
     @staticmethod
     def all_of(*args: 'BoolExpr') -> 'BoolExpr':
@@ -346,13 +356,12 @@ class GridExpr(Expr, tp.Generic[TExpr]):
         stride_c = IntExpr.make(stride[1])
         node = ir.GridWindowNode(self.node, size_r.node, size_c.node, stride_r.node, stride_c.node)
         T = irT.ListT(irT.GridT(self.value_type, "C"))
-        tiles_ = tp.cast(ListExpr[GridExpr[TExpr]], wrap(node, T))
-        if as_grid:
-            return tiles_
-        else:
-            # Need to map the elements of the grid to a list of cells
-            tiles_mapped = tiles_.map(lambda g: g.C())
-            return tiles_mapped
+        return tp.cast(ListExpr[GridExpr[TExpr]], wrap(node, T))
+
+    def flat(self):
+        node = ir.GridFlatNode(self.node)
+        T = irT.ListT(self.value_type)
+        return tp.cast(ListExpr[TExpr], wrap(node, T))
 
     # Ergonomic: get row i or col j as a list of cells using existing enumeration
     def row(self, i: IntOrExpr) -> ListExpr[TExpr]:

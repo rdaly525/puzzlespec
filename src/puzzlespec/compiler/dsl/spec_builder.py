@@ -220,8 +220,4 @@ class PuzzleSpecBuilder:
 
     @property
     def rules(self) -> ast.BoolExpr:
-        return ast.wrap(ir.Conj(
-            self._param_rules.node,
-            self._gen_rules.node, 
-            self._decision_rules.node
-        ), irT.Bool)
+        return self._rules

@@ -39,6 +39,6 @@ class Grid2D(Topology):
         T = irT.ListT(irT.ListT(irT.CellIdxT))
         return tp.cast(ast.ListExpr[ast.ListExpr[ast.Expr]], ast.wrap(node, T))
     
-    def tiles(self, size: tp.Tuple[ast.IntOrExpr, ast.IntOrExpr], stride: tp.Tuple[ast.IntOrExpr, ast.IntOrExpr], as_grid: bool=False) -> ast.ListExpr[ast.GridExpr[ast.Expr]]:
+    def tiles(self, size: tp.Tuple[ast.IntOrExpr, ast.IntOrExpr], stride: tp.Tuple[ast.IntOrExpr, ast.IntOrExpr]) -> ast.ListExpr[ast.GridExpr[ast.Expr]]:
         id_grid = tp.cast(ast.GridExpr[ast.Expr], self.index_grid("C"))
-        return id_grid.tiles(size, stride, as_grid)
+        return id_grid.tiles(size, stride)

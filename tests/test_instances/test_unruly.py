@@ -5,6 +5,7 @@ from puzzlespec.compiler.passes import Context, PassManager, analyses as A, tran
 import numpy as np
 
 Unruly = get_puzzle("unruly")
+Sudoku = get_puzzle("sudoku")
 def t0():
     assert 0
     params = Unruly.params

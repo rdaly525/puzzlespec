@@ -340,6 +340,15 @@ class TypeInferencePass(Analysis):
         self.node_types[node] = irT.ListT(irT.GridT(gridT.valueT, "C"))
         return node
 
+    @handles(ir.GridFlatNode)
+    def _(self, node: ir.GridFlatNode):
+        self.visit_children(node)
+        grid, = node._children
+        gridT = self.node_types[grid]
+        if not isinstance(gridT, irT.GridT):
+            raise TypeError("GridFlatNode expects a grid")
+        self.node_types[node] = irT.ListT(gridT.valueT)
+
     @handles(ir.GridNumRows)
     def _(self, node: ir.GridNumRows):
         self.visit_children(node)

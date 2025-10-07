@@ -142,9 +142,7 @@ class Analysis(Pass):
         return self.visit_children(node)
 
     def visit_children(self, node: ir.Node):
-        for child in node._children:
-            self.visit(child)
-        return node
+        return tuple(self.visit(child) for child in node._children)
 
     @abstractmethod
     def run(self, root: ir.Node, ctx: 'Context') -> AnalysisObject: ...

@@ -222,6 +222,7 @@ class Grid(Node):
     def __init__(self, *elements: Node, nR: int, nC: int):
         self.nR = nR
         self.nC = nC
+        assert len(elements) == nR*nC
         super().__init__(*elements)
 
 # A symbolic Grid
@@ -235,6 +236,10 @@ class GridEnumNode(Node):
     def __init__(self, nR: Node, nC: Node, mode: str):
         self.mode = mode
         super().__init__(nR, nC)
+
+class GridFlatNode(Node):
+    def __init__(self, grid: Node):
+        super().__init__(grid)
 
 ## Single slice of a grid (mode = "C" | "V" | "EV" | "EH")
 #class GridSliceNode(Node):
