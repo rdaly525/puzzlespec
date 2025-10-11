@@ -31,7 +31,6 @@ def build_unruly_spec() -> PuzzleSpec:
 
     # Handle the givens
     p += grid.C().forall(lambda c: given_mask[c].implies(color[c] == given_vals[c]))
-
     # Equal balance of colors in all rows and cols
     p += grid.rows().forall(lambda row: color[row].sum() == nC // 2)
     p += grid.cols().forall(lambda col: color[col].sum() == nR // 2)

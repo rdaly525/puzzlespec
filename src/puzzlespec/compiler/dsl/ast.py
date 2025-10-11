@@ -218,13 +218,25 @@ class ListExpr(Expr, tp.Generic[TExpr]):
         return tp.cast(ListExpr, wrap(node, retT))
 
     def sum(self) -> IntExpr:
-        node = ir.Sum(self.node)
+        node = ir.SumReduce(self.node)
         return tp.cast(IntExpr, wrap(node, irT.Int))
 
     def forall(self, fn: tp.Callable[[TExpr], BoolExpr]) -> BoolExpr:
         lambda_expr = make_lambda(fn, self.elem_type)
         node = ir.Forall(self.node, lambda_expr.node)
         return tp.cast(BoolExpr, wrap(node, irT.Bool))
+
+    def exists(self, fn: tp.Callable[[TExpr], BoolExpr]) -> BoolExpr:
+        lambda_expr = make_lambda(fn, self.elem_type)
+        node = ir.Exists(self.node, lambda_expr.node)
+        return tp.cast(BoolExpr, wrap(node, irT.Bool))
+
+    def all(self, fn: tp.Callable[[TExpr], BoolExpr]) -> BoolExpr:
+        return self.forall(fn)
+
+    def any(self, fn: tp.Callable[[TExpr], BoolExpr]) -> BoolExpr:
+        return self.exists(fn)
+
 
     def distinct(self) -> BoolExpr:
         node = ir.Distinct(self.node)
@@ -266,10 +278,6 @@ class DictExpr(Expr, tp.Generic[KExpr, VExpr]):
     @property
     def val_type(self) -> irT.Type_:
         return tp.cast(irT.DictT, self.T).valT
-
-    def __getitem__(self, key: KExpr) -> VExpr:
-        node = ir.DictGet(self.node, key.node)
-        return tp.cast(VExpr, wrap(node, self.val_type))
 
     def map(self, fn: tp.Callable[[KExpr, VExpr], TExpr]) -> 'DictExpr[KExpr, TExpr]':
         lambda_expr = make_lambda_dict(fn, self.key_type, self.val_type)

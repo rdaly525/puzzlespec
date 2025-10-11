@@ -46,6 +46,10 @@ class PrettyPrinterPass(Analysis):
     produces = (PrettyPrintedExpr,)
     name = "pretty_printer"
 
+    def visit(self, node):
+        raise NotImplementedError("Should never be here!")
+        # All node kinds have a custom visit
+
     def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
         # Get analysis results
         self.tenv = ctx.get(TypeEnv_).env
@@ -69,8 +73,8 @@ class PrettyPrinterPass(Analysis):
             s += f"    {dname}: {T}\n"
         s += constraint_text
         return PrettyPrintedExpr(s)
-       # Literals and basic nodes
-    
+
+    # Literals and basic nodes
     @handles()
     def _(self, node: ir.Lit) -> str:
         return str(node.value)
@@ -98,27 +102,40 @@ class PrettyPrinterPass(Analysis):
         return self.b_names[-(node.idx+1)]
     
     @handles()
-    def _(self, node: ir.Lambda) -> str:
-        is_col = isinstance(node.paramT, (irT.ListT, irT.DictT, irT.GridT))
-        if is_col:
-            bv_name = f"X{self.b_num_col}"
-            self.b_num_col += 1
-        else:
-            bv_name = f"x{self.b_num_col}"
-            self.b_num_elem += 1
-        self.b_names.append(bv_name)
-        body_txt, = self.visit_children(node)
-        # pop the stack
-        self.b_names.pop()
-        if is_col:
-            self.b_num_col -= 1
-        else:
-            self.b_num_elem -= 1
-        return bv_name, body_txt
-        #return f"λ {var_name}:\n    {body_str}"
+    def _(self, node: ir._BoundVarPlaceholder) -> str:
+        raise ValueError("ERROR")
 
+    # Arithmetic + Boolean
+    @handles()
+    def _(self, node: ir.Eq) -> str:
+        left, right = self.visit_children(node)
+        return f"({left} = {right})"
 
-    # Arithmetic operators (binary)
+    @handles()
+    def _(self, node: ir.And) -> str:
+        left, right = self.visit_children(node)
+        return f"({left} ∧ {right})"
+
+    @handles()
+    def _(self, node: ir.Implies) -> str:
+        left, right = self.visit_children(node)
+        return f"({left} → {right})"
+
+    @handles()
+    def _(self, node: ir.Or) -> str:
+        left, right = self.visit_children(node)
+        return f"({left} ∨ {right})"
+
+    @handles()
+    def _(self, node: ir.Not) -> str:
+        child, = self.visit_children(node)
+        return f"¬{child}"
+
+    @handles()
+    def _(self, node: ir.Neg) -> str:
+        child, = self.visit_children(node)
+        return f"(-{child})"
+
     @handles()
     def _(self, node: ir.Add) -> str:
         ltext, rtext = self.visit_children(node)
@@ -144,11 +161,15 @@ class PrettyPrinterPass(Analysis):
         left, right = self.visit_children(node)
         return f"({left} % {right})"
 
-    # Comparison operators
     @handles()
-    def _(self, node: ir.Eq) -> str:
+    def _(self, node: ir.Gt) -> str:
         left, right = self.visit_children(node)
-        return f"({left} = {right})"
+        return f"({left} > {right})"
+
+    @handles()
+    def _(self, node: ir.GtEq) -> str:
+        left, right = self.visit_children(node)
+        return f"({left} ≥ {right})"
 
     @handles()
     def _(self, node: ir.Lt) -> str:
@@ -160,38 +181,7 @@ class PrettyPrinterPass(Analysis):
         left, right = self.visit_children(node)
         return f"({left} ≤ {right})"
 
-    @handles()
-    def _(self, node: ir.Gt) -> str:
-        left, right = self.visit_children(node)
-        return f"({left} > {right})"
-
-    @handles()
-    def _(self, node: ir.GtEq) -> str:
-        left, right = self.visit_children(node)
-        return f"({left} ≥ {right})"
-
-    # Logical operators
-    @handles()
-    def _(self, node: ir.And) -> str:
-        left, right = self.visit_children(node)
-        return f"({left} ∧ {right})"
-
-    @handles()
-    def _(self, node: ir.Or) -> str:
-        left, right = self.visit_children(node)
-        return f"({left} ∨ {right})"
-
-    @handles()
-    def _(self, node: ir.Not) -> str:
-        child, = self.visit_children(node)
-        return f"¬{child}"
-
-    @handles()
-    def _(self, node: ir.Implies) -> str:
-        left, right = self.visit_children(node)
-        return f"({left} → {right})"
-
-    # Variadic logical operators
+    # Variadic
     @handles()
     def _(self, node: ir.Conj) -> str:
         children_strs = self.visit_children(node)
@@ -234,87 +224,35 @@ class PrettyPrinterPass(Analysis):
                 indented_children.append(f"    {child_str}")
         return f"∪\n" + "\n".join(indented_children)
 
-    # Collection operations
-    @handles()
-    def _(self, node: ir.ListGet) -> str:
-        list_expr, idx_expr = self.visit_children(node)
-        return f"{list_expr}[{idx_expr}]"
-
-    @handles()
-    def _(self, node: ir.DictGet) -> str:
-        dict_expr, key_expr = self.visit_children(node)
-        return f"{dict_expr}[{key_expr}]"
-
-    @handles()
-    def _(self, node: ir.ListLength) -> str:
-        list_expr, = self.visit_children(node)
-        return f"|{list_expr}|"
-
-    @handles()
-    def _(self, node: ir.DictLength) -> str:
-        dict_expr, = self.visit_children(node)
-        return f"|{dict_expr}|"
-
-    # Aggregates and quantifiers
     @handles()
     def _(self, node: ir.Sum) -> str:
-        vals_expr, = self.visit_children(node)
-        return f"Σ({vals_expr})"
+        children_strs = self.visit_children(node)
+        return f"Σ({children_strs})"
 
     @handles()
-    def _(self, node: ir.Forall) -> str:
-        domain_expr, fun_expr = node._children
-        assert isinstance(fun_expr, ir.Lambda), f"Forall function expression should be Lambda, got {type(fun_expr)}"
-        var_name, body_str = self.visit(fun_expr)
-        domain_str = self.visit(domain_expr)
-        # Multi-line format: context on first line, body indented on next line
-        return f"∀ {var_name} ∈ {domain_str}:\n    {body_str}"
+    def _(self, node: ir.Prod) -> str:
+        # TODO: Implement Prod pretty printing
+        children_strs = self.visit_children(node)
+        return f"Π({children_strs})"
 
-    @handles()
-    def _(self, node: ir.Map) -> str:
-        domain_expr, fun_expr = node._children
-        assert isinstance(fun_expr, ir.Lambda), f"Forall function expression should be Lambda, got {type(fun_expr)}"
-        var_name, body_str = self.visit(fun_expr)
-        domain_str = self.visit(domain_expr)
-        # Keep set builder notation on one line
-        return f"{{{body_str} | {var_name} ∈ {domain_str}}}"
-
-    # Collections
-    @handles()
-    def _(self, node: ir.List) -> str:
-        # Skip the first child which is the length
-        children = self.visit_children(node)
-        return f"[{', '.join(children)}]"
-
+    # Collections - Tuple nodes
     @handles()
     def _(self, node: ir.Tuple) -> str:
         elements = self.visit_children(node)
         return f"({', '.join(elements)})"
 
     @handles()
-    def _(self, node: ir.Dict) -> str:
-        # Dict stores flat key-value pairs
+    def _(self, node: ir.TupleGet) -> str:
+        # TODO: Implement TupleGet pretty printing
+        tup_expr, = self.visit_children(node)
+        return f"({tup_expr}_{node.idx})"
+
+    # Collections - List nodes
+    @handles()
+    def _(self, node: ir.List) -> str:
         children = self.visit_children(node)
-        pairs = []
-        for i in range(0, len(children), 2):
-            key = children[i]
-            value = children[i + 1]
-            pairs.append(f"{key}: {value}")
-        return f"{{{', '.join(pairs)}}}"
+        return f"[{', '.join(children)}]"
 
-    # Grid operations
-    @handles()
-    def _(self, node: ir.GridNumRows) -> str:
-        grid_expr, = self.visit_children(node)
-        return f"nRows({grid_expr})"
-
-    @handles()
-    def _(self, node: ir.GridNumCols) -> str:
-        grid_expr, = self.visit_children(node)
-        return f"nCols({grid_expr})"
-
-
-    # Additional collection operations
     @handles()
     def _(self, node: ir.ListTabulate) -> str:
         size_expr, fun_expr = node._children
@@ -323,9 +261,14 @@ class PrettyPrinterPass(Analysis):
         return f"{{{body_str} | {var_name} ∈ (1..{size_str})}}"
 
     @handles()
-    def _(self, node: ir.DictTabulate) -> str:
-        keys_expr, fun_expr = self.visit_children(node)
-        return f"tabulate({keys_expr}, {fun_expr})"
+    def _(self, node: ir.ListGet) -> str:
+        list_expr, idx_expr = self.visit_children(node)
+        return f"{list_expr}[{idx_expr}]"
+
+    @handles()
+    def _(self, node: ir.ListLength) -> str:
+        list_expr, = self.visit_children(node)
+        return f"|{list_expr}|"
 
     @handles()
     def _(self, node: ir.ListWindow) -> str:
@@ -343,11 +286,57 @@ class PrettyPrinterPass(Analysis):
         return f"({elem_expr} ∈ {list_expr})"
 
     @handles()
-    def _(self, node: ir.Distinct) -> str:
-        vals_expr, = self.visit_children(node)
-        return f"distinct({vals_expr})"
+    def _(self, node: ir.OnlyElement) -> str:
+        list_expr, = self.visit_children(node)
+        return f"{list_expr}.only)"
 
-    # Grid enumeration and operations
+    # Collections - Dict nodes
+    @handles()
+    def _(self, node: ir.Dict) -> str:
+        # Dict stores flat key-value pairs
+        children = self.visit_children(node)
+        pairs = []
+        for i in range(0, len(children), 2):
+            key = children[i]
+            value = children[i + 1]
+            pairs.append(f"{key}: {value}")
+        return f"{{{', '.join(pairs)}}}"
+
+    @handles()
+    def _(self, node: ir.DictTabulate) -> str:
+        keys_expr, fun_expr = self.visit_children(node)
+        return f"tabulate({keys_expr}, {fun_expr})"
+
+    @handles()
+    def _(self, node: ir.DictGet) -> str:
+        dict_expr, key_expr = self.visit_children(node)
+        return f"{dict_expr}[{key_expr}]"
+
+    @handles()
+    def _(self, node: ir.DictMap) -> str:
+        raise NotImplementedError()
+        dict_expr, fun_expr = self.visit_children(node)
+        return f"map({dict_expr}, {fun_expr})"
+
+    @handles()
+    def _(self, node: ir.DictLength) -> str:
+        dict_expr, = self.visit_children(node)
+        return f"|{dict_expr}|"
+
+    # Grid nodes
+    @handles()
+    def _(self, node: ir.Grid) -> str:
+        # Grid stores elements followed by nR, nC in _fields
+        elements = self.visit_children(node)
+        return f"Grid({node.nR}×{node.nC}, [{', '.join(elements)}])"
+
+    @handles()
+    def _(self, node: ir.GridTabulate) -> str:
+        nR_expr, nC_expr, fun_expr = node._children
+        var_name, body_str = self.visit(fun_expr)
+        nR, nC = self.visit(nR_expr), self.visit(nC_expr)
+        return f"{{{body_str} | {var_name} ∈ ((1,1)..({nR},{nC}))}}"
+
     @handles()
     def _(self, node: ir.GridEnumNode) -> str:
         nR_expr, nC_expr = self.visit_children(node)
@@ -372,19 +361,70 @@ class PrettyPrinterPass(Analysis):
         return f"{grid_expr}.tiles({size_r}x{size_c}, {stride_r}x{stride_c})"
 
     @handles()
-    def _(self, node: ir.Grid) -> str:
-        # Grid stores elements followed by nR, nC in _fields
-        elements = self.visit_children(node)
-        return f"Grid({node.nR}×{node.nC}, [{', '.join(elements)}])"
+    def _(self, node: ir.GridDims) -> str:
+        # TODO: Implement GridDims pretty printing
+        grid_expr, = self.visit_children(node)
+        return f"{grid_expr}.shape"
+
+    # Higher Order Operators
+    @handles()
+    def _(self, node: ir.Lambda) -> str:
+        is_col = isinstance(node.paramT, (irT.ListT, irT.DictT, irT.GridT))
+        if is_col:
+            bv_name = f"X{self.b_num_col}"
+            self.b_num_col += 1
+        else:
+            bv_name = f"x{self.b_num_col}"
+            self.b_num_elem += 1
+        self.b_names.append(bv_name)
+        body_txt, = self.visit_children(node)
+        # pop the stack
+        self.b_names.pop()
+        if is_col:
+            self.b_num_col -= 1
+        else:
+            self.b_num_elem -= 1
+        return bv_name, body_txt
+        #return f"λ {var_name}:\n    {body_str}"
 
     @handles()
-    def _(self, node: ir.GridTabulate) -> str:
-        nR_expr, nC_expr, fun_expr = node._children
-        var_name, body_str = self.visit(fun_expr)
-        nR, nC = self.visit(nR_expr), self.visit(nC_expr)
-        return f"{{{body_str} | {var_name} ∈ ((1,1)..({nR},{nC}))}}"
+    def _(self, node: ir._LambdaPlaceholder) -> str:
+        raise ValueError("Should not be here")
 
     @handles()
-    def _(self, node: ir.OnlyElement) -> str:
-        list_expr, = self.visit_children(node)
-        return f"{list_expr}.only)"
+    def _(self, node: ir.Map) -> str:
+        domain_str, (var_name, body_str) = self.visit_children(node)
+        # Keep set builder notation on one line
+        return f"{{{body_str} | {var_name} ∈ {domain_str}}}"
+
+    @handles()
+    def _(self, node: ir.Fold) -> str:
+        # TODO: Implement Fold pretty printing
+        domain_str, fun_str, init_str = self.visit_children(node)
+        return f"foldr({domain_str}, {fun_str}, {init_str})"
+
+    @handles()
+    def _(self, node: ir.SumReduce) -> str:
+        vals_expr, = self.visit_children(node)
+        return f"Σ({vals_expr})"
+
+    @handles()
+    def _(self, node: ir.ProdReduce) -> str:
+        vals_expr, = self.visit_children(node)
+        return f"Π({vals_expr})"
+
+    @handles()
+    def _(self, node: ir.Forall) -> str:
+        domain_str, (var_name, body_str) = self.visit_children(node)
+        # Multi-line format: context on first line, body indented on next line
+        return f"∀ {var_name} ∈ {domain_str}:\n    {body_str}"
+
+    @handles()
+    def _(self, node: ir.Exists) -> str:
+        domain_str, (var_name, body_str) = self.visit_children(node)
+        return f"∃ {var_name} ∈ {domain_str}:\n    {body_str}"
+
+    @handles()
+    def _(self, node: ir.Distinct) -> str:
+        vals_expr, = self.visit_children(node)
+        return f"distinct({vals_expr})"

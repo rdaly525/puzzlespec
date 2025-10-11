@@ -1,5 +1,6 @@
 from . import ast, ir_types as irT
 from . import ir
+from ..passes.canonicalize import canonicalize
 import typing as tp
 
 class Topology:
@@ -8,14 +9,14 @@ class Topology:
 
 class Grid2D(Topology):
     def __init__(self, nR: ast.IntOrExpr, nC: ast.IntOrExpr):
-        self.nR = ast.IntExpr.make(nR)
-        self.nC = ast.IntExpr.make(nC)
+        self.nR = canonicalize(ast.IntExpr.make(nR))
+        self.nC = canonicalize(ast.IntExpr.make(nC))
 
     def copy(self):
         return Grid2D(self.nR, self.nC)
 
     def terms(self):
-        return [self.nR, self.nC]
+        return [self.nR.node, self.nC.node]
 
     def index_grid(self, mode:str) -> ast.GridExpr[ast.Expr]:
         if mode == "C":
