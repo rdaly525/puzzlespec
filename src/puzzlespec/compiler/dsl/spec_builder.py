@@ -6,13 +6,16 @@ import typing as tp
 from . import ast, ir, ir_types as irT
 from .topology import Topology, Grid2D
 from .envs import SymTable, ShapeEnv, TypeEnv
+from ..passes.canonicalize import canonicalize, _canonicalize
 from ..passes.pass_base import PassManager, Context
 from ..passes.analyses import SymTableEnv_
+from ..passes.transforms.cse import CSE
 from ..passes.analyses.constraint_categorizer import ConstraintCategorizerVals, ConstraintCategorizer
 from ..passes.analyses.type_inference import TypeInferencePass, TypeEnv_, TypeValues
 from ..passes.transforms import SubstitutionPass, SubMapping, ConstFoldPass, ResolveBoundVars
 from ..utils import pretty_print
 from .spec import PuzzleSpec
+from ..passes.utils import printAST
 
 class PuzzleSpecBuilder:
     def __init__(self, name: str, desc: str, topo: Topology):
@@ -22,7 +25,7 @@ class PuzzleSpecBuilder:
         self._frozen = False
 
         # Rules storage - separated by constraint type
-        self._rules: ast.BoolExpr = ast.wrap(ir.Conj(), irT.Bool)
+        self._rules: ir.List = ir.List()
         
         # Environments
         self.sym = SymTable()
@@ -38,15 +41,15 @@ class PuzzleSpecBuilder:
         self._params = {}
         self._register_params(*topo.terms())
 
-    def _register_params(self, *terms: ast.Expr):
+    def _register_params(self, *terms: ir.Node):
         pm = PassManager(
-            ConstraintCategorizer(include_params=True), #1 and 2
+            ConstraintCategorizer(include_params=True)
         )
         for term in terms:
             # New context for each constraint
             ctx = Context()
             ctx.add(SymTableEnv_(self.sym))
-            pm.run(term.node, ctx) 
+            pm.run(term, ctx) 
             ccvals = tp.cast(ConstraintCategorizerVals, ctx.get(ConstraintCategorizerVals))
             for pname, T in ccvals._params.items():
                 if pname in self._params and T != self._params[pname]:
@@ -66,7 +69,7 @@ class PuzzleSpecBuilder:
             name = self._new_var_name()
         assert role in "GDP"
         sid = self.sym.new_var(name, role)
-        v = ast.wrap(ir.VarRef(sid), sort)
+        v = canonicalize(ast.wrap(ir.VarRef(sid), sort))
         self.tenv.add(sid, sort)
         return sid, v
 
@@ -90,9 +93,13 @@ class PuzzleSpecBuilder:
         self.shape_env.add_dict(sid, keys=keys)
         return v
 
-    def _add_rules(self, *new_rules):
-        nodes = [*self._rules.node._children, *new_rules]
-        self._rules = tp.cast(ast.BoolExpr, ast.wrap(ir.Conj(*nodes), irT.Bool))
+    def _replace_rules(self, new_rules: ir.Node):
+        canon = _canonicalize(new_rules)
+        self._rules = canon
+ 
+    def _add_rules(self, *new_rules: ast.Expr):
+        nodes = [*self._rules._children, *[r.node for r in new_rules]]
+        self._replace_rules(ir.List(*nodes))
 
     def __iadd__(self, other):
         
@@ -100,41 +107,39 @@ class PuzzleSpecBuilder:
         if not isinstance(other, tp.Iterable):
             constraints = [other]
 
-        # Make all the constraints bool expressions    
-        constraints = [ast.BoolExpr.make(c) for c in constraints]
+        # Verify that all the constraints bool expressions    
+        if not all(isinstance(c, ast.BoolExpr) for c in constraints):
+            raise ValueError(f"Constraints, {constraints}, is not a BoolExpr")
         
         # For every constraint:
-        #  1: Extract all Parameters and add to sym table if they do not already exist
-        self._register_params(*constraints)
+
+        self._add_rules(*constraints)
+        print("After adding rules")
+        print(printAST(self._rules))
+        # Extract all Parameters and add to sym table if they do not already exist
+        self._register_params(self._rules)
 
         #  2: Resolve Placeholders (for bound bars/lambdas)
-        pm = PassManager(ResolveBoundVars())
-        new_cs = [pm.run(c.node) for c in constraints]
-        self._type_check(new_cs)
-        self._add_rules(*new_cs)
+        # This will also implicitly do CSE as will any transformation pass
+        pm = PassManager(ResolveBoundVars(), CSE())
+        self._replace_rules(pm.run(self._rules))
+        print("After resolving bound vars")
+        print(printAST(self._rules))
+        self._type_check()
+        print(self.pretty())
         return self
-    
-    def _type_check(self, constraints: tp.List[ir.Node]):
-        pm = PassManager(TypeInferencePass())
-        for c in constraints:
-            ctx = Context()
-            ctx.add(TypeEnv_(self.tenv))
-            pm.run(c, ctx)
-            tvals = ctx.get(TypeValues)
-            if tvals.mapping[c] != irT.Bool:
-                raise ValueError(f"Constraint {c} is not bool")
 
-    # Apply passes to rules
-    def _apply_passes(self, pm: PassManager, ctx: Context=None, per_constraint=True):
-        if ctx is None:
-            ctx = Context()
-        if per_constraint:
-            new_rules = [pm.run(c, ctx) for c in self._rules.node._children]
-            self._rules = ast.wrap(ir.Conj(*new_rules), irT.Bool)
-        else:
-            new_rules = pm.run(self._rules.node, ctx)
-            assert isinstance(new_rules, ir.Conj)
-            self._rules = ast.wrap(new_rules, irT.Bool)
+   
+    def _type_check(self):
+        pm = PassManager(TypeInferencePass())
+        ctx = Context()
+        ctx.add(TypeEnv_(self.tenv))
+        pm.run(self._rules, ctx)
+        tvals = ctx.get(TypeValues).mapping
+        if tvals[self._rules] != irT.ListT(irT.Bool):
+            for c in self._rules._children:
+                if tvals[c] != irT.Bool:
+                    raise ValueError(f"Constraint {c} is not bool, {tvals[c]}")
 
     def _unify_params(self):
         smap = SubMapping()
@@ -147,12 +152,14 @@ class PuzzleSpecBuilder:
         pm = PassManager(SubstitutionPass())
         ctx = Context()
         ctx.add(smap)
-        self._apply_passes(pm, ctx, per_constraint=True)
+        self._replace_rules(pm.run(self._rules, ctx))
 
     # Freezes the spec and makes it immutable (no new rules can be added).
     def build(self) -> PuzzleSpec:
         self._unify_params()
-        self._type_check(self._rules.node._children)
+        print("After unifying params")
+        print(printAST(self._rules))
+        self._type_check()
         # Print AST
         print(self.pretty(self._rules))
         # 2) Run simplification loop
@@ -163,7 +170,7 @@ class PuzzleSpecBuilder:
         # Extract implicit constraints
         return self
     
-    def pretty(self, constraint: ast.BoolExpr=None) -> str:
+    def pretty(self, constraint: ir.Node=None) -> str:
         """Pretty print a constraint using the spec's type environment."""
         from ..passes.analyses.pretty_printer import PrettyPrinterPass, PrettyPrintedExpr
         from ..passes.analyses.type_inference import TypeInferencePass, TypeEnv_
@@ -180,7 +187,7 @@ class PuzzleSpecBuilder:
             PrettyPrinterPass()
         )
         # Run all passes and get the final result
-        pm.run(constraint.node, ctx)
+        pm.run(constraint, ctx)
         
         # Get the pretty printed result from context
         result = ctx.get(PrettyPrintedExpr)

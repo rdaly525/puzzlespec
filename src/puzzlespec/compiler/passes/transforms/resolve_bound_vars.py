@@ -5,6 +5,7 @@ import typing as tp
 # Turns placeholder bound vars/lambdas into proper bound vars/lambdas with de bruijn indices
 # Used immediately to translate DSL constraints to a standard form
 class ResolveBoundVars(Transform):
+    enable_memoization = False
     requires = ()
     produces = ()
     name = "resolve_bound_vars"

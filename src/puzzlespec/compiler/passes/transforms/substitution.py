@@ -33,5 +33,4 @@ class SubstitutionPass(Transform):
             if submap.match(node):
                 return submap.replace(node)
         new_children = self.visit_children(node)
-        result = node if new_children == node._children else node.replace(*new_children)
-        return result
+        return node.replace(*new_children)

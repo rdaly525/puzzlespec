@@ -1,9 +1,12 @@
 from __future__ import annotations
-from functools import singledispatchmethod
+from functools import singledispatchmethod, singledispatch
 import typing as tp
 from typing import TYPE_CHECKING
 from abc import ABC, abstractmethod
 import inspect
+
+from puzzlespec.compiler.dsl.ir import _LambdaPlaceholder
+from .canonicalize import _canonicalize
 
 if TYPE_CHECKING:
     from ..dsl import ir
@@ -14,14 +17,19 @@ class Context:
     def __init__(self):
         self._store: tp.Dict[tp.Type[AnalysisObject], AnalysisObject] = {}
 
-    def add(self, result: object):
-        if type(result) in self._store:
+    def add(self, result: object, replace=False):
+        if not replace and type(result) in self._store:
             raise ValueError(f"Context already contains {type(result)}")
         self._store[type(result)] = result
 
-    def get(self, cls: tp.Type[AnalysisObject]) -> AnalysisObject:
+    def get(self, cls: tp.Type[AnalysisObject], *args) -> AnalysisObject:
+        if len(args) >1:
+            raise ValueError("Only one default")
         if cls not in self._store:
-            raise KeyError(f"Context does not contain {cls}")
+            if len(args)==0:
+                raise KeyError(f"Context does not contain {cls}")
+            else:
+                return args[0]
         return self._store[cls]
     
     def try_get(self, cls: tp.Type[AnalysisObject]) -> tp.Optional[AnalysisObject]:
@@ -66,6 +74,7 @@ def _explode_types(t: tp.Any) -> tp.Tuple[type, ...]:
         return tuple(tt for tt in tp.get_args(t) if tt is not type(None))
     return (t,)
 
+
 def handles(*explicit_types: type):
     """
     @handles()                  -> infer from 2nd param annotation
@@ -101,116 +110,155 @@ def handles(*explicit_types: type):
     return deco
 
 class Analysis(Pass):
-    def __call__(self, root: ir.Node, ctx: 'Context') -> ir.Node:
-        self.ensure_dependencies(ctx)
-        res = self.run(root, ctx)
-        ctx.add(res)
-        return root
+    enable_memoization=True
     
-    def __init_subclass__(cls, **kw):
-        super().__init_subclass__(**kw)
-
-        # build or wrap a per-class dispatcher
-        v = cls.__dict__.get("visit")
-        if isinstance(v, singledispatchmethod):
-            dispatcher = v
-        else:
-            if callable(v):
-                def _default(self, node, _plain=v):
-                    return _plain(self, node)
-            else:
-                def _default(self, node):
-                    return super(cls, self).visit(node)
-            dispatcher = singledispatchmethod(_default)
-            setattr(cls, "visit", dispatcher)
-
-        # consume exactly the queued (fn, types) for THIS class
-        key = (cls.__module__, cls.__qualname__)
-        for fn, types in _PENDING.pop(key, []):
-            for t in types:
-                dispatcher.register(t)(fn)
-
-        # (optional) also register uniquely named methods still in __dict__
-        # in case someone didn’t use @handles but set __handles__ themselves
-        #for obj in cls.__dict__.values():
-        #    types = getattr(obj, "__handles__", ())
-        #    for t in types:
-        #        dispatcher.register(t)(obj)
-
-    def visit(self, node: ir.Node):
-        # Fallback: recurse
-        return self.visit_children(node)
-
-    def visit_children(self, node: ir.Node):
-        return tuple(self.visit(child) for child in node._children)
-
-    @abstractmethod
-    def run(self, root: ir.Node, ctx: 'Context') -> AnalysisObject: ...
-
-class Transform(Pass):
-    enable_memoization = False
-    
-    def visit_children(self, node) -> tp.Tuple[ir.Node]:
-        return tuple(self.visit(c) for c in node._children)
-
-    def visit(self, node: ir.Node) -> ir.Node:
-        # Check if we've already transformed this node
-        if self.enable_memoization and node in self._transform_memo:
-            return self._transform_memo[node]
-        
-        # Fallback: recurse
-        new_children = self.visit_children(node)
-        result = node if new_children == node._children else node.replace(*new_children)
-        
-        # Memoize the result
+    def __call__(self, root: ir.Node, ctx: 'Context', cache = {}) -> ir.Node:
         if self.enable_memoization:
-            self._transform_memo[node] = result
-        return result
+            self._cache = cache
+        self.ensure_dependencies(ctx)
+        # Initialize memoization for this transformation
+        if self.enable_memoization:
+            self._cache = {}
+        aobj = self.run(root, ctx)
+        ctx.add(aobj)
+        return root
+ 
+    def visit(self, node: ir.Node) -> tp.Any:
+        self.visit_children(node)
 
     @abstractmethod
-    def run(self, root: ir.Node, ctx: 'Context') -> ir.Node:
-        # Default implementation: just visit the root
-        return self.visit(root)
+    def run(self, root: ir.Node, ctx: 'Context'):
+        raise NotImplementedError()
+
+    def visit_children(self, node: ir.Node) -> tp.Tuple[tp.Any]:
+        return tuple(self.visit(c) for c in node._children)
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
+        if "__call__" in cls.__dict__:
+            raise ValueError("Cannot override __call__")
+        if "run" not in cls.__dict__:
+            raise ValueError("Must override run")
+         
+        v = cls.__dict__.get("visit", None)
+        if v is None:
+            def v(self, node):
+                return super(cls, self).visit(node)
 
-        # Determine the subclass's dispatcher:
-        # - If subclass already defined a singledispatchmethod visit, use it.
-        # - If subclass defined a plain visit, wrap *that* as the default.
-        # - Otherwise, synthesize a dispatcher whose default delegates to super().visit.
-        v = cls.__dict__.get("visit")
-        if isinstance(v, singledispatchmethod):
-            dispatcher = v
-        else:
-            if callable(v):
-                # subclass provided a plain visit; make it the default
-                def _default(self, node, _plain=v):
-                    return _plain(self, node)
-            else:
-                # no visit defined on subclass; delegate to base fallback
-                def _default(self, node):
-                    return super(cls, self).visit(node)
-            dispatcher = singledispatchmethod(_default)
-            setattr(cls, "visit", dispatcher)
-
+        # Define the base dispatcher visit method
+        def _base(self, node):
+            return v(self, node)
+        dispatcher = singledispatchmethod(_base)
+        
+        # Add the dispatched methods
+        from ..dsl import ir
         # consume exactly the queued (fn, types) for THIS class
         key = (cls.__module__, cls.__qualname__)
         for fn, types in _PENDING.pop(key, []):
             for t in types:
                 dispatcher.register(t)(fn)
 
-        # (optional) also register uniquely named methods still in __dict__
-        # in case someone didn't use @handles but set __handles__ themselves
-        #for obj in cls.__dict__.values():
-        #    for t in getattr(obj, "__handles__", ()):
-        #        dispatcher.register(t)(obj)
+        # Define custom visit function to do caching
+        def visit(self, node: ir.Node):
+            if not node.is_canon:
+                raise ValueError(f"{node} is not cannonicalized")
+            
+            if self.enable_memoization:
+                if node in self._cache:
+                    return self._cache[node]
+            # Hacked way to get the dispatcher to work without binding to an instance
+            new_val = dispatcher.__get__(self, type(self))(node) 
+            
+            if self.enable_memoization:
+                # Add new node to cache
+                assert node not in self._cache
+                self._cache[node] = new_val
+            return new_val
+        setattr(cls, "visit", visit)
 
-    def __call__(self, root: ir.Node, ctx: 'Context') -> ir.Node:
+
+class Transform(Pass):
+    enable_memoization=True
+    
+    def __call__(self, root: ir.Node, ctx: 'Context', cache = {}) -> ir.Node:
+        if self.enable_memoization:
+            self._cache = cache
         self.ensure_dependencies(ctx)
         # Initialize memoization for this transformation
-        self._transform_memo = {}
+        if self.enable_memoization:
+            self._cache = {}
+            self._bframes = []
         return self.run(root, ctx)
+
+    def visit(self, node: ir.Node) -> ir.Node:
+        # Fallback: recurse
+        new_children = self.visit_children(node)
+        result = node.replace(*new_children)
+        return result
+
+    def run(self, root: ir.Node, ctx: 'Context') -> ir.Node:
+        return self.visit(root)
+
+    def visit_children(self, node: ir.Node) -> tp.Tuple[ir.Node]:
+        return tuple(self.visit(c) for c in node._children)
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        if "__call__" in cls.__dict__:
+            raise ValueError("Cannot override __call__")
+         
+        v = cls.__dict__.get("visit", None)
+        if v is None:
+            def v(self, node):
+                return super(cls, self).visit(node)
+
+        # Define the base dispatcher visit method
+        def _base(self, node):
+            return v(self, node)
+        dispatcher = singledispatchmethod(_base)
+        
+        # Add the dispatched methods
+        from ..dsl import ir
+        # consume exactly the queued (fn, types) for THIS class
+        key = (cls.__module__, cls.__qualname__)
+        for fn, types in _PENDING.pop(key, []):
+            for t in types:
+                dispatcher.register(t)(fn)
+
+        # Define custom visit function that creates new keys
+        def visit(self, node: ir.Node):
+            if not node.is_canon:
+                raise ValueError(f"{node} is not cannonicalized")
+            
+            if self.enable_memoization:
+                if isinstance(node, ir.BoundVar):
+                    cache_key = (self._bframes[-(node.idx+1)], node._key)
+                else:
+                    cache_key = node._key
+                if cache_key in self._cache:
+                    return self._cache[cache_key]
+                if isinstance(node, ir.Lambda):
+                    self._bframes.append(node._key)
+            
+            # Hacked way to get the dispatcher to work without binding to an instance
+            new_node = dispatcher.__get__(self, type(self))(node) 
+ 
+            canon_node = _canonicalize(new_node)
+            
+            if self.enable_memoization:
+                if isinstance(node, ir.Lambda):
+                    self._bframes.pop()
+                # Add new node to cache
+                assert canon_node.is_canon
+                if isinstance(node, ir.BoundVar):
+                    new_cache_key = (self._bframes[-(node.idx+1)], canon_node._key)
+                else:
+                    new_cache_key = canon_node._key
+                if new_cache_key not in self._cache:
+                    self._cache[new_cache_key] = new_node
+                canon_node = self._cache[new_cache_key]
+            return canon_node
+        setattr(cls, "visit", visit)
 
 class PassManager:
     verbose = True

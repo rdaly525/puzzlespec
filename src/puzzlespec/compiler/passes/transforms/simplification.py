@@ -2,7 +2,7 @@ from __future__ import annotations
 from hmac import new
 
 from ..pass_base import Transform, Context, handles
-from ...dsl import ir
+from ...dsl import ir, ir_types as irT
 import typing as tp
 
 class AlgebraicSimplificationPass(Transform):
@@ -215,18 +215,16 @@ class AlgebraicSimplificationPass(Transform):
             return reduced[0]
         return node.replace(*reduced)
 
-    # Structural / collections
+    # Structural / collections simplification
     @handles(ir.ListLength)
     def _(self, node: ir.ListLength) -> ir.Node:
-        lst = self.visit(node._children[0])
-        if isinstance(lst, ir.List):
-            # child 0 is a node that stores the list length (typically Lit)
-            return lst._children[0]
-        return node if (lst is node._children[0]) else ir.ListLength(lst)
-
-    @handles(ir.DictLength)
-    def _(self, node: ir.DictLength) -> ir.Node:
-        raise NotImplementedError("DictLength is not implemented")
+        lst, = self.visit_children(node)
+        match (lst):
+            case ir.List(elems):
+                return ir.Lit(len(lst), irT.Int)
+            case ir.ListTabulate(size, _):
+                return size
+        raise ValueError(f"ListLength expects a list, got {type(lst)}")
 
     @handles(ir.ListGet)
     def _(self, node: ir.ListGet) -> ir.Node:
@@ -235,6 +233,17 @@ class AlgebraicSimplificationPass(Transform):
     @handles(ir.ListConcat)
     def _(self, node: ir.ListConcat) -> ir.Node:
         raise NotImplementedError("ListConcat is not implemented")
+
+    @handles(ir.DictLength)
+    def _(self, node: ir.DictLength) -> ir.Node:
+        dct, = self.visit_children(node)
+        match (dct):
+            case ir.Dict:
+                return dct._size()
+            case ir.DictTabulate(keys, vals):
+                return ir.ListLength(keys)
+        raise ValueError(f"DictLength expects a dict, got {type(dct)}")
+
 
     @handles(ir.Sum)
     def _(self, node: ir.Sum) -> ir.Node:

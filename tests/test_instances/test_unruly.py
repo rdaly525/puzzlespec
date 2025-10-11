@@ -4,7 +4,7 @@ from puzzlespec.compiler.dsl import ir, ir_types as irT
 from puzzlespec.compiler.passes import Context, PassManager, analyses as A, transforms as T
 import numpy as np
 
-Unruly = get_puzzle("unruly")
+#Unruly = get_puzzle("unruly")
 Sudoku = get_puzzle("sudoku")
 def t0():
     assert 0

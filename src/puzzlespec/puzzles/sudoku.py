@@ -21,7 +21,7 @@ def build_sudoku_spec() -> PuzzleSpec:
     # Puzzle Rules
     
     # Handle the givens
-    p += grid.C().forall(lambda c: given_mask[c].implies((cell_vals[c] == given_vals[c]) & 1 ))
+    p += grid.C().forall(lambda c: given_mask[c].implies((cell_vals[c] == given_vals[c])))
 
     # All values in each row, column, and tile are distinct
     for rc in (

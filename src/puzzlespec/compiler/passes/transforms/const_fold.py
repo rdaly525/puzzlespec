@@ -44,14 +44,6 @@ class ConstFoldPass(Transform):
             return ir.Lit(self._ops[type(node)](*new_children))
         return node.replace(*new_children)
 
-    @handles(ir.ListConcat)
-    def _(self, node: ir.ListConcat) -> ir.Node:
-        a, b = self.visit_children(node)
-        if isinstance(a, ir.List) and isinstance(b, ir.List):
-            new_elems = a._children + b._children
-            return ir.List(*new_elems)
-        return node.replace(a, b)
-
     @handles(ir.Sum)
     def _(self, node: ir.Sum) -> ir.Node:
         lst, = self.visit_children(node)
@@ -67,16 +59,9 @@ class ConstFoldPass(Transform):
             return ir.Lit(len(set(lst._children)) == len(lst._children))
         return node.replace(lst)
 
-    @handles(ir.GridNumRows)
-    def _(self, node: ir.GridNumRows) -> ir.Node:
+    @handles(ir.GridDims)
+    def _(self, node: ir.GridDims) -> ir.Node:
         g, = self.visit_children(node)
         if isinstance(g, ir.Grid):
             return ir.Lit(g.nR)
-        return node.replace(g)
-
-    @handles(ir.GridNumCols)
-    def _(self, node: ir.GridNumCols) -> ir.Node:
-        g, = self.visit_children(node)
-        if isinstance(g, ir.Grid):
-            return ir.Lit(g.nC)
         return node.replace(g)
