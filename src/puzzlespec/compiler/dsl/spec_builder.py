@@ -101,7 +101,7 @@ class PuzzleSpecBuilder:
         nodes = [*self._rules._children, *[r.node for r in new_rules]]
         self._replace_rules(ir.List(*nodes))
 
-    def __iadd__(self, other):
+    def __iadd__(self, other) -> 'PuzzleSpecBuilder':
         
         constraints = other
         if not isinstance(other, tp.Iterable):
@@ -128,7 +128,6 @@ class PuzzleSpecBuilder:
         self._type_check()
         print(self.pretty())
         return self
-
    
     def _type_check(self):
         pm = PassManager(TypeInferencePass())
