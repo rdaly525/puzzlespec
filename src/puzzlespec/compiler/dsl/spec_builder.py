@@ -114,19 +114,13 @@ class PuzzleSpecBuilder:
         # For every constraint:
 
         self._add_rules(*constraints)
-        print("After adding rules")
-        print(printAST(self._rules))
         # Extract all Parameters and add to sym table if they do not already exist
         self._register_params(self._rules)
 
-        #  2: Resolve Placeholders (for bound bars/lambdas)
-        # This will also implicitly do CSE as will any transformation pass
+        #  2: Resolve Placeholders (for bound bars/lambdas) and run CSE
         pm = PassManager(ResolveBoundVars(), CSE())
         self._replace_rules(pm.run(self._rules))
-        print("After resolving bound vars")
-        print(printAST(self._rules))
         self._type_check()
-        print(self.pretty())
         return self
    
     def _type_check(self):
@@ -145,8 +139,8 @@ class PuzzleSpecBuilder:
         for pname, T in self._params.items():
             sid, v = self._create_var(T, 'P', pname)
             smap.add(
-                match=lambda node: isinstance(node, ir._Param) and node.name==pname,
-                replace=lambda node: ir.VarRef(sid)
+                match=lambda node, pname=pname: isinstance(node, ir._Param) and node.name==pname,
+                replace=lambda node, sid=sid: ir.VarRef(sid)
             )
         pm = PassManager(SubstitutionPass())
         ctx = Context()
@@ -154,13 +148,10 @@ class PuzzleSpecBuilder:
         self._replace_rules(pm.run(self._rules, ctx))
 
     # Freezes the spec and makes it immutable (no new rules can be added).
-    def build(self) -> PuzzleSpec:
+    def build(self) -> 'PuzzleSpecBuilder':
         self._unify_params()
-        print("After unifying params")
-        print(printAST(self._rules))
         self._type_check()
         # Print AST
-        print(self.pretty(self._rules))
         # 2) Run simplification loop
         # 3) Fold/invalidate the shape_env
         #   - Replace any Len(Var) with the shape_env size
@@ -169,10 +160,11 @@ class PuzzleSpecBuilder:
         # Extract implicit constraints
         return self
     
-    def pretty(self, constraint: ir.Node=None) -> str:
+    def pretty(self, constraint: ir.Node=None, dag=False) -> str:
         """Pretty print a constraint using the spec's type environment."""
         from ..passes.analyses.pretty_printer import PrettyPrinterPass, PrettyPrintedExpr
         from ..passes.analyses.type_inference import TypeInferencePass, TypeEnv_
+        from ..passes.analyses.ssa_printer import SSAPrinter, SSAResult
         from ..passes.pass_base import Context, PassManager
         
         if constraint is None:
@@ -181,16 +173,24 @@ class PuzzleSpecBuilder:
         ctx = Context()
         ctx.add(TypeEnv_(self.tenv))
         ctx.add(SymTableEnv_(self.sym))
+        if dag:
+            p = SSAPrinter()
+        else:
+            p = PrettyPrinterPass()
         pm = PassManager(
             TypeInferencePass(),
-            PrettyPrinterPass()
+            p
         )
         # Run all passes and get the final result
         pm.run(constraint, ctx)
         
         # Get the pretty printed result from context
-        result = ctx.get(PrettyPrintedExpr)
-        return result.text
+        if dag:
+            text = ctx.get(SSAResult).text
+        else:
+            text = ctx.get(PrettyPrintedExpr).text
+
+        return text
 
     # Returns a dict of param names to param node
     @property

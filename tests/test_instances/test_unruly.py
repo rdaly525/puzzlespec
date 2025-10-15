@@ -1,12 +1,18 @@
+from ast import Pass
 from puzzlespec import get_puzzle
 #from puzzlespec import set_clues
 from puzzlespec.compiler.dsl import ir, ir_types as irT
 from puzzlespec.compiler.passes import Context, PassManager, analyses as A, transforms as T
 import numpy as np
 
-#Unruly = get_puzzle("unruly")
+Unruly = get_puzzle("unruly")
 Sudoku = get_puzzle("sudoku")
+
 def t0():
+    print(Unruly.pretty(dag=False))
+    print(Unruly.pretty(dag=True))
+    print(Sudoku.pretty(dag=False))
+    print(Sudoku.pretty(dag=True))
     assert 0
     params = Unruly.params
     assert 'nR' in params
