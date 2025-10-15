@@ -1,5 +1,6 @@
 from __future__ import annotations
 from functools import singledispatchmethod, singledispatch
+from multiprocessing import Value
 import typing as tp
 from typing import TYPE_CHECKING
 from abc import ABC, abstractmethod
@@ -17,7 +18,7 @@ class Context:
     def __init__(self):
         self._store: tp.Dict[tp.Type[AnalysisObject], AnalysisObject] = {}
 
-    def add(self, result: object, replace=False):
+    def add(self, result: object, replace=True):
         if not replace and type(result) in self._store:
             raise ValueError(f"Context already contains {type(result)}")
         self._store[type(result)] = result
@@ -75,7 +76,7 @@ def _explode_types(t: tp.Any) -> tp.Tuple[type, ...]:
     return (t,)
 
 
-def handles(*explicit_types: type):
+def handles(*explicit_types: type, mark_invalid=False):
     """
     @handles()                  -> infer from 2nd param annotation
     @handles(A, B)              -> explicit types
@@ -104,6 +105,9 @@ def handles(*explicit_types: type):
         # queue this exact (function, types) pair so same-named defs aren’t lost
         cls_qual = fn.__qualname__.rsplit(".", 1)[0]  # e.g., "Getter"
         key = (fn.__module__, cls_qual)
+        if mark_invalid:
+            def fn(self, node):
+                raise ValueError(f"Should not be here, {node} Marked invalid")
         _PENDING.setdefault(key, []).append((fn, concrete))
 
         return fn
@@ -261,10 +265,11 @@ class Transform(Pass):
         setattr(cls, "visit", visit)
 
 class PassManager:
-    verbose = True
-    def __init__(self, *passes: Pass):
+    verbose = False
+    def __init__(self, *passes: Pass, verbose=False):
         self.passes = passes
-    
+        self.verbose = verbose
+
     def run(self, root: ir.Node, ctx: tp.Optional[Context] = None) -> ir.Node:
         if ctx is None:
             ctx = Context()

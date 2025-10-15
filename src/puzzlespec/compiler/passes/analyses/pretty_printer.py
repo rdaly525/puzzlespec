@@ -82,7 +82,7 @@ class PrettyPrinterPass(Analysis):
     @handles()
     def _(self, node: ir._Param) -> str:
         self.p_to_T[node.name] = node.T
-        return node.name
+        return f"_P{node.name}"
 
     @handles()
     def _(self, node: ir.VarRef) -> str:
