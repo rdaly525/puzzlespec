@@ -150,14 +150,15 @@ class PuzzleSpecBuilder:
 
     # Freezes the spec and makes it immutable (no new rules can be added).
     def build(self) -> 'PuzzleSpecBuilder':
+        # 1) Unify parameters (change parameters to vars)
         self._unify_params()
         self._type_check()
         # Print AST
-        # 2) Run simplification loop
         # 3) Fold/invalidate the shape_env
-        #   - Replace any Len(Var) with the shape_env size
-        #   - Replace any Keys(Var) with shape_env keys
-        # DO type checking/shape validation
+        #   - eg, replace any Len(Var) with the shape_env size
+        #   - eg, Replace any Keys(Var) with shape_env keys
+        # 2) Run simplification loop
+        # Do type checking/shape validation
         # Extract implicit constraints
         return self
     
@@ -209,22 +210,6 @@ class PuzzleSpecBuilder:
         return {self.sym.get_name(sid): ast.wrap(ir.VarRef(sid), self.tenv[sid]) for sid in self.sym.get_decision_vars()}
 
     @property
-    def param_constraints(self) -> ast.BoolExpr:
-        return self._param_rules
-
-    @property
-    def gen_constraints(self) -> ast.BoolExpr:
-        return self._gen_rules
-
-    @property
-    def decision_constraints(self) -> ast.BoolExpr:
-        return self._decision_rules
-
-    @property
-    def constant_constraints(self) -> ast.BoolExpr:
-        # For now, return empty Conj since we don't support constant constraints yet
-        return ast.wrap(ir.Conj(), irT.Bool)
-
-    @property
-    def rules(self) -> ast.BoolExpr:
-        return self._rules
+    def rules(self) -> ast.ListExpr:
+        # return as a List
+        return tp.cast(ast.BoolExpr, ast.wrap(self._rules, irT.ListT(irT.Bool)))
