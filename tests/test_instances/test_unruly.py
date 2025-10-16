@@ -5,15 +5,14 @@ from puzzlespec.compiler.dsl import ir, ir_types as irT
 from puzzlespec.compiler.passes import Context, PassManager, analyses as A, transforms as T
 import numpy as np
 
-Unruly = get_puzzle("unruly")
 Sudoku = get_puzzle("sudoku")
+Unruly = get_puzzle("unruly")
 
 def t0():
     print(Unruly.pretty(dag=False))
     print(Unruly.pretty(dag=True))
     print(Sudoku.pretty(dag=False))
     print(Sudoku.pretty(dag=True))
-    assert 0
     params = Unruly.params
     assert 'nR' in params
     assert 'nC' in params
@@ -77,29 +76,4 @@ def t1():
                 cs.given_vals[(r,c)] = v
     
     # This will do the final substituiton of the genvars
-    game_with_clues = cs.finalize()
-
-
-
-def t2():
-    ctx = Context()
-    ctx.add(A.TypeEnv_(Unruly.tenv))
-    ctx.add(T.ParamValues(nR=4, nC=4))
-
-    # Run a representative pipeline on the rules conjunction
-    root = Unruly.rules.as_expr().node
-    pm = PassManager(
-        A.RolesPass(Unruly),
-        T.ParamSubPass(),
-        T.ConcretizeVarsPass(),
-        T.ConcretizeCollectionsPass(),
-        T.ConstPropPass(),
-        A.TypeInferencePass(),
-        A.AstPrinterPass(),
-    )
-    _ = pm.run(root, ctx)
-    print(ctx.get(A.PrintedAST).text)
-    # If we got here, the passes cooperated on this ruleset
-    assert True
-
-
+    game_with_clues = cs.build()

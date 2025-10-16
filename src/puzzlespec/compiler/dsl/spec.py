@@ -1,35 +1,94 @@
-from ast import Pass
-from multiprocessing import Value
+from ast import Pass, Sub
 import typing as tp
 
-from puzzlespec.compiler.passes.analyses import sym_table
+from puzzlespec.compiler.passes.transforms.substitution import SubMapping, SubstitutionPass
+from puzzlespec.compiler.passes.canonicalize import _canonicalize
 from . import ast, ir, ir_types as irT
 from .topology import Topology, Grid2D
-from dataclasses import dataclass
 
-from ..passes.pass_base import PassManager, Context, Transform, Analysis, AnalysisObject
-from ..passes.analyses import SymTableEnv_
-from ..passes.analyses.constraint_categorizer import ConstraintCategorizerVals, ConstraintCategorizer
-from ..passes.transforms import SubstitutionPass, SubMapping, ConstFoldPass, ResolveBoundVars
-from ..utils import pretty_print
 from .envs import SymTable, TypeEnv, ShapeEnv
+from ..passes.pass_base import PassManager, Context
+from ..passes.analyses.type_inference import TypeInferencePass, TypeEnv_, TypeValues
+from ..passes.analyses.sym_table import SymTableEnv_
+
 
 class PuzzleSpec:
-    def __init__(self, name: str, desc: str, topo: Topology):
+
+    def __init__(self,
+        name: str,
+        desc: str,
+        topo: Topology,
+        sym: SymTable,
+        tenv: TypeEnv,
+        shape_env: ShapeEnv,
+        rules: ir.List
+    ):
         self.name = name
         self.desc = desc
         self.topo = topo
+        self.sym = sym
+        self.tenv = tenv
+        self.shape_env = shape_env
+        self._rules = _canonicalize(rules)
+        self._type_check()
 
-        # Rules storage - separated by constraint type
-        self._param_rules: ast.BoolExpr = ast.wrap(ir.Conj(), irT.Bool)
-        self._gen_rules: ast.BoolExpr = ast.wrap(ir.Conj(), irT.Bool)
-        self._decision_rules: ast.BoolExpr = ast.wrap(ir.Conj(), irT.Bool)
-
+    @classmethod
+    def make(cls,
+        name: str,
+        desc: str,
+        topo: Topology,
+        vars: tp.List[tp.Tuple[int, str, irT.Type_, str, ir.Node]] , # (cid, name, T, Role, shape)
+        rules: tp.List[ir.Node]
+    ):
 
         # Environments
-        self.sym = SymTable()
-        self.tenv = TypeEnv()
-        self.shape_env = ShapeEnv()
+        sym = SymTable()
+        tenv = TypeEnv()
+        shape_env = ShapeEnv()
+        for (sid, name, T, role, shape) in vars:
+            sym.add_var(sid=sid, name=name, role=role)
+            tenv.add(sid=sid, sort=T)
+            shape_env.add(sid=sid, T=T, shape=shape)
+
+        return cls(name=name, desc=desc, topo=topo, sym=sym, tenv=tenv, shape_env=shape_env, rules=rules)
+
+    def _type_check(self):
+        if len(self._rules._children)==0:
+            return
+        pm = PassManager(TypeInferencePass())
+        ctx = Context()
+        ctx.add(TypeEnv_(self.tenv))
+        pm.run(self._rules, ctx)
+        tvals = ctx.get(TypeValues).mapping
+        if tvals[self._rules] != irT.ListT(irT.Bool):
+            for c in self._rules._children:
+                if tvals[c] != irT.Bool:
+                    raise ValueError(f"Constraint {c} is not bool, {tvals[c]}")
+
+    # applies passes to the spec, returns the new topo, shape env, and rules
+    def _transform(self, passes: tp.List[Pass], ctx: Context = None) -> tp.Tuple[Topology, ShapeEnv, ir.Node]:
+        if ctx is None:
+            ctx = Context()
+        spec_node = _canonicalize(ir.Tuple(
+            self.topo.terms_node(),
+            self.shape_env.terms_node(),
+            self._rules
+        ))
+        pm = PassManager(*passes)
+        spec_node = pm.run(spec_node, ctx)
+        topo_dim_node = spec_node._children[0]
+        shape_env_node = spec_node._children[1]
+        rules_node = spec_node._children[2]
+        new_topo = Grid2D.make_from_terms_node(topo_dim_node)
+        new_shape_env = self.shape_env.make_from_terms_node(shape_env_node)
+        return new_topo, new_shape_env, rules_node
+
+    # applies passes, copies the tenv and sym table, returns a new spec
+    def transform(self, passes: tp.List[Pass], ctx: Context = None) -> 'PuzzleSpec':
+        new_topo, new_shape_env, new_rules = self._transform(passes, ctx)
+        new_tenv = self.tenv.copy()
+        new_sym = self.sym.copy()
+        return PuzzleSpec(name=self.name, desc=self.desc, topo=new_topo, sym=new_sym, tenv=new_tenv, shape_env=new_shape_env, rules=new_rules)
 
     # TODO
     def __repr__(self):
@@ -69,119 +128,65 @@ class PuzzleSpec:
 
     @property
     def rules(self) -> ast.BoolExpr:
-        # Return predictable structure: Conj(param_rules, gen_rules, decision_rules)
-        # Always include all three rule types, even if empty
-        return ast.wrap(ir.Conj(
-            self._param_rules.node,
-            self._gen_rules.node, 
-            self._decision_rules.node
-        ), irT.Bool)
+        return tp.cast(ast.BoolExpr, ast.wrap(self._rules, irT.ListT(irT.Bool)))
 
-    # TODO
     # Returns a new spec with the params set
     def set_params(self, **kwargs) -> 'PuzzleSpec':
-        new_spec = ...
-        
         # Run parameter substitution and constant propagation
         ctx = Context()
-        ctx.add(ParamValues(**kwargs))
-        pm = PassManager(ParamSubPass(), ConstPropPass())
-        
-        # Transform each rule type separately
-        new_spec._param_rules = self._transform_rule_list(new_spec._param_rules, pm, ctx)
-        new_spec._gen_rules = self._transform_rule_list(new_spec._gen_rules, pm, ctx)  
-        new_spec._decision_rules = self._transform_rule_list(new_spec._decision_rules, pm, ctx)
-        
-        # Validate parameter constraints - much simpler now!
-        self._validate_param_constraints(new_spec._param_rules, kwargs)
-        
-        # Apply to topology dimensions
-        if isinstance(new_spec.topo, Grid2D):
-            new_nR = ast.wrap(pm.run(new_spec.topo.nR.node, ctx), irT.Int)
-            new_nC = ast.wrap(pm.run(new_spec.topo.nC.node, ctx), irT.Int)
-            new_spec.topo = Grid2D(new_nR, new_nC)
-        
-        return new_spec.freeze()
+        param_sub_mapping = SubMapping()
+        for pname, value in kwargs.items():
+            if isinstance(value, int):
+                new_node = ir.Lit(value, irT.Int)
+            elif isinstance(value, bool):
+                new_node = ir.Lit(value, irT.Bool)
+            else:
+                raise ValueError(f"Expected int or bool, got {type(value)}")
 
-    def _transform_rule_list(self, rule_list: ast.BoolExpr, pm: PassManager, ctx: Context) -> ast.BoolExpr:
-        """Transform each child of a rule list independently."""
-        assert isinstance(rule_list.node, ir.Conj), f"Expected Conj node, got {type(rule_list.node)}"
-        
-        if len(rule_list.node._children) == 0:
-            # Empty rule list stays empty
-            return rule_list
-        
-        # Transform each child independently
-        transformed_children = []
-        for child in rule_list.node._children:
-            transformed_child = pm.run(child, ctx)
-            transformed_children.append(transformed_child)
-        
-        # Reconstruct the rule list
-        return ast.wrap(ir.Conj(*transformed_children), irT.Bool)
+            sid = self.sym.get_sid(pname)
+            role = self.sym.get_role(sid)
+            if sid is None:
+                raise ValueError(f"Param {pname} not found")
+            if role != 'P':
+                raise ValueError(f"Param {pname} with sid {sid} is not a parameter")
 
-    def _validate_param_constraints(self, transformed_param_rules: ast.BoolExpr, param_values: tp.Dict[str, tp.Any]):
-        """Validate that parameter values satisfy the parameter constraints."""
-        # After transformation, the rules might be simplified to a single literal
-        if isinstance(transformed_param_rules.node, ir.Lit):
-            # If it's a literal False, all constraints were violated
-            if transformed_param_rules.node.value is False:
-                # Get original parameter constraints for error message
-                original_param_rules = self._param_rules
-                assert isinstance(original_param_rules.node, ir.Conj), f"Expected Conj node for original param constraints"
-                original_constraints = original_param_rules.node._children
-                self._raise_param_constraint_error_with_printer(original_constraints, param_values)
-            # If it's literal True, all constraints are satisfied
-            return
-        
-        # The transformed parameter rules should be a Conj node
-        assert isinstance(transformed_param_rules.node, ir.Conj), f"Expected Conj node for param constraints, got {type(transformed_param_rules.node)}"
-        
-        if len(transformed_param_rules.node._children) == 0:
-            # No parameter constraints to validate
-            return
-        
-        # Get original parameter constraints for pretty printing
-        original_param_rules = self._param_rules
-        assert isinstance(original_param_rules.node, ir.Conj), f"Expected Conj node for original param constraints"
-        original_constraints = original_param_rules.node._children
-        
-        # Check each transformed parameter constraint against its original
-        violated_original_constraints = []
-        transformed_constraints = transformed_param_rules.node._children
-        
-        for i, transformed_node in enumerate(transformed_constraints):
-            # After parameter substitution and constant propagation, this could be:
-            # - A literal (fully resolved): check if False
-            # - A non-literal (partially resolved): allow it (partial evaluation)
-            if isinstance(transformed_node, ir.Lit):
-                if transformed_node.value is False:
-                    # This specific constraint was violated - get the original constraint
-                    if i < len(original_constraints):
-                        violated_original_constraints.append(original_constraints[i])
-            # If not a literal, it means some parameters are unresolved - that's OK for partial evaluation
-        
-        # If any constraints were violated, raise an error with pretty-printed original constraints
-        if violated_original_constraints:
-            self._raise_param_constraint_error_with_printer(violated_original_constraints, param_values)
+            param_sub_mapping.add(
+                match=lambda node, sid=sid: isinstance(node, ir.VarRef) and node.sid==sid,
+                replace=lambda node, new_node=new_node: new_node
+            )
+        ctx.add(
+            param_sub_mapping
+        )
+        return self.transform([SubstitutionPass()], ctx)
 
-    def _raise_param_constraint_error_with_printer(self, violated_nodes: tp.List[ir.Node], param_values: tp.Dict[str, tp.Any]):
-        """Raise a helpful error message for violated constraints."""
+    def pretty(self, constraint: ir.Node=None, dag=False) -> str:
+        """Pretty print a constraint using the spec's type environment."""
+        from ..passes.analyses.pretty_printer import PrettyPrinterPass, PrettyPrintedExpr
+        from ..passes.analyses.type_inference import TypeInferencePass, TypeEnv_
+        from ..passes.analyses.ssa_printer import SSAPrinter, SSAResult
+        from ..passes.pass_base import Context, PassManager
         
-        param_str = ", ".join(f"{k}={v}" for k, v in param_values.items())
+        if constraint is None:
+            constraint = self._rules
+
+        ctx = Context()
+        ctx.add(TypeEnv_(self.tenv))
+        ctx.add(SymTableEnv_(self.sym))
+        if dag:
+            p = SSAPrinter()
+        else:
+            p = PrettyPrinterPass()
+        pm = PassManager(
+            TypeInferencePass(),
+            p
+        )
+        # Run all passes and get the final result
+        pm.run(constraint, ctx)
         
-        # Create error messages for each violated constraint
-        error_messages = []
-        for node in violated_nodes:
-            try:
-                # Use pretty printer to show the original constraint
-                constraint_desc = pretty_print(node)
-            except Exception:
-                # Fallback if pretty printing fails
-                constraint_desc = str(node)
-            
-            error_messages.append(f"The constraint {constraint_desc} is violated when {param_str}")
-        
-        # Join multiple violations with newlines
-        full_message = "\n".join(error_messages)
-        raise ValueError(full_message)
+        # Get the pretty printed result from context
+        if dag:
+            text = ctx.get(SSAResult).text
+        else:
+            text = ctx.get(PrettyPrintedExpr).text
+
+        return text
