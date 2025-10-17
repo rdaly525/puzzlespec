@@ -49,18 +49,20 @@ class ConstFoldPass(Transform):
     def _(self, node: ir.Node) -> ir.Node:
         new_children = self.visit_children(node)
         if all(isinstance(c, ir.Lit) for c in new_children):
+            vals = [c.val for c in new_children]
             T = irT.Int if type(node) in self._int_ops else irT.Bool
-            return ir.Lit(self._binops[type(node)](*new_children), T)
+            return ir.Lit(self._binops[type(node)](*vals), T)
         return node.replace(*new_children)
 
     # variadic operations: Fold constants
     @handles(*_variadic_ops.keys())
     def _(self, node: ir.Node) -> ir.Node:
-        children = self.visit_children(node)
-        if all(isinstance(c, ir.Lit) for c in children):
+        new_children = self.visit_children(node)
+        if all(isinstance(c, ir.Lit) for c in new_children):
+            vals = [c.val for c in new_children]
             T = irT.Int if type(node) in self._int_ops else irT.Bool
-            return ir.Lit(self._variadic_ops[type(node)](*children), T)
-        return node.replace(*children)
+            return ir.Lit(self._variadic_ops[type(node)](*vals), T)
+        return node.replace(*new_children)
     
     # Higher order ops
     @handles(ir.SumReduce)
@@ -69,7 +71,8 @@ class ConstFoldPass(Transform):
         match (lst):
             case ir.List(elems):
                 if all(isinstance(e, ir.Lit) for e in elems):
-                    return ir.Lit(self._variadic_ops[ir.Sum](*elems), irT.Int)
+                    vals = [e.val for e in elems]
+                    return ir.Lit(self._variadic_ops[ir.Sum](*vals), irT.Int)
         return node.replace(lst)
 
     @handles(ir.ProdReduce)
@@ -78,7 +81,8 @@ class ConstFoldPass(Transform):
         match (lst):
             case ir.List(elems):
                 if all(isinstance(e, ir.Lit) for e in elems):
-                    return ir.Lit(self._variadic_ops[ir.Prod](*elems), irT.Int)
+                    vals = [e.val for e in elems]
+                    return ir.Lit(self._variadic_ops[ir.Prod](*vals), irT.Int)
         return node.replace(lst)
 
     @handles(ir.Distinct)
@@ -87,6 +91,7 @@ class ConstFoldPass(Transform):
         match (lst):
             case ir.List(elems):
                 if all(isinstance(e, ir.Lit) for e in elems):
-                    distinct = len(set(elems)) == len(elems)
+                    vals = [e.val for e in elems]
+                    distinct = len(set(vals)) == len(vals)
                     return ir.Lit(distinct, irT.Bool)
         return node.replace(lst)

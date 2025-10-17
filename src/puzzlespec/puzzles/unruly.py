@@ -18,7 +18,7 @@ def build_unruly_spec() -> PuzzleSpec:
         topo=grid,
     )
     # Structural constraints
-    p += [nR % 2 == 0, nC % 2 == 0, nR > 1, nC > 1]
+    p += [nR % 2 == 0, nC % 2 == 0, nR > 1, nC > 1, ((-(-nR)+4)-4) >=2]
 
     # Generator parameters, i.e., the 'clues' of the puzzle
     given_mask = p.var_dict(grid.C(), sort=Bool, name='given_mask', gen=True) # Cell -> Var

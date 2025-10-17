@@ -47,7 +47,7 @@ class AlgebraicSimplificationPass(Transform):
         children = self.visit_children(node)
         # simplify all literals
         const_children, non_const_children = partition(children, lambda c: isinstance(c, ir.Lit))
-        const_val = sum([c.value for c in const_children])
+        const_val = sum([c.val for c in const_children])
         if const_val != 0:
             children = non_const_children + [ir.Lit(const_val, irT.Int)]
         
@@ -69,7 +69,7 @@ class AlgebraicSimplificationPass(Transform):
         children = self.visit_children(node)
         # simplify all literals
         const_children, non_const_children = partition(children, lambda c: isinstance(c, ir.Lit))
-        const_val = math.prod([c.value for c in const_children])
+        const_val = math.prod([c.val for c in const_children])
         match const_val:
             case 0:
                 return ir.Lit(0, irT.Int)
@@ -88,7 +88,7 @@ class AlgebraicSimplificationPass(Transform):
         children = self.visit_children(node)
         # simplify all literals
         const_children, non_const_children = partition(children, lambda c: isinstance(c, ir.Lit))
-        const_val = all([c.value for c in const_children])
+        const_val = all([c.val for c in const_children])
         match const_val:
             case True:
                 children = non_const_children
@@ -103,7 +103,7 @@ class AlgebraicSimplificationPass(Transform):
         children = self.visit_children(node)
         # simplify all literals
         const_children, non_const_children = partition(children, lambda c: isinstance(c, ir.Lit))
-        const_val = any([c.value for c in const_children])
+        const_val = any([c.val for c in const_children])
         match const_val:
             case True:
                 return ir.Lit(True, irT.Bool)
@@ -121,7 +121,7 @@ class AlgebraicSimplificationPass(Transform):
         match (a, b):
             case (_, ir.Lit(val=1)):
                 return a
-            case (ir.Lit(0), _):
+            case (ir.Lit(val=0), _):
                 return ir.Lit(0)
             case (_, _):
                 return node.replace(a, b)
@@ -132,7 +132,7 @@ class AlgebraicSimplificationPass(Transform):
         match (a, b):
             case (_, ir.Lit(val=1)):
                 return ir.Lit(0)
-            case (ir.Lit(0), _):
+            case (ir.Lit(val=0), _):
                 return ir.Lit(0)
             case (_, _):
                 return node.replace(a, b)
@@ -157,48 +157,10 @@ class AlgebraicSimplificationPass(Transform):
     def _(self, node: ir.Implies) -> ir.Node:
         a, b = self.visit_children(node)
         match (a, b):
-            case (ir.Lit(True), _):
+            case (ir.Lit(val=True), _):
                 return b
-            case (_, ir.Lit(True)):
+            case (_, ir.Lit(val=True)):
                 return ir.Lit(True)
-            case (_, ir.Lit(False)):
+            case (_, ir.Lit(val=False)):
                 return ir.Not(a)
         return node.replace(a, b)
-
-    # Structural / collections simplification
-    @handles(ir.ListLength)
-    def _(self, node: ir.ListLength) -> ir.Node:
-        lst, = self.visit_children(node)
-        match (lst):
-            case ir.List(elems):
-                return ir.Lit(len(lst), irT.Int)
-            case ir.ListTabulate(size, _):
-                return size
-        raise ValueError(f"ListLength expects a list, got {type(lst)}")
-
-    @handles(ir.ListGet)
-    def _(self, node: ir.ListGet) -> ir.Node:
-        raise NotImplementedError("ListGet is not implemented")
-
-    @handles(ir.ListConcat)
-    def _(self, node: ir.ListConcat) -> ir.Node:
-        raise NotImplementedError("ListConcat is not implemented")
-
-    @handles(ir.DictLength)
-    def _(self, node: ir.DictLength) -> ir.Node:
-        dct, = self.visit_children(node)
-        match (dct):
-            case ir.Dict:
-                return dct._size()
-            case ir.DictTabulate(keys, vals):
-                return ir.ListLength(keys)
-        raise ValueError(f"DictLength expects a dict, got {type(dct)}")
-
-
-    @handles(ir.Sum)
-    def _(self, node: ir.Sum) -> ir.Node:
-        raise NotImplementedError("Sum is not implemented")
-
-    @handles(ir.Distinct)
-    def _(self, node: ir.Distinct) -> ir.Node:
-        raise NotImplementedError("Distinct is not implemented")

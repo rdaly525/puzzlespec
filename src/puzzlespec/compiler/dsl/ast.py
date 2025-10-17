@@ -55,6 +55,9 @@ class IntExpr(Expr):
         node = ir.Sub(self.node, other.node)
         return tp.cast(IntExpr, wrap(node, irT.Int))
 
+    def __neg__(self) -> IntExpr:
+        return tp.cast(IntExpr, wrap(ir.Neg(self.node), irT.Int))
+
     def __mul__(self, other: IntOrExpr) -> IntExpr:
         other = IntExpr.make(other)
         node = ir.Mul(self.node, other.node)

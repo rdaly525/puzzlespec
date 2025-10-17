@@ -73,12 +73,12 @@ class Node:
 
 # Literal value
 class Lit(Node):
-    _fields = ("value", "T")
+    _fields = ("val", "T")
     _numc = 0
-    def __init__(self, value: tp.Any, T: irT.Type_):
+    def __init__(self, val: tp.Any, T: irT.Type_):
         assert T in (irT.Bool, irT.Int)
         self.T = T
-        self.value = T.cast_as(value)
+        self.val = T.cast_as(val)
         super().__init__()
 
 

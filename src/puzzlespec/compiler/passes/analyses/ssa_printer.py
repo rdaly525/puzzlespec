@@ -103,7 +103,7 @@ class SSAPrinter(Analysis):
     @handles()
     def _(self, node: ir.Lit) -> tp.Any:
         """Analyze literal nodes."""
-        return str(node.value)
+        return str(node.val)
 
     @handles()
     def _(self, node: ir.VarRef) -> tp.Any:
