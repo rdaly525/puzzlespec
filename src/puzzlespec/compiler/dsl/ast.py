@@ -39,7 +39,8 @@ class IntExpr(Expr):
                 raise ValueError(f"Expected int or Lit, got {val}")
         try:
             val = int(val)
-            return IntExpr(ir.Lit(val, irT.Int), irT.Int)
+            node = ir.Lit(val, irT.Int)
+            return tp.cast(IntExpr, wrap(node, irT.Int))
         except:
             raise ValueError(f"Expected Int expression. Got {val}")
 

@@ -1,6 +1,5 @@
 from . import ast, ir_types as irT
 from . import ir
-from ..passes.canonicalize import canonicalize, _canonicalize
 import typing as tp
 from abc import abstractmethod
 
@@ -15,8 +14,8 @@ class Topology:
 class Grid2D(Topology):
     def __init__(self, nR: ast.IntOrExpr, nC: ast.IntOrExpr):
         nR, nC = ast.IntExpr.make(nR), ast.IntExpr.make(nC)
-        self.nR = canonicalize(nR)
-        self.nC = canonicalize(nC)
+        self.nR = nR
+        self.nC = nC
 
     @classmethod
     def make_from_terms_node(cls, dims: ir.Tuple) -> 'Grid2D':
@@ -27,7 +26,7 @@ class Grid2D(Topology):
         return Grid2D(nR, nC)
 
     def terms_node(self) -> ir.Tuple:
-        return _canonicalize(ir.Tuple(self.nR.node, self.nC.node))
+        return ir.Tuple(self.nR.node, self.nC.node)
 
     def index_grid(self, mode:str) -> ast.GridExpr[ast.Expr]:
         if mode == "C":

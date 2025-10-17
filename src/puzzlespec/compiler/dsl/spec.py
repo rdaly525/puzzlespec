@@ -1,13 +1,14 @@
 from ast import Pass, Sub
 import typing as tp
 
+from puzzlespec.compiler.passes.analyses.ssa_printer import SSAPrinter
 from puzzlespec.compiler.passes.transforms.substitution import SubMapping, SubstitutionPass
-from puzzlespec.compiler.passes.canonicalize import _canonicalize
 from . import ast, ir, ir_types as irT
 from .topology import Topology, Grid2D
 
 from .envs import SymTable, TypeEnv, ShapeEnv
 from ..passes.pass_base import PassManager, Context
+from ..passes.transforms import CanonicalizePass, ConstFoldPass, AlgebraicSimplificationPass
 from ..passes.analyses.type_inference import TypeInferencePass, TypeEnv_, TypeValues
 from ..passes.analyses.sym_table import SymTableEnv_
 
@@ -29,7 +30,7 @@ class PuzzleSpec:
         self.sym = sym
         self.tenv = tenv
         self.shape_env = shape_env
-        self._rules = _canonicalize(rules)
+        self._rules = rules
         self._type_check()
 
     @classmethod
@@ -69,12 +70,12 @@ class PuzzleSpec:
     def _transform(self, passes: tp.List[Pass], ctx: Context = None) -> tp.Tuple[Topology, ShapeEnv, ir.Node]:
         if ctx is None:
             ctx = Context()
-        spec_node = _canonicalize(ir.Tuple(
+        spec_node = ir.Tuple(
             self.topo.terms_node(),
             self.shape_env.terms_node(),
             self._rules
-        ))
-        pm = PassManager(*passes)
+        )
+        pm = PassManager(*passes, verbose=True)
         spec_node = pm.run(spec_node, ctx)
         topo_dim_node = spec_node._children[0]
         shape_env_node = spec_node._children[1]
@@ -158,6 +159,17 @@ class PuzzleSpec:
             param_sub_mapping
         )
         return self.transform([SubstitutionPass()], ctx)
+
+    def optimize(self) -> 'PuzzleSpec':
+        ctx = Context()
+        ctx.add(SymTableEnv_(self.sym))
+        ctx.add(TypeEnv_(self.tenv))
+        return self.transform([[
+            CanonicalizePass(),
+            ConstFoldPass(),
+            AlgebraicSimplificationPass(),
+            #CollectionSimplificationPass(),
+        ]], ctx)
 
     def pretty(self, constraint: ir.Node=None, dag=False) -> str:
         """Pretty print a constraint using the spec's type environment."""

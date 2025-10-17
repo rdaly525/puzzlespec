@@ -4,7 +4,6 @@ import typing as tp
 from . import ast, ir, ir_types as irT
 from .topology import Topology
 from .envs import SymTable, ShapeEnv, TypeEnv
-from ..passes.canonicalize import canonicalize, _canonicalize
 from ..passes.pass_base import PassManager, Context
 from ..passes.analyses import SymTableEnv_
 from ..passes.transforms.cse import CSE
@@ -55,7 +54,7 @@ class PuzzleSpecBuilder(PuzzleSpec):
             name = self._new_var_name()
         assert role in "GDP"
         sid = self.sym.new_var(name, role)
-        v = canonicalize(ast.wrap(ir.VarRef(sid), sort))
+        v = ast.wrap(ir.VarRef(sid), sort)
         self.tenv.add(sid, sort)
         return sid, v
 
@@ -80,8 +79,7 @@ class PuzzleSpecBuilder(PuzzleSpec):
         return v
 
     def _replace_rules(self, new_rules: ir.Node):
-        canon = _canonicalize(new_rules)
-        self._rules = canon
+        self._rules = new_rules
  
     def _add_rules(self, *new_rules: ast.Expr):
         nodes = [*self._rules._children, *[r.node for r in new_rules]]
@@ -144,6 +142,7 @@ class PuzzleSpecBuilder(PuzzleSpec):
             all_vars,
             self._rules
         )
+        return spec.optimize()
 
         # TODO run passes on spec
 

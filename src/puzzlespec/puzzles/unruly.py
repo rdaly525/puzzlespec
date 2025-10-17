@@ -31,11 +31,11 @@ def build_unruly_spec() -> PuzzleSpec:
 
     # Handle the givens
     p += grid.C().forall(lambda c: given_mask[c].implies(color[c] == given_vals[c]))
-    # Equal balance of colors in all rows and cols
+    ## Equal balance of colors in all rows and cols
     p += grid.rows().forall(lambda row: color[row].sum() == nC // 2)
     p += grid.cols().forall(lambda col: color[col].sum() == nR // 2)
 
-    # No triple of the same color
+    ## No triple of the same color
     p += grid.rows().forall(
         lambda row: row.windows(3).forall(
             lambda w: (color[w].sum() != 3) & (color[w].sum() != 0)))

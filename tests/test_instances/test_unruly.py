@@ -5,14 +5,15 @@ from puzzlespec.compiler.dsl import ir, ir_types as irT
 from puzzlespec.compiler.passes import Context, PassManager, analyses as A, transforms as T
 import numpy as np
 
-Sudoku = get_puzzle("sudoku")
+#Sudoku = get_puzzle("sudoku")
 Unruly = get_puzzle("unruly")
 
 def t0():
     print(Unruly.pretty(dag=False))
     print(Unruly.pretty(dag=True))
-    print(Sudoku.pretty(dag=False))
-    print(Sudoku.pretty(dag=True))
+    #print(Sudoku.pretty(dag=False))
+    #print(Sudoku.pretty(dag=True))
+    return
     params = Unruly.params
     assert 'nR' in params
     assert 'nC' in params

@@ -20,7 +20,7 @@ class Uses(Analysis):
         """Main entry point for the analysis pass."""
         self.use_cnt = {root: 1}
         self.visit(root)
-        ctx.add(UsesResult(self.use_cnt))
+        return UsesResult(self.use_cnt)
 
     def visit(self, node: ir.Node) -> tp.Any:
         self.visit_children(node)
@@ -53,8 +53,7 @@ class SSAPrinter(Analysis):
         self.sym: SymTable = ctx.get(SymTableEnv_).sym
         self.decls = {}
         self.var_names = set()
-        Uses()(root, ctx)
-        self.use_cnt = ctx.get(UsesResult).use_cnt
+        self.use_cnt = Uses()(root, ctx).use_cnt
         self._var_cnt={}
         constraints = [self.visit(c) for c in root._children]
         c_str = ", \n    ".join(cs for cs in constraints)
@@ -67,8 +66,8 @@ class SSAPrinter(Analysis):
             if name not in self.var_names:
                 text += f"\n{name}: {T} = {con}"
         text += f"\nreturn ∩(\n    {c_str}\n)\n"
-        ctx.add(SSAResult(text))
-        # TODO
+        print(text)
+        return SSAResult(text)
 
     def do_use(self, node, use_s, prefix='x'):
         if node not in self.use_cnt:

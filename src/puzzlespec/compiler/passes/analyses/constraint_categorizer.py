@@ -59,8 +59,7 @@ class ConstraintCategorizer(Analysis):
         
         # Visit the constraint to categorize it and collect variables
         self.visit(root)
-        ctx.add(self.vals)
-        return root
+        return self.vals
 
     @handles(ir.VarRef)
     def _(self, var: ir.VarRef):
