@@ -1,7 +1,8 @@
 from __future__ import annotations
 
 from ..pass_base import Transform, Context, handles
-from ...dsl import ir
+from ...dsl import ir, ir_types as irT
+import math
 import typing as tp
 
 class ConstFoldPass(Transform):
@@ -16,7 +17,7 @@ class ConstFoldPass(Transform):
     name = "const_prop"
 
 
-    _ops = {
+    _binops = {
         ir.Neg: lambda a: -a,
         ir.Add: lambda a,b: a+b,
         ir.Sub: lambda a,b: a-b,
@@ -32,36 +33,65 @@ class ConstFoldPass(Transform):
         ir.And: lambda a,b: a and b,
         ir.Or: lambda a,b: a or b,
         ir.Implies: lambda a,b: (not a) or b,
+    } 
+
+    _variadic_ops = {
         ir.Conj: lambda *args: all(args),
         ir.Disj: lambda *args: any(args),
-    }    
+        ir.Sum: lambda *args: sum(args),
+        ir.Prod: lambda *args: math.prod(args),
+    }
+    _bool_ops = set([ir.And, ir.Or, ir.Implies, ir.Not, ir.Eq, ir.Gt, ir.GtEq, ir.Lt, ir.LtEq, ir.Conj, ir.Disj])
+    _int_ops = set([ir.Add, ir.Sub, ir.Mul, ir.Div, ir.Mod, ir.Neg, ir.Sum, ir.Prod])
 
-    # Basic Ops
-    @handles(*_ops.keys())
+    # Binary operations
+    @handles(*_binops.keys())
     def _(self, node: ir.Node) -> ir.Node:
         new_children = self.visit_children(node)
         if all(isinstance(c, ir.Lit) for c in new_children):
-            return ir.Lit(self._ops[type(node)](*new_children))
+            vals = [c.val for c in new_children]
+            T = irT.Int if type(node) in self._int_ops else irT.Bool
+            return ir.Lit(self._binops[type(node)](*vals), T)
         return node.replace(*new_children)
 
-    @handles(ir.Sum)
-    def _(self, node: ir.Sum) -> ir.Node:
+    # variadic operations: Fold constants
+    @handles(*_variadic_ops.keys())
+    def _(self, node: ir.Node) -> ir.Node:
+        new_children = self.visit_children(node)
+        if all(isinstance(c, ir.Lit) for c in new_children):
+            vals = [c.val for c in new_children]
+            T = irT.Int if type(node) in self._int_ops else irT.Bool
+            return ir.Lit(self._variadic_ops[type(node)](*vals), T)
+        return node.replace(*new_children)
+    
+    # Higher order ops
+    @handles(ir.SumReduce)
+    def _(self, node: ir.SumReduce) -> ir.Node:
         lst, = self.visit_children(node)
-        if isinstance(lst, ir.List) and all(isinstance(e, ir.Lit) for e in lst._children):
-            total = sum(int(e.value) for e in lst._children)
-            return ir.Lit(total)
+        match (lst):
+            case ir.List(elems):
+                if all(isinstance(e, ir.Lit) for e in elems):
+                    vals = [e.val for e in elems]
+                    return ir.Lit(self._variadic_ops[ir.Sum](*vals), irT.Int)
+        return node.replace(lst)
+
+    @handles(ir.ProdReduce)
+    def _(self, node: ir.ProdReduce) -> ir.Node:
+        lst, = self.visit_children(node)
+        match (lst):
+            case ir.List(elems):
+                if all(isinstance(e, ir.Lit) for e in elems):
+                    vals = [e.val for e in elems]
+                    return ir.Lit(self._variadic_ops[ir.Prod](*vals), irT.Int)
         return node.replace(lst)
 
     @handles(ir.Distinct)
     def _(self, node: ir.Distinct) -> ir.Node:
         lst, = self.visit_children(node)
-        if isinstance(lst, ir.List) and all(isinstance(e, ir.Lit) for e in lst._children):
-            return ir.Lit(len(set(lst._children)) == len(lst._children))
+        match (lst):
+            case ir.List(elems):
+                if all(isinstance(e, ir.Lit) for e in elems):
+                    vals = [e.val for e in elems]
+                    distinct = len(set(vals)) == len(vals)
+                    return ir.Lit(distinct, irT.Bool)
         return node.replace(lst)
-
-    @handles(ir.GridDims)
-    def _(self, node: ir.GridDims) -> ir.Node:
-        g, = self.visit_children(node)
-        if isinstance(g, ir.Grid):
-            return ir.Lit(g.nR)
-        return node.replace(g)

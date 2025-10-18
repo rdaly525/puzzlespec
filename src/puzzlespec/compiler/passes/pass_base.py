@@ -7,7 +7,6 @@ from abc import ABC, abstractmethod
 import inspect
 
 from puzzlespec.compiler.dsl.ir import _LambdaPlaceholder
-from .canonicalize import _canonicalize
 
 if TYPE_CHECKING:
     from ..dsl import ir
@@ -124,8 +123,9 @@ class Analysis(Pass):
         if self.enable_memoization:
             self._cache = {}
         aobj = self.run(root, ctx)
-        ctx.add(aobj)
-        return root
+        if not isinstance(aobj, AnalysisObject):
+            raise RuntimeError(f"Analysis pass {self.name} did not return an AnalysisObject, {aobj}")
+        return aobj
  
     def visit(self, node: ir.Node) -> tp.Any:
         self.visit_children(node)
@@ -164,9 +164,6 @@ class Analysis(Pass):
 
         # Define custom visit function to do caching
         def visit(self, node: ir.Node):
-            if not node.is_canon:
-                raise ValueError(f"{node} is not cannonicalized")
-            
             if self.enable_memoization:
                 if node in self._cache:
                     return self._cache[node]
@@ -192,7 +189,11 @@ class Transform(Pass):
         if self.enable_memoization:
             self._cache = {}
             self._bframes = []
-        return self.run(root, ctx)
+        new_root = self.run(root, ctx)
+        from ..dsl import ir
+        if not isinstance(new_root, ir.Node):
+            raise RuntimeError("Transform pass did not return an IR node")
+        return new_root
 
     def visit(self, node: ir.Node) -> ir.Node:
         # Fallback: recurse
@@ -231,9 +232,6 @@ class Transform(Pass):
 
         # Define custom visit function that creates new keys
         def visit(self, node: ir.Node):
-            if not node.is_canon:
-                raise ValueError(f"{node} is not cannonicalized")
-            
             if self.enable_memoization:
                 if isinstance(node, ir.BoundVar):
                     cache_key = (self._bframes[-(node.idx+1)], node._key)
@@ -245,47 +243,56 @@ class Transform(Pass):
                     self._bframes.append(node._key)
             
             # Hacked way to get the dispatcher to work without binding to an instance
-            new_node = dispatcher.__get__(self, type(self))(node) 
+            new_node = dispatcher.__get__(self, type(self))(node)
+            if new_node._key == node._key:
+                new_node = node
  
-            canon_node = _canonicalize(new_node)
-            
             if self.enable_memoization:
                 if isinstance(node, ir.Lambda):
                     self._bframes.pop()
                 # Add new node to cache
-                assert canon_node.is_canon
-                if isinstance(node, ir.BoundVar):
-                    new_cache_key = (self._bframes[-(node.idx+1)], canon_node._key)
-                else:
-                    new_cache_key = canon_node._key
-                if new_cache_key not in self._cache:
-                    self._cache[new_cache_key] = new_node
-                canon_node = self._cache[new_cache_key]
-            return canon_node
+                assert cache_key not in self._cache
+                self._cache[cache_key] = new_node
+            return new_node
         setattr(cls, "visit", visit)
 
 class PassManager:
-    verbose = False
-    def __init__(self, *passes: Pass, verbose=False):
+    def __init__(self, *passes: Pass, verbose=False, max_iter=5):
         self.passes = passes
         self.verbose = verbose
+        self.max_iter = max_iter
 
-    def run(self, root: ir.Node, ctx: tp.Optional[Context] = None) -> ir.Node:
+    def run(self, root: ir.Node, ctx: tp.Optional[Context] = None, fixed_point=False) -> ir.Node:
         if ctx is None:
             ctx = Context()
-        for p in self.passes:
-            if self.verbose:
-                print(f"PM: Running {p.name}")
-            new_root = p(root, ctx)
-            root = new_root
+        if fixed_point:
+            return self._run_fixed(root, self.passes, ctx)
+        return self._run_passes(root, self.passes, ctx)
+    
+    def _run_pass(self, root: ir.Node, p: Pass, ctx: Context) -> ir.Node:
+        if self.verbose:
+            print(f"P: {p.__class__.__name__} on {id(root)}")
+        if isinstance(p, Transform):
+            root = p(root, ctx)
+        else:
+            assert isinstance(p, Analysis)
+            anal_obj = p(root, ctx)
+            ctx.add(anal_obj)
+        return root
+    
+    def _run_passes(self, root: ir.Node, passes: tp.Iterable[Pass], ctx: Context) -> ir.Node:
+        for p in passes:
+            if isinstance(p, tp.Iterable):
+                root = self._run_fixed(root, p, ctx)
+            else:
+                root = self._run_pass(root, p, ctx)
         return root
 
     # Does a fixed point iteration
-    def run_fixed(self, root: ir.Node, ctx: 'Context', max_iter: int = 20) -> ir.Node:
-        old_root = root
-        for _ in range(max_iter):
-            new_root = self.run(old_root, ctx)
-            if new_root == old_root:
+    def _run_fixed(self, root: ir.Node, passes: tp.Iterable[Pass], ctx: 'Context') -> ir.Node:
+        for _ in range(self.max_iter):
+            new_root = self._run_passes(root, passes, ctx)
+            if new_root == root:
                 return new_root
-            old_root = new_root
-        raise RuntimeError(f"Fixed point iteration did not converge in {max_iter} iterations")
+            root = new_root
+        raise RuntimeError(f"Fixed point iteration did not converge in {self.max_iter} iterations")

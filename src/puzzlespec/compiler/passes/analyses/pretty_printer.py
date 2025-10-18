@@ -77,7 +77,7 @@ class PrettyPrinterPass(Analysis):
     # Literals and basic nodes
     @handles()
     def _(self, node: ir.Lit) -> str:
-        return str(node.value)
+        return str(node.val)
 
     @handles()
     def _(self, node: ir._Param) -> str:

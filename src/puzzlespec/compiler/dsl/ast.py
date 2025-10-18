@@ -39,7 +39,8 @@ class IntExpr(Expr):
                 raise ValueError(f"Expected int or Lit, got {val}")
         try:
             val = int(val)
-            return IntExpr(ir.Lit(val, irT.Int), irT.Int)
+            node = ir.Lit(val, irT.Int)
+            return tp.cast(IntExpr, wrap(node, irT.Int))
         except:
             raise ValueError(f"Expected Int expression. Got {val}")
 
@@ -53,6 +54,9 @@ class IntExpr(Expr):
         other = IntExpr.make(other)
         node = ir.Sub(self.node, other.node)
         return tp.cast(IntExpr, wrap(node, irT.Int))
+
+    def __neg__(self) -> IntExpr:
+        return tp.cast(IntExpr, wrap(ir.Neg(self.node), irT.Int))
 
     def __mul__(self, other: IntOrExpr) -> IntExpr:
         other = IntExpr.make(other)
@@ -181,6 +185,18 @@ BoolOrExpr = tp.Union[bool, BoolExpr, Expr]
 
 class CellIdxExpr(Expr): ...
 
+class TupleExpr(Expr):
+    
+    def __getitem__(self, idx: int) -> Expr:
+        node = ir.TupleGet(idx, self.node)
+        return tp.cast(Expr, wrap(node, self.T.elemTs[idx]))
+
+    def __len__(self) -> int:
+        return len(self.node._children)
+
+    def __iter__(self) -> tp.Iterator[Expr]:
+        for i in range(len(self)):
+            yield self[i]
 
 def make_lambda(fn: tp.Callable[[TExpr], VExpr], paramT: irT.Type_) -> 'LambdaExpr[TExpr, VExpr]':
     bv_node = ir._BoundVarPlaceholder()
@@ -392,6 +408,8 @@ def wrap(node: ir.Node, T: irT.Type_) -> Expr:
         return BoolExpr(node, T)
     if T is irT.CellIdxT:
         return CellIdxExpr(node, T)
+    if isinstance(T, irT.TupleT):
+        return TupleExpr(node, T)
     if isinstance(T, irT.ListT):
         return ListExpr(node, T)
     if isinstance(T, irT.DictT):

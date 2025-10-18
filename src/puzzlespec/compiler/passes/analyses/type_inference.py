@@ -25,15 +25,12 @@ class TypeInferencePass(Analysis):
         super().__init__()
 
     def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
-        # Use concrete mapping for fast lookup
         self.tenv: tp.Dict[int, irT.Type_] = ctx.get(TypeEnv_).env
         self.bctx = []
         # Walk and populate
         root_T = self.visit(root)
-        # Package result
         tv = TypeValues(self._cache)
-        ctx.add(tv)
-        return root
+        return tv
 
     def visit(self, node):
         raise ValueError(f"Should never occur! {node}")

@@ -1,22 +1,32 @@
 from . import ast, ir_types as irT
 from . import ir
-from ..passes.canonicalize import canonicalize
 import typing as tp
+from abc import abstractmethod
 
 class Topology:
-    def terms(self) -> tp.List[ast.Expr]:
+    @abstractmethod
+    def terms(self) -> ast.Expr:
         ...
+
+    def terms_node(self) -> ir.Node:
+        return self.terms.node
 
 class Grid2D(Topology):
     def __init__(self, nR: ast.IntOrExpr, nC: ast.IntOrExpr):
-        self.nR = canonicalize(ast.IntExpr.make(nR))
-        self.nC = canonicalize(ast.IntExpr.make(nC))
+        nR, nC = ast.IntExpr.make(nR), ast.IntExpr.make(nC)
+        self.nR = nR
+        self.nC = nC
 
-    def copy(self):
-        return Grid2D(self.nR, self.nC)
+    @classmethod
+    def make_from_terms_node(cls, dims: ir.Tuple) -> 'Grid2D':
+        if not isinstance(dims, ir.Tuple) and len(dims._children) != 2:
+            raise ValueError(f"Grid2D expects an ir.Tuple of 2 ints, but got {dims}")
+        nR = ast.IntExpr(dims._children[0], irT.Int)
+        nC = ast.IntExpr(dims._children[1], irT.Int)
+        return Grid2D(nR, nC)
 
-    def terms(self):
-        return [self.nR.node, self.nC.node]
+    def terms_node(self) -> ir.Tuple:
+        return ir.Tuple(self.nR.node, self.nC.node)
 
     def index_grid(self, mode:str) -> ast.GridExpr[ast.Expr]:
         if mode == "C":
