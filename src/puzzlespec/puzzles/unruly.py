@@ -1,5 +1,5 @@
 from ..compiler.dsl import ast
-from ..compiler.dsl.ir_types import Bool
+from ..compiler.dsl.ir_types import Bool, Int
 from ..compiler.dsl import PuzzleSpecBuilder, PuzzleSpec
 from ..compiler.dsl.topology import Grid2D as Grid
 
@@ -18,11 +18,14 @@ def build_unruly_spec() -> PuzzleSpec:
         topo=grid,
     )
     # Structural constraints
-    p += [nR % 2 == 0, nC % 2 == 0, nR > 1, nC > 1, ((-(-nR)+4)-4) >=2]
+    p += [nR % 2 == 0, nC % 2 == 0, nR > 1, nC > 1]
 
     # Generator parameters, i.e., the 'clues' of the puzzle
+    num_clues = p.var(sort=Int, gen=True, name='num_clues')
     given_mask = p.var_dict(grid.C(), sort=Bool, name='given_mask', gen=True) # Cell -> Var
     given_vals = p.var_dict(grid.C(), sort=Bool, name='given_vals', gen=True) # Cell -> Var
+    p += given_mask[grid.C()].sum()==num_clues
+    p += grid.C().forall(lambda c: (~given_mask[c]).implies(given_vals[c]==False))
 
     # Decision variables, i.e., what the end user will solve for
     color = p.var_dict(grid.C(), sort=Bool, name="color", gen=False)

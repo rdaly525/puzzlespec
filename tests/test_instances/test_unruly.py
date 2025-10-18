@@ -1,4 +1,3 @@
-from ast import Pass
 from puzzlespec import get_puzzle
 #from puzzlespec import set_clues
 from puzzlespec.compiler.dsl import ir, ir_types as irT
@@ -11,9 +10,6 @@ Unruly = get_puzzle("unruly")
 def t0():
     print(Unruly.pretty(dag=False))
     print(Unruly.pretty(dag=True))
-    #print(Sudoku.pretty(dag=False))
-    #print(Sudoku.pretty(dag=True))
-    return
     params = Unruly.params
     assert 'nR' in params
     assert 'nC' in params
@@ -24,15 +20,16 @@ def t0():
     assert 'color' in decision_vars
     # Returns a new ruleset object with concretized parameters. (Unruly object is unmodified)
     assert len(Unruly.param_constraints.node._children)==4
-    assert len(Unruly.gen_constraints.node._children)==0
-    assert len(Unruly.decision_constraints.node._children)==3
+    assert len(Unruly.gen_constraints.node._children)==2
+    assert len(Unruly.decision_constraints.node._children)==5
+    assert len(Unruly.constant_constraints.node._children)==0
 
     print("Param constraints!")
-    print(Unruly.pretty(Unruly.param_constraints))
+    print(Unruly.pretty(Unruly.param_constraints.node))
     print("Gen constraints!")
-    print(Unruly.pretty(Unruly.gen_constraints))
+    print(Unruly.pretty(Unruly.gen_constraints.node))
     print("Decision constraints!")
-    print(Unruly.pretty(Unruly.decision_constraints))
+    print(Unruly.pretty(Unruly.decision_constraints.node))
 
     game = Unruly.set_params(nR=4)
     assert 'nC' in game.params

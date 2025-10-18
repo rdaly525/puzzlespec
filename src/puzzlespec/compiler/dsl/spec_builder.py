@@ -9,6 +9,7 @@ from ..passes.analyses import SymTableEnv_
 from ..passes.transforms.cse import CSE
 from ..passes.analyses.constraint_categorizer import ConstraintCategorizerVals, ConstraintCategorizer
 from ..passes.analyses.type_inference import TypeInferencePass, TypeEnv_, TypeValues
+from ..passes.analyses.getter import ParamGetter
 from ..passes.transforms import SubstitutionPass, SubMapping, ConstFoldPass, ResolveBoundVars
 from .spec import PuzzleSpec
 
@@ -28,19 +29,12 @@ class PuzzleSpecBuilder(PuzzleSpec):
         self._register_params(topo.terms_node())
 
     def _register_params(self, terms: ir.Node):
-        pm = PassManager(
-            ConstraintCategorizer(include_params=True)
-        )
-        # New context for each constraint
-        ctx = Context()
-        ctx.add(SymTableEnv_(self.sym))
-        pm.run(terms, ctx) 
-        ccvals = tp.cast(ConstraintCategorizerVals, ctx.get(ConstraintCategorizerVals))
-        for pname, T in ccvals._params.items():
-            if pname in self._params and T != self._params[pname]:
-                raise ValueError(f"param {pname} already exists")
-            self._params[pname] = T
-
+        pset = ParamGetter()(terms, ctx=Context()).vars
+        for p in pset:
+            assert isinstance(p, ir._Param)
+            if p.name in self._params and p.T != self._params[p.name]:
+                raise ValueError(f"param {p.name} already exists")
+            self._params[p.name] = p.T
 
     def _new_var_name(self):
         self._var_name_cnt += 1
@@ -118,7 +112,7 @@ class PuzzleSpecBuilder(PuzzleSpec):
             )
         ctx = Context()
         ctx.add(smap)
-        new_topo, new_shape_env, new_rules = self._transform([SubstitutionPass()], ctx=ctx)
+        new_topo, new_shape_env, new_rules, _ = self._transform([SubstitutionPass()], ctx=ctx)
         self.topo = new_topo
         self.shape_env = new_shape_env
         self._replace_rules(new_rules)

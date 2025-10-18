@@ -12,13 +12,17 @@ class TypeEnv:
     def __contains__(self, sid: int):
         return sid in self.vars
 
-    def copy(self) -> 'TypeEnv':
-        return TypeEnv(vars=self.vars.copy())
+    def copy(self, sids: tp.Set[int] = None) -> 'TypeEnv':
+        if sids is None:
+            sids = self.vars.keys()
+        return TypeEnv(vars={sid: self.vars[sid] for sid in sids})
 
     def add(self, sid: int|str, sort: irT.Type_):
         if sid in self.vars:
             raise ValueError(f"Variable with sid={sid} already defined")
         self.vars[sid] = sort
+
+
 
 # Symbol table that stores params/vars and their role. 
 # There is an annoying circular dependency with params, so these have sid as their name
@@ -34,8 +38,14 @@ class SymTable:
         self._name_to_sid = name_to_sid if name_to_sid is not None else {}
         self._sid = sid
 
-    def copy(self) -> 'SymTable':
-        return SymTable(entries=self.entries.copy(), name_to_sid=self._name_to_sid.copy(), sid=self._sid)
+    def copy(self, sids: tp.Set[int] = None) -> 'SymTable':
+        if sids is None:
+            sids = self.entries.keys()
+        return SymTable(
+            entries={sid: self.entries[sid] for sid in sids},
+            name_to_sid={name: sid for name, sid in self._name_to_sid.items() if sid in sids},
+            sid=self._sid
+        )
 
     def new_var(self, name: str, role: str):
         assert role in ('P', 'G', 'D')

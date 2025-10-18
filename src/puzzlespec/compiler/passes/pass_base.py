@@ -292,8 +292,6 @@ class PassManager:
     def _run_fixed(self, root: ir.Node, passes: tp.Iterable[Pass], ctx: 'Context') -> ir.Node:
         for _ in range(self.max_iter):
             new_root = self._run_passes(root, passes, ctx)
-            print('KEYS=?', new_root._key == root._key)
-            print('IDS', id(new_root), id(root))
             if new_root == root:
                 return new_root
             root = new_root

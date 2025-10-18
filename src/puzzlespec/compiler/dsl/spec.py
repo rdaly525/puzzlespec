@@ -11,7 +11,8 @@ from ..passes.pass_base import PassManager, Context
 from ..passes.transforms import CanonicalizePass, ConstFoldPass, AlgebraicSimplificationPass
 from ..passes.analyses.type_inference import TypeInferencePass, TypeEnv_, TypeValues
 from ..passes.analyses.sym_table import SymTableEnv_
-
+from ..passes.analyses.constraint_categorizer import ConstraintCategorizer, ConstraintCategorizerVals
+from ..passes.analyses.getter import VarGetter, VarSet
 
 class PuzzleSpec:
 
@@ -32,6 +33,34 @@ class PuzzleSpec:
         self.shape_env = shape_env
         self._rules = rules
         self._type_check()
+        self._categorize_constraints()
+
+    def _categorize_constraints(self):
+        pm = PassManager(ConstraintCategorizer())
+        ctx = Context()
+        ctx.add(SymTableEnv_(self.sym))
+        pm.run(self._rules, ctx)
+        ccmapping = tp.cast(ConstraintCategorizerVals, ctx.get(ConstraintCategorizerVals)).mapping
+        param_rules = []
+        gen_rules = []
+        decision_rules = []
+        constant_rules = []
+
+        for rule in self._rules._children:
+            assert rule in ccmapping
+            match (ccmapping[rule]):
+                case "D":
+                    decision_rules.append(rule)
+                case "G":
+                    gen_rules.append(rule)
+                case "P":
+                    param_rules.append(rule)
+                case "C":
+                    constant_rules.append(rule)
+        self._param_rules = ir.List(*param_rules)
+        self._gen_rules = ir.List(*gen_rules)
+        self._decision_rules = ir.List(*decision_rules)
+        self._constant_rules = ir.List(*constant_rules)
 
     @classmethod
     def make(cls,
@@ -75,20 +104,21 @@ class PuzzleSpec:
             self.shape_env.terms_node(),
             self._rules
         )
-        pm = PassManager(*passes, verbose=True)
+        pm = PassManager(*passes, VarGetter(), verbose=True)
         spec_node = pm.run(spec_node, ctx)
         topo_dim_node = spec_node._children[0]
         shape_env_node = spec_node._children[1]
         rules_node = spec_node._children[2]
         new_topo = Grid2D.make_from_terms_node(topo_dim_node)
         new_shape_env = self.shape_env.make_from_terms_node(shape_env_node)
-        return new_topo, new_shape_env, rules_node
+        return new_topo, new_shape_env, rules_node, ctx.get(VarSet)
 
     # applies passes, copies the tenv and sym table, returns a new spec
     def transform(self, passes: tp.List[Pass], ctx: Context = None) -> 'PuzzleSpec':
-        new_topo, new_shape_env, new_rules = self._transform(passes, ctx)
-        new_tenv = self.tenv.copy()
-        new_sym = self.sym.copy()
+        new_topo, new_shape_env, new_rules, varset = self._transform(passes, ctx)
+        sids = set(v.sid for v in varset.vars)
+        new_tenv = self.tenv.copy(sids)
+        new_sym = self.sym.copy(sids)
         return PuzzleSpec(name=self.name, desc=self.desc, topo=new_topo, sym=new_sym, tenv=new_tenv, shape_env=new_shape_env, rules=new_rules)
 
     # TODO
@@ -112,20 +142,19 @@ class PuzzleSpec:
 
     @property
     def param_constraints(self) -> ast.BoolExpr:
-        return self._param_rules
+        return tp.cast(ast.BoolExpr, ast.wrap(self._param_rules, irT.ListT(irT.Bool)))
 
     @property
     def gen_constraints(self) -> ast.BoolExpr:
-        return self._gen_rules
+        return tp.cast(ast.BoolExpr, ast.wrap(self._gen_rules, irT.ListT(irT.Bool)))
 
     @property
     def decision_constraints(self) -> ast.BoolExpr:
-        return self._decision_rules
+        return tp.cast(ast.BoolExpr, ast.wrap(self._decision_rules, irT.ListT(irT.Bool)))
 
     @property
     def constant_constraints(self) -> ast.BoolExpr:
-        # For now, return empty Conj since we don't support constant constraints yet
-        return ast.wrap(ir.Conj(), irT.Bool)
+        return tp.cast(ast.BoolExpr, ast.wrap(self._constant_rules, irT.ListT(irT.Bool)))
 
     @property
     def rules(self) -> ast.BoolExpr:
@@ -137,23 +166,15 @@ class PuzzleSpec:
         ctx = Context()
         param_sub_mapping = SubMapping()
         for pname, value in kwargs.items():
-            if isinstance(value, int):
-                new_node = ir.Lit(value, irT.Int)
-            elif isinstance(value, bool):
-                new_node = ir.Lit(value, irT.Bool)
-            else:
-                raise ValueError(f"Expected int or bool, got {type(value)}")
-
             sid = self.sym.get_sid(pname)
-            role = self.sym.get_role(sid)
             if sid is None:
                 raise ValueError(f"Param {pname} not found")
-            if role != 'P':
+            if self.sym.get_role(sid) != 'P':
                 raise ValueError(f"Param {pname} with sid {sid} is not a parameter")
-
+            val = self.tenv[sid].cast_as(value)
             param_sub_mapping.add(
                 match=lambda node, sid=sid: isinstance(node, ir.VarRef) and node.sid==sid,
-                replace=lambda node, new_node=new_node: new_node
+                replace=lambda node, val=val: ir.Lit(val, self.tenv[sid])
             )
         ctx.add(
             param_sub_mapping

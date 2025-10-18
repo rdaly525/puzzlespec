@@ -142,6 +142,11 @@ class AlgebraicSimplificationPass(Transform):
         a, b = self.visit_children(node)
         if a==b:
             return ir.Lit(True)
+        match (a, b):
+            case (ir.Lit(val=val,T=irT.Bool), b):
+                return b if val else ir.Not(b)
+            case (a, ir.Lit(val=val,T=irT.Bool)):
+                return a if val else ir.Not(a)
         return node.replace(a, b)
 
     # Booleans
