@@ -98,55 +98,40 @@ class SymTable:
             yield sid
 
 
+#TODO START HERE TOMORROW. unify env by including a unit type for base types
 class ShapeEnv:
     # Stores shape information about variables
-    # if variable is a base type, no info needed
+    # if variable is a base type, stores the unit type
     # if variable is a list, stores the size
     # if variable is a dict, stores the keys
-    def __init__(self, elems: tp.Set[int] = None, lists: tp.Dict[int, ir.Node] = None, dicts: tp.Dict[int, ir.Node] = None):
-        self.elems = elems if elems is not None else set()
-        self.lists = lists if lists is not None else {}
-        self.dicts = dicts if dicts is not None else {}
-
+    def __init__(self, shapes: tp.Dict[int, ir.Node] = None):
+        if shapes is None:
+            shapes: tp.Dict[int, ir.Node] = {}
+        self.shapes = {}
+        for sid, shape in shapes.items():
+            self.add(sid, shape)
+    
     def terms_node(self) -> ir.Node:
-        return ir.Tuple(ir.Tuple(*self.lists.values()), ir.Tuple(*self.dicts.values()))
+        return ir.Tuple(*self.shapes.values())
 
-    def terms(self) -> ast.TupleExpr:
-        return ast.TupleExpr.make(*[ast.IntExpr.make(size) for size in self.lists.values()], *[ast.ListExpr.make(keys) for keys in self.dicts.values()])
+    #def terms(self) -> ast.TupleExpr:
+    #    return ast.TupleExpr.make(*[ast.IntExpr.make(size) for size in self.lists.values()], *[ast.ListExpr.make(keys) for keys in self.dicts.values()])
 
     def make_from_terms_node(self, node: ir.Node):
         terms = node._children
-        lists_nodes = terms[0]._children
-        dicts_nodes = terms[1]._children
-        if len(lists_nodes) != len(self.lists):
-            raise ValueError(f"Number of lists in terms node does not match number of lists in shape env")
-        if len(dicts_nodes) != len(self.dicts):
-            raise ValueError(f"Number of dicts in terms node does not match number of dicts in shape env")
-        new_lists = {sid: lists_nodes[i] for i, (sid, _) in enumerate(self.lists.items())}
-        new_dicts = {sid: dicts_nodes[i] for i, (sid, _) in enumerate(self.dicts.items())}
-        return ShapeEnv(elems=self.elems, lists=new_lists, dicts=new_dicts)
+        if len(terms) != len(self.shapes):
+            raise ValueError(f"Expected {len(self.shapes)} terms, got {len(terms)}")
+        new_shapes = {}
+        for sid, shape in zip(self.shapes.keys(), terms):
+            new_shapes[sid] = shape
+        return ShapeEnv(shapes=new_shapes)
 
-    def add(self, sid: int, T: irT.Type_, shape: ir.Node=None):
-        if sid in self.elems or sid in self.lists or sid in self.dicts:
-            raise ValueError(f"Cannot add shape {T} to sid {sid} because it already exists")
-        match T:
-            case irT.ListT():
-                self.lists[sid] = shape
-            case irT.DictT():
-                self.dicts[sid] = shape
-            case irT.Bool | irT.Int | irT.CellIdxT:
-                assert shape is None
-                self.elems.add(sid)
-            case _:
-                raise NotImplementedError(f"Shape type {T} not supported")
+    def add(self, sid: int, shape: ir.Node):
+        self.shapes[sid] = shape
    
     def get_shape(self, sid: int) -> tp.Optional[ir.Node]:
-        if sid in self.elems:
-            return None
-        elif sid in self.lists:
-            return self.lists[sid]
-        elif sid in self.dicts:
-            return self.dicts[sid]
-        else:
-            raise ValueError(f"Shape not found for sid {sid}")
+        return self.shapes.get(sid, None)
+
+    def __getitem__(self, sid: int):
+        return self.get_shape(sid)
 

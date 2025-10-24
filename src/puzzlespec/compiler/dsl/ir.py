@@ -18,6 +18,14 @@ class Node:
         self._children: tp.Tuple[Node, ...] = children
         self._key = self._gen_key()
 
+    @property
+    def is_lit(self):
+        return isinstance(self, Lit)
+
+    @property
+    def num_children(self):
+        return len(self._children)
+
     def _gen_key(self):
         child_keys = tuple(c._key for c in self._children)
         assert None not in child_keys
@@ -26,10 +34,6 @@ class Node:
         priority = NODE_PRIORITY[(type(self))]
         key = (priority, self.__class__.__name__, fields, child_keys)
         return key
-
-    # TODO might want to make this more strict
-    # def __eq__(self, other: 'Node'):
-    #    return self._key == other._key
 
     def __iter__(self):
         return iter(self._children)
@@ -70,6 +74,16 @@ class Node:
                 name = f"_arg{i}"
                 setattr(cls, name, make_getter(i))
         setattr(cls, "__match_args__", match_args)
+
+# Unit node 
+class Unit_(Node):
+    _fields = ()
+    _numc = 0
+    def __init__(self):
+        super().__init__()
+
+    def __repr__(self):
+        return "Unit"
 
 # Literal value
 class Lit(Node):
@@ -341,12 +355,13 @@ class GridTabulate(Node):
 # enumerate cells, rows, cols, edges, etc
 # TODO might want to split into individual nodes
 class GridEnumNode(Node):
-    _fields = ("mode",)
+    _fields = ("mode", "cellT")
     _numc = 2
-    def __init__(self, nR: Node, nC: Node, mode: str):
+    def __init__(self, nR: Node, nC: Node, mode: str, cellT: irT.Type_=irT.CellIdxT):
         if mode not in ('CellGrid', 'Cells', 'Rows', 'Cols'):
             raise NotImplementedError(f"{mode} not supported for GridEnum")
         self.mode = mode
+        self.cellT = cellT
         super().__init__(nR, nC)
 
 class GridFlatNode(Node):
@@ -421,6 +436,7 @@ class Distinct(Node):
 # Mapping from Node classes to a priority integer.
 # This is probably way overengineered and there are probably better priorities
 NODE_PRIORITY: tp.Dict[tp.Type[Node], int] = {
+    Unit_: -1,
     Lit: 0,
     _Param: 1,
     VarRef: 1,
@@ -476,3 +492,6 @@ NODE_PRIORITY: tp.Dict[tp.Type[Node], int] = {
     Exists: 14,
     Distinct: 14,
 }
+
+# Singleton unit node
+Unit = Unit_()

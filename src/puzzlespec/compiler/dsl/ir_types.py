@@ -2,6 +2,12 @@ from __future__ import annotations
 import typing as tp
 from dataclasses import dataclass
 class Type_: ...
+
+class _UnitType(Type_):
+    def __repr__(self):
+        return "𝟙"
+UnitType = _UnitType()
+
 class BaseType(Type_):
     _pytype = None
     def cast_as(self, val: tp.Any):
@@ -44,6 +50,7 @@ EdgeIdxT = _EdgeIdxT()
 
 class GridT(Type_):
     _cache = {}
+    __match_args__ = ("valueT", "domain")
 
     def __new__(cls, valueT: Type_, domain: str):
         key = (valueT, domain)
@@ -59,8 +66,10 @@ class GridT(Type_):
 
 class TupleT(Type_):
     _cache = {}
+    __match_args__ = ("elemTs",)
     
     def __new__(cls, *elemTs: Type_):
+        assert all(isinstance(T, Type_) for T in elemTs)
         key = tuple(elemTs)
         if key not in cls._cache:
             instance = super().__new__(cls)
@@ -73,8 +82,10 @@ class TupleT(Type_):
 
 class ListT(Type_):
     _cache = {}
-    
+    __match_args__ = ("elemT",)
+
     def __new__(cls, elemT: Type_):
+        assert isinstance(elemT, Type_)
         if elemT not in cls._cache:
             instance = super().__new__(cls)
             instance.elemT = elemT
@@ -86,7 +97,8 @@ class ListT(Type_):
 
 class DictT(Type_):
     _cache = {}
-    
+    __match_args__ = ("keyT", "valT")
+
     def __new__(cls, keyT: Type_, valT: Type_):
         key = (keyT, valT)
         if key not in cls._cache:
@@ -101,7 +113,8 @@ class DictT(Type_):
 
 class ArrowT(Type_):
     _cache = {}
-    
+    __match_args__ = ("argT", "resT")
+
     def __new__(cls, argT: Type_, resT: Type_):
         key = (argT, resT)
         if key not in cls._cache:
@@ -113,6 +126,10 @@ class ArrowT(Type_):
 
     def __repr__(self):
         return f"{repr(self.argT)} -> {repr(self.resT)}"
+
+# Common concrete CellIdx types
+CellIdxT_RC = TupleT(Int, Int)
+CellIdxT_linear = Int
 
 
 

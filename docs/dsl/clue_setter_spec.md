@@ -6,12 +6,6 @@ This specification defines a new API for programmatically setting generator vari
 
 ## Prerequisites
 
-### 1. Fix set_params Bug
-**CRITICAL**: Before implementing clue_setter, fix the existing bug in `PuzzleSpec.set_params()` where the topology object is not updated with concrete parameter values. The topology must be updated to contain concrete dimensions after parameter substitution.
-
-### 2. Add Concretization Method
-Add a new method to `PuzzleSpec` for concretizing index types:
-
 ```python
 def concretize_indices(self, index_format='tuple') -> 'PuzzleSpec':
     """

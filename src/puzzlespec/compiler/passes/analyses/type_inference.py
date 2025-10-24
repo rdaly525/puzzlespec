@@ -18,6 +18,7 @@ class TypeValues(AnalysisObject):
         self.mapping: tp.Dict[ir.Node, irT.Type_] = mapping
 
 class TypeInferencePass(Analysis):
+    #_debug=True
     requires = (TypeEnv_,)
     produces = (TypeValues,)
     name = "type_inference"
@@ -37,6 +38,10 @@ class TypeInferencePass(Analysis):
         # All visitors have been defined
 
     # Literals and basic nodes
+    @handles(ir.Unit_)
+    def _(self, node: ir.Unit_):
+        return irT.UnitType
+
     @handles(ir.Lit)
     def _(self, node: ir.Lit):
         return node.T

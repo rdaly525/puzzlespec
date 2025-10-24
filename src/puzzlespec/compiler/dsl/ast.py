@@ -387,7 +387,6 @@ class GridExpr(Expr, tp.Generic[TExpr]):
         T = irT.ListT(self.value_type)
         return tp.cast(ListExpr[TExpr], wrap(node, T))
 
-    # Ergonomic: get row i or col j as a list of cells using existing enumeration
     def row(self, i: IntOrExpr) -> ListExpr[TExpr]:
         i = IntExpr.make(i)
         # rows() returns a list of lists; index into it

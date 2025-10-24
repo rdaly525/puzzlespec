@@ -14,8 +14,10 @@ if TYPE_CHECKING:
 class AnalysisObject(ABC): ...
 
 class Context:
-    def __init__(self):
+    def __init__(self, *args):
         self._store: tp.Dict[tp.Type[AnalysisObject], AnalysisObject] = {}
+        for arg in args:
+            self.add(arg)
 
     def add(self, result: object, replace=True):
         if not replace and type(result) in self._store:
@@ -38,6 +40,7 @@ class Context:
         return self._store[cls]
     
 class Pass(ABC):
+    _debug: bool=False
     name: str
     requires: tp.Tuple[tp.Type[AnalysisObject], ...] = ()
     produces: tp.Tuple[tp.Type[AnalysisObject], ...] = ()
@@ -118,6 +121,8 @@ class Analysis(Pass):
     def __call__(self, root: ir.Node, ctx: 'Context', cache = {}) -> ir.Node:
         if self.enable_memoization:
             self._cache = cache
+        if self._debug:
+            self._dindent=0
         self.ensure_dependencies(ctx)
         # Initialize memoization for this transformation
         if self.enable_memoization:
@@ -164,9 +169,16 @@ class Analysis(Pass):
 
         # Define custom visit function to do caching
         def visit(self, node: ir.Node):
+            if self._debug:
+                print("|  "*self._dindent + f"{node.__class__.__name__}: {id(node)}", end="")
             if self.enable_memoization:
                 if node in self._cache:
+                    if self._debug:
+                        print(" (cached)")
                     return self._cache[node]
+            if self._debug:
+                print("")
+                self._dindent += 1
             # Hacked way to get the dispatcher to work without binding to an instance
             new_val = dispatcher.__get__(self, type(self))(node) 
             
@@ -174,6 +186,8 @@ class Analysis(Pass):
                 # Add new node to cache
                 assert node not in self._cache
                 self._cache[node] = new_val
+            if self._debug:
+                self._dindent -= 1
             return new_val
         setattr(cls, "visit", visit)
 
@@ -184,6 +198,8 @@ class Transform(Pass):
     def __call__(self, root: ir.Node, ctx: 'Context', cache = {}) -> ir.Node:
         if self.enable_memoization:
             self._cache = cache
+        if self._debug:
+            self._dindent=0
         self.ensure_dependencies(ctx)
         # Initialize memoization for this transformation
         if self.enable_memoization:
@@ -232,16 +248,22 @@ class Transform(Pass):
 
         # Define custom visit function that creates new keys
         def visit(self, node: ir.Node):
+            if self._debug:
+                print("|  "*self._dindent + f"{node.__class__.__name__}: {id(node)}", end="")
             if self.enable_memoization:
                 if isinstance(node, ir.BoundVar):
                     cache_key = (self._bframes[-(node.idx+1)], node._key)
                 else:
                     cache_key = node._key
                 if cache_key in self._cache:
+                    if self._debug:
+                        print(" (cached)")
                     return self._cache[cache_key]
                 if isinstance(node, ir.Lambda):
                     self._bframes.append(node._key)
-            
+            if self._debug:
+                print("")
+                self._dindent += 1
             # Hacked way to get the dispatcher to work without binding to an instance
             new_node = dispatcher.__get__(self, type(self))(node)
             if new_node._key == node._key:
@@ -253,6 +275,8 @@ class Transform(Pass):
                 # Add new node to cache
                 assert cache_key not in self._cache
                 self._cache[cache_key] = new_node
+            if self._debug:
+                self._dindent -=1
             return new_node
         setattr(cls, "visit", visit)
 
