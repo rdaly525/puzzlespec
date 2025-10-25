@@ -1,4 +1,4 @@
-from puzzlespec import get_puzzle
+from puzzlespec import PuzzleSpec, get_puzzle
 #from puzzlespec import set_clues
 from puzzlespec.compiler.dsl import ir, ir_types as irT
 from puzzlespec.compiler.passes import Context, PassManager, analyses as A, transforms as T
@@ -63,6 +63,7 @@ def t1():
     cs = game.clue_setter(cellIdxT=irT.CellIdxT_RC)
     # clue setter mode has access to all the gen_var variables as attributes
     # initialize all the given_vals to be 0 and given_mask to be false
+    cs.num_clues = 5
     cs.given_vals.set(np.zeros(shape=(4,4)))
     cs.given_mask.set(np.zeros(shape=(4,4)))
     for i, v in enumerate(clues):
@@ -73,6 +74,8 @@ def t1():
             cs.given_mask[(r,c)] = True
             cs.given_vals[(r,c)] = v
     # This will do the final substituiton of the genvars
-    game_with_clues = cs.build()
+    instance: PuzzleSpec = cs.build()
+    print("After setter mode")
+    print(instance.pretty())
 
 t1()

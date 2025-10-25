@@ -294,6 +294,7 @@ class OnlyElement(Node):
 ## Dict Nodes
 
 # Concrete dict
+# Keys and values are alternating children
 class Dict(Node):
     _numc = -1
     def __init__(self, *flat_key_vals: Node):

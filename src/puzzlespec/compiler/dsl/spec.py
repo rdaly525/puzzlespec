@@ -235,15 +235,15 @@ class PuzzleSpec:
             rules=new_rules
         ).optimize()
 
-    def clue_setter(self, cellIdxT: tp.Optional[irT.Type_]=None) -> 'ClueSetter':
+    def clue_setter(self, cellIdxT: tp.Optional[irT.Type_]=None) -> 'Setter':
         if cellIdxT:
             spec = self.concretize_types(cellIdxT)
             print("After concretization:")
             print(spec.pretty(spec._spec_node))
         else:
             spec = self
-        from .setter import ClueSetter
-        return ClueSetter(spec)
+        from .setter import Setter
+        return Setter(spec)
 
     def evaluate(self, node: ir.Node, varmap: tp.Dict[int, tp.Any]=None) -> tp.Any:
         if varmap is None:

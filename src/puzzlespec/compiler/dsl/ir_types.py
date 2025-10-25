@@ -1,7 +1,11 @@
 from __future__ import annotations
+from abc import abstractmethod
 import typing as tp
 from dataclasses import dataclass
-class Type_: ...
+class Type_:
+    @abstractmethod
+    def cast_as(self, val: tp.Any):
+        ...
 
 class _UnitType(Type_):
     def __repr__(self):
@@ -11,6 +15,8 @@ UnitType = _UnitType()
 class BaseType(Type_):
     _pytype = None
     def cast_as(self, val: tp.Any):
+        if self._pytype is None:
+            raise ValueError(f"Cannot create a python value from abstract type {self.__class__.__name__}")
         try:
             return self._pytype(val)
         except:
@@ -34,6 +40,7 @@ class _CellIdxT(BaseType):
     _pytype = None
     def __repr__(self):
         return "𝒞"
+    
 CellIdxT = _CellIdxT()
 
 class _VertexIdxT(BaseType):
@@ -69,6 +76,8 @@ class TupleT(Type_):
     __match_args__ = ("elemTs",)
     
     def __new__(cls, *elemTs: Type_):
+        if len(elemTs)==0:
+            return UnitType
         assert all(isinstance(T, Type_) for T in elemTs)
         key = tuple(elemTs)
         if key not in cls._cache:
@@ -79,6 +88,10 @@ class TupleT(Type_):
     
     def __repr__(self):
         return f"{'x'.join(repr(t) for t in self.elemTs)}"
+
+    def cast_as(self, val):
+        if isinstance(val, tp.Iterable) and len(val)==len(self.elemTs):
+            return tuple(T.cast_as(v) for T, v in zip(self.elemTs, val))
 
 class ListT(Type_):
     _cache = {}

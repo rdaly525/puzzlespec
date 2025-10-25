@@ -155,7 +155,7 @@ class TypeInferencePass(Analysis):
         # children: (length, elem0, elem1, ...)
         cTs = self.visit_children(node)
         if len(cTs) == 0:
-            raise TypeError("Cannot infer element type of empty list literal")
+            raise NotImplementedError("Cannot support empty list yet")
         elemT0 = cTs[0]
         for T in cTs[1:]:
             if T != elemT0:
@@ -183,7 +183,7 @@ class TypeInferencePass(Analysis):
 
     @handles(ir.ListLength)
     def _(self, node: ir.ListLength):
-        lstT = self.visit_children(node)
+        lstT, = self.visit_children(node)
         if not isinstance(lstT, irT.ListT):
             raise TypeError("ListLength expects a list")
         return irT.Int
@@ -312,13 +312,13 @@ class TypeInferencePass(Analysis):
             raise TypeError("GridEnumNode nR and nC must be Int")
         mode = node.mode
         if mode in ("Cells",):
-            elemT = irT.CellIdxT
+            elemT = node.cellT
             T = irT.ListT(elemT)
         elif mode in ("Rows", "Cols"):
             # List of lists of cell indices
-            T = irT.ListT(irT.ListT(irT.CellIdxT))
+            T = irT.ListT(irT.ListT(node.cellT))
         elif mode in ("CellGrid",):
-            T = irT.GridT(irT.CellIdxT, "C")
+            T = irT.GridT(node.cellT, "C")
         else:
             raise TypeError(f"Unknown GridEnumNode mode: {mode}")
         return T

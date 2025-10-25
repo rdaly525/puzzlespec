@@ -240,7 +240,7 @@ class PrettyPrinterPass(Analysis):
         # TODO: Implement Prod pretty printing
         children_strs = self.visit_children(node)
         return f"Π({children_strs})"
-
+    
     # Collections - Tuple nodes
     @handles()
     def _(self, node: ir.Tuple) -> str:
@@ -434,3 +434,7 @@ class PrettyPrinterPass(Analysis):
     def _(self, node: ir.Distinct) -> str:
         vals_expr, = self.visit_children(node)
         return f"distinct({vals_expr})"
+
+# TODO
+#"⊎" disjoint union
+#"×"cartesian product
