@@ -8,7 +8,7 @@ import numpy as np
 Unruly = get_puzzle("unruly")
 
 def t0():
-    print(Unruly.pretty(dag=False))
+    print(Unruly.pretty(Unruly._rules, dag=False))
     print(Unruly.pretty(dag=True))
     params = Unruly.params
     assert 'nR' in params
@@ -38,6 +38,8 @@ def t0():
     assert 'nC' not in game.params
     assert 'nR' not in game.params
 
+t0()
+assert 0
 
 def t1():
     game = Unruly.set_params(nR=4, nC=4)

@@ -252,10 +252,10 @@ class List(Node):
         super().__init__(*elements)
 
 # Represents a symbolic list
-class ListTabulate(Node):
-    _numc = 2
-    def __init__(self, size: Node, fun: Node):
-        super().__init__(size, fun)
+class Range(Node):
+    _numc = 1
+    def __init__(self, N: Node):
+        super().__init__(N)
 
 # Operations on lists
 class ListGet(Node):
@@ -285,34 +285,15 @@ class ListContains(Node):
     def __init__(self, list: Node, elem: Node):
         super().__init__(list, elem)
 
-class OnlyElement(Node):
-    """Return the only element of a list; intended to be guarded by ListLength == 1."""
-    _numc = 1
-    def __init__(self, list: Node):
-        super().__init__(list)
-
-## Dict Nodes
-
-# Concrete dict
-# Keys and values are alternating children
-class Dict(Node):
+# Func
+# Total Function: (i.e., a Dict with a complete domain)
+class Func(Node):
     _numc = -1
     def __init__(self, *flat_key_vals: Node):
-        if len(flat_key_vals) % 2 != 0:
-            raise ValueError("Keys and values must have the same length")
         super().__init__(*flat_key_vals)
 
-    def keys(self) -> tp.List[Node]:
-        return self._children[::2]
-
-    def values(self) -> tp.List[Node]:
-        return self._children[1::2]
-
-    def _size(self):
-        return len(self._children)//2
-
 # Represents a symbolic dict (Tabulated from keys)
-class DictTabulate(Node):
+class FuncFromList(Node):
     _numc = 2
     def __init__(self, keys: Node, fun: Node):
         super().__init__(keys, fun)
@@ -380,6 +361,13 @@ class GridDims(Node):
     _numc = 1
     def __init__(self, grid: Node):
         super().__init__(grid)
+
+class CartProd(Node):
+    _numc = -1
+    def __init__(self, *args: Node):
+        super().__init__(*args)
+
+# TODO disjoint union
 
 ## PRIORITY 0   
 ## Higher Order Operators

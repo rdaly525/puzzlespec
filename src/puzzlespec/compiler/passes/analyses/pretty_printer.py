@@ -435,6 +435,6 @@ class PrettyPrinterPass(Analysis):
         vals_expr, = self.visit_children(node)
         return f"distinct({vals_expr})"
 
-# TODO
+
 #"⊎" disjoint union
 #"×"cartesian product
