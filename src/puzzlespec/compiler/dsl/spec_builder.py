@@ -55,21 +55,21 @@ class PuzzleSpecBuilder(PuzzleSpec):
     def var(self, sort: irT.Type_, gen: bool=False, name: tp.Optional[str] = None) -> ast.Expr:
         role = "G" if gen else "D"
         sid, v = self._create_var(sort, role, name)
-        self.shape_env.add(sid, sort)
+        self.shape_env.add(sid, shape=ir.Unit)
         return v
 
     def var_list(self, size: ast.IntExpr, sort: irT.Type_, gen: bool=False, name: tp.Optional[str] = None) -> ast.ListExpr[irT.Type_]:
         role = "G" if gen else "D"
         varT = irT.ListT(sort)
         sid, v = self._create_var(varT, role, name)
-        self.shape_env.add(sid, varT, shape=size.node)
+        self.shape_env.add(sid, shape=size.node)
         return v
 
     def var_dict(self, keys: ast.ListExpr[ast.Expr], sort: irT.Type_, name: str, gen: bool=False) -> ast.DictExpr[ast.Expr, irT.Type_]:
         role = "G" if gen else "D"
         varT = irT.DictT(keys.elem_type, sort)
         sid, v = self._create_var(varT, role, name)
-        self.shape_env.add(sid, varT, shape=keys.node)
+        self.shape_env.add(sid, shape=keys.node)
         return v
 
     def _replace_rules(self, new_rules: ir.Node):
@@ -104,8 +104,8 @@ class PuzzleSpecBuilder(PuzzleSpec):
     def _unify_params(self):
         smap = SubMapping()
         for pname, T in self._params.items():
-            sid, v = self._create_var(T, 'P', pname)
-            self.shape_env.add(sid, T, shape=None)
+            sid, _ = self._create_var(T, 'P', pname)
+            self.shape_env.add(sid, shape=ir.Unit)
             smap.add(
                 match=lambda node, pname=pname: isinstance(node, ir._Param) and node.name==pname,
                 replace=lambda node, sid=sid: ir.VarRef(sid)

@@ -74,9 +74,15 @@ class PrettyPrinterPass(Analysis):
         s += constraint_text
         return PrettyPrintedExpr(s)
 
+    @handles()
+    def _(self, node: ir.Unit_) -> str:
+        return "tt"
+
     # Literals and basic nodes
     @handles()
     def _(self, node: ir.Lit) -> str:
+        if node.T is irT.Bool:
+            return '𝕋' if node.val else '𝔽'
         return str(node.val)
 
     @handles()
@@ -101,9 +107,9 @@ class PrettyPrinterPass(Analysis):
     def _(self, node: ir.BoundVar) -> str:
         return self.b_names[-(node.idx+1)]
     
-    @handles()
+    @handles(mark_invalid=True)
     def _(self, node: ir._BoundVarPlaceholder) -> str:
-        raise ValueError("ERROR")
+        ...
 
     # Arithmetic + Boolean
     @handles()
@@ -186,7 +192,7 @@ class PrettyPrinterPass(Analysis):
     def _(self, node: ir.Conj) -> str:
         children_strs = self.visit_children(node)
         if not children_strs:
-            return "T"
+            return '𝕋'
         if len(children_strs) == 1:
             return children_strs[0]
         
@@ -207,7 +213,7 @@ class PrettyPrinterPass(Analysis):
     def _(self, node: ir.Disj) -> str:
         children_strs = self.visit_children(node)
         if not children_strs:
-            return "F"
+            return '𝔽'
         if len(children_strs) == 1:
             return children_strs[0]
         
@@ -234,7 +240,7 @@ class PrettyPrinterPass(Analysis):
         # TODO: Implement Prod pretty printing
         children_strs = self.visit_children(node)
         return f"Π({children_strs})"
-
+    
     # Collections - Tuple nodes
     @handles()
     def _(self, node: ir.Tuple) -> str:
@@ -428,3 +434,7 @@ class PrettyPrinterPass(Analysis):
     def _(self, node: ir.Distinct) -> str:
         vals_expr, = self.visit_children(node)
         return f"distinct({vals_expr})"
+
+# TODO
+#"⊎" disjoint union
+#"×"cartesian product

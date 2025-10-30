@@ -1,4 +1,4 @@
-from puzzlespec import get_puzzle
+from puzzlespec import PuzzleSpec, get_puzzle
 #from puzzlespec import set_clues
 from puzzlespec.compiler.dsl import ir, ir_types as irT
 from puzzlespec.compiler.passes import Context, PassManager, analyses as A, transforms as T
@@ -18,12 +18,12 @@ def t0():
     assert 'given_vals' in gen_vars
     decision_vars = Unruly.decision_vars
     assert 'color' in decision_vars
-    # Returns a new ruleset object with concretized parameters. (Unruly object is unmodified)
     assert len(Unruly.param_constraints.node._children)==4
     assert len(Unruly.gen_constraints.node._children)==2
     assert len(Unruly.decision_constraints.node._children)==5
     assert len(Unruly.constant_constraints.node._children)==0
 
+    # Returns a new ruleset object with concretized parameters. (Unruly object is unmodified)
     print("Param constraints!")
     print(Unruly.pretty(Unruly.param_constraints.node))
     print("Gen constraints!")
@@ -38,7 +38,6 @@ def t0():
     assert 'nC' not in game.params
     assert 'nR' not in game.params
 
-t0()
 
 def t1():
     game = Unruly.set_params(nR=4, nC=4)
@@ -60,18 +59,23 @@ def t1():
     # X X X X
     
     clues = "11..0.0.0......."
-    with game.clue_setter() as cs:
-        # clue setter mode has access to all the gen_var variables as attributes
-        # initialize all the given_vals to be 0 and given_mask to be false
-        cs.given_vals.set(np.zeros(shape=(4,4)))
-        cs.given_mask.set(np.zeros(shape=(4,4)))
-        for i, v in enumerate(clues):
-            r = i // 4
-            c = i % 4
-            if v != '.':
-                v = int(v)
-                cs.given_mask[(r,c)] = True
-                cs.given_vals[(r,c)] = v
-    
+    print("CLUE SETTER MODE")
+    cs = game.clue_setter(cellIdxT=irT.CellIdxT_RC)
+    # clue setter mode has access to all the gen_var variables as attributes
+    # initialize all the given_vals to be 0 and given_mask to be false
+    cs.num_clues = 5
+    cs.given_vals.set(np.zeros(shape=(4,4)))
+    cs.given_mask.set(np.zeros(shape=(4,4)))
+    for i, v in enumerate(clues):
+        r = i // 4
+        c = i % 4
+        if v != '.':
+            v = int(v)
+            cs.given_mask[(r,c)] = True
+            cs.given_vals[(r,c)] = v
     # This will do the final substituiton of the genvars
-    game_with_clues = cs.build()
+    instance: PuzzleSpec = cs.build()
+    print("After setter mode")
+    print(instance.pretty())
+
+t1()

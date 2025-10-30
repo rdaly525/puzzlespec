@@ -24,6 +24,24 @@ class Expr:
     node: ir.Node
     T: irT.Type_
 
+    @classmethod
+    def make(cls, val: tp.Any) -> Expr:
+        if isinstance(val, Expr):
+            return val
+        if isinstance(val, int):
+            return IntExpr.make(val)
+        if isinstance(val, bool):
+            return BoolExpr.make(val)
+        if isinstance(val, tp.Tuple):
+            return TupleExpr.make(val)
+        if isinstance(val, tp.List):
+            return ListExpr.make(val)
+        if isinstance(val, tp.Dict):
+            return DictExpr.make(val)
+        if isinstance(val, tp.Callable):
+            raise NotImplementedError(f"make(Callable) not implemented")
+        raise ValueError(f"Expected Expr or Node, got {type(val)}")
+
     def __repr__(self):
         return f"<{self.type} {self.node}>"
 
@@ -31,12 +49,7 @@ class IntExpr(Expr):
     @classmethod
     def make(cls, val: tp.Any) -> IntExpr:
         if isinstance(val, IntExpr):
-            return val
-        if isinstance(val, Expr):
-            if val.T is irT.Int:
-                return val
-            else:
-                raise ValueError(f"Expected int or Lit, got {val}")
+            return tp.cast(IntExpr, val)
         try:
             val = int(val)
             node = ir.Lit(val, irT.Int)
@@ -117,16 +130,13 @@ class BoolExpr(Expr):
     @classmethod
     def make(cls, val: tp.Any) -> BoolExpr:
         if isinstance(val, BoolExpr):
-            return val
-        if isinstance(val, Expr):
-            if val.T is irT.Bool:
-                return val
-            else:
-                raise ValueError(f"Expected bool or Lit, got {val}")
-        if isinstance(val, (bool, int)):
+            return tp.cast(BoolExpr, val)
+        try:
             val = bool(val)
-            return BoolExpr(ir.Lit(val, irT.Bool), irT.Bool)
-        raise ValueError(f"Expected Bool expression. Got {val}")
+            node = ir.Lit(val, irT.Bool)
+            return tp.cast(BoolExpr, wrap(node, irT.Bool))
+        except:
+            raise ValueError(f"Expected Bool expression. Got {val}")
 
     def __invert__(self) -> BoolExpr:
         node = ir.Not(self.node)
@@ -187,6 +197,17 @@ class CellIdxExpr(Expr): ...
 
 class TupleExpr(Expr):
     
+    @classmethod
+    def make(cls, vals: tp.Tuple[tp.Any, ...]) -> TupleExpr:
+        if isinstance(vals, TupleExpr):
+            return tp.cast(TupleExpr, vals)
+        try:
+            vals = tuple(Expr.make(v) for v in vals)
+            T = irT.TupleT(*[e.T for e in vals])
+            return tp.cast(TupleExpr, wrap(ir.Tuple(*[e.node for e in vals]), T))
+        except:
+            raise ValueError(f"Expected Tuple of values, got {vals}")
+
     def __getitem__(self, idx: int) -> Expr:
         node = ir.TupleGet(idx, self.node)
         return tp.cast(Expr, wrap(node, self.T.elemTs[idx]))
@@ -216,6 +237,21 @@ def make_lambda_dict(fn: tp.Callable[[KExpr, VExpr], TExpr], keyT: irT.Type_, va
     return tp.cast(LambdaExpr, wrap(lambda_node, irT.ArrowT(paramT, ret_expr.T)))
 
 class ListExpr(Expr, tp.Generic[TExpr]):
+    @classmethod
+    def make(cls, val: tp.List[tp.Any]) -> ListExpr[TExpr]:
+        if isinstance(val, ListExpr[TExpr]):
+            return tp.cast(ListExpr[TExpr], val)
+        try:
+            vals = [Expr.make(v) for v in val]
+        except:
+            raise ValueError(f"Expected List of values, got {val}")
+        if len(vals) == 0:
+            raise NotImplementedError("Empty lists are not supported")
+        if not all(v.T == vals[0].T for v in vals):
+            raise TypeError(f"Expected List of values with the same type, got {vals}")
+        T = irT.ListT(vals[0].T)
+        return tp.cast(ListExpr[TExpr], wrap(ir.List(*[e.node for e in vals]), T))
+
     @property
     def elem_type(self) -> irT.Type_:
         return tp.cast(irT.ListT, self.T).elemT
@@ -253,7 +289,6 @@ class ListExpr(Expr, tp.Generic[TExpr]):
     def any(self, fn: tp.Callable[[TExpr], BoolExpr]) -> BoolExpr:
         return self.exists(fn)
 
-
     def distinct(self) -> BoolExpr:
         node = ir.Distinct(self.node)
         return tp.cast(BoolExpr, wrap(node, irT.Bool))
@@ -287,6 +322,24 @@ class ListExpr(Expr, tp.Generic[TExpr]):
 
 
 class DictExpr(Expr, tp.Generic[KExpr, VExpr]):
+
+    @classmethod
+    def make(cls, val: tp.Dict[tp.Any, tp.Any]) -> DictExpr:
+        try:
+            keys = [Expr.make(k) for k in val.keys()]
+            vals = [Expr.make(v) for v in val.values()]
+        except:
+            raise ValueError(f"Expected Dict of values, got {val}")
+        if len(keys) == 0:
+            raise NotImplementedError("Empty dicts are not supported")
+        if not all(k.T == keys[0].T for k in keys):
+            raise TypeError(f"Expected Dict of keys with the same type, got {keys}")
+        if not all(v.T == vals[0].T for v in vals):
+            raise TypeError(f"Expected Dict of values with the same type, got {vals}")
+        T = irT.DictT(keys[0].T, vals[0].T)
+        # keys and vals are alterating
+        return tp.cast(DictExpr[KExpr, VExpr], wrap(ir.Dict(*[e.node for kv in zip(keys, vals) for e in kv]), T))
+
     @property
     def key_type(self) -> irT.Type_:
         return tp.cast(irT.DictT, self.T).keyT
@@ -328,6 +381,7 @@ class DictExpr(Expr, tp.Generic[KExpr, VExpr]):
 
 
 class LambdaExpr(Expr, tp.Generic[TExpr, VExpr]):
+
     @property
     def arg_type(self) -> irT.Type_:
         return tp.cast(irT.ArrowT, self.T).argT
@@ -387,7 +441,6 @@ class GridExpr(Expr, tp.Generic[TExpr]):
         T = irT.ListT(self.value_type)
         return tp.cast(ListExpr[TExpr], wrap(node, T))
 
-    # Ergonomic: get row i or col j as a list of cells using existing enumeration
     def row(self, i: IntOrExpr) -> ListExpr[TExpr]:
         i = IntExpr.make(i)
         # rows() returns a list of lists; index into it

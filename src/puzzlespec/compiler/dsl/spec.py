@@ -1,4 +1,5 @@
 from ast import Pass, Sub
+from re import A
 import typing as tp
 
 from puzzlespec.compiler.passes.analyses.ssa_printer import SSAPrinter
@@ -9,11 +10,13 @@ from .topology import Topology, Grid2D
 from .envs import SymTable, TypeEnv, ShapeEnv
 from ..passes.pass_base import PassManager, Context
 from ..passes.transforms import CanonicalizePass, ConstFoldPass, AlgebraicSimplificationPass
+from ..passes.transforms.concretize_types import TypeEncoding, ConcretizeTypes
 from ..passes.analyses.type_inference import TypeInferencePass, TypeEnv_, TypeValues
 from ..passes.analyses.sym_table import SymTableEnv_
 from ..passes.analyses.constraint_categorizer import ConstraintCategorizer, ConstraintCategorizerVals
 from ..passes.analyses.getter import VarGetter, VarSet
-
+from ..passes.analyses.ast_printer import AstPrinterPass, PrintedAST
+from ..passes.analyses.evaluator import EvalPass, EvalResult, VarMap
 class PuzzleSpec:
 
     def __init__(self,
@@ -78,7 +81,7 @@ class PuzzleSpec:
         for (sid, name, T, role, shape) in vars:
             sym.add_var(sid=sid, name=name, role=role)
             tenv.add(sid=sid, sort=T)
-            shape_env.add(sid=sid, T=T, shape=shape)
+            shape_env.add(sid=sid, shape=shape)
 
         return cls(name=name, desc=desc, topo=topo, sym=sym, tenv=tenv, shape_env=shape_env, rules=rules)
 
@@ -95,15 +98,19 @@ class PuzzleSpec:
                 if tvals[c] != irT.Bool:
                     raise ValueError(f"Constraint {c} is not bool, {tvals[c]}")
 
-    # applies passes to the spec, returns the new topo, shape env, and rules
-    def _transform(self, passes: tp.List[Pass], ctx: Context = None) -> tp.Tuple[Topology, ShapeEnv, ir.Node]:
-        if ctx is None:
-            ctx = Context()
-        spec_node = ir.Tuple(
+    @property
+    def _spec_node(self) -> ir.Node:
+        return ir.Tuple(
             self.topo.terms_node(),
             self.shape_env.terms_node(),
             self._rules
         )
+
+    # applies passes to the spec, returns the new topo, shape env, and rules
+    def _transform(self, passes: tp.List[Pass], ctx: Context = None) -> tp.Tuple[Topology, ShapeEnv, ir.Node]:
+        if ctx is None:
+            ctx = Context()
+        spec_node = self._spec_node
         pm = PassManager(*passes, VarGetter(), verbose=True)
         spec_node = pm.run(spec_node, ctx)
         topo_dim_node = spec_node._children[0]
@@ -120,6 +127,15 @@ class PuzzleSpec:
         new_tenv = self.tenv.copy(sids)
         new_sym = self.sym.copy(sids)
         return PuzzleSpec(name=self.name, desc=self.desc, topo=new_topo, sym=new_sym, tenv=new_tenv, shape_env=new_shape_env, rules=new_rules)
+
+    def analyze(self, passes: tp.List[Pass], node: ir.Node=None, ctx: Context = None) -> Context:
+        if ctx is None:
+            ctx = Context()
+        if node is None:
+            node = self._spec_node
+        pm = PassManager(*passes)
+        pm.run(node, ctx)
+        return ctx
 
     # TODO
     def __repr__(self):
@@ -179,7 +195,7 @@ class PuzzleSpec:
         ctx.add(
             param_sub_mapping
         )
-        return self.transform([SubstitutionPass()], ctx)
+        return self.transform([SubstitutionPass()], ctx).optimize()
 
     def optimize(self) -> 'PuzzleSpec':
         ctx = Context()
@@ -191,6 +207,49 @@ class PuzzleSpec:
             AlgebraicSimplificationPass(),
             #CollectionSimplificationPass(),
         ]], ctx)
+
+    def concretize_types(self, cellIdxT):
+        ctx = Context()
+        ctx.add(TypeEncoding(c_encoding=cellIdxT))
+        new_topo, new_shape_env, new_rules, varset = self._transform([ConcretizeTypes()], ctx)
+        sids = set(v.sid for v in varset.vars)
+        new_tenv = TypeEnv()
+        for sid in sids:
+            oldT = self.tenv[sid]
+            match oldT:
+                case irT.CellIdxT:
+                    newT = cellIdxT
+                case irT.DictT(irT.CellIdxT, valT):
+                    newT = irT.DictT(cellIdxT, valT)
+                case _:
+                    newT = oldT
+            new_tenv.add(sid, newT)
+        new_sym = self.sym.copy(sids)
+        return PuzzleSpec(
+            name=self.name,
+            desc=self.desc,
+            topo=new_topo,
+            sym=new_sym,
+            tenv=new_tenv,
+            shape_env=new_shape_env,
+            rules=new_rules
+        ).optimize()
+
+    def clue_setter(self, cellIdxT: tp.Optional[irT.Type_]=None) -> 'Setter':
+        if cellIdxT:
+            spec = self.concretize_types(cellIdxT)
+            print("After concretization:")
+            print(spec.pretty(spec._spec_node))
+        else:
+            spec = self
+        from .setter import Setter
+        return Setter(spec)
+
+    def evaluate(self, node: ir.Node, varmap: tp.Dict[int, tp.Any]=None) -> tp.Any:
+        if varmap is None:
+            varmap = {}
+        ctx = self.analyze([EvalPass()], node, Context(VarMap(varmap)))
+        return ctx.get(EvalResult).result
 
     def pretty(self, constraint: ir.Node=None, dag=False) -> str:
         """Pretty print a constraint using the spec's type environment."""
