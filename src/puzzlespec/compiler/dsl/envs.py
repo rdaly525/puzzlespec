@@ -17,7 +17,7 @@ class TypeEnv:
             sids = self.vars.keys()
         return TypeEnv(vars={sid: self.vars[sid] for sid in sids})
 
-    def add(self, sid: int|str, sort: irT.Type_):
+    def add(self, sid: int, sort: irT.Type_):
         if sid in self.vars:
             raise ValueError(f"Variable with sid={sid} already defined")
         self.vars[sid] = sort
@@ -30,12 +30,13 @@ class TypeEnv:
 class SymEntry:
     name: str
     role: str
+    public: bool
     src: str = ""
 
 class SymTable:
-    def __init__(self, entries: tp.Dict[int, SymEntry] =None, name_to_sid: tp.Dict[str, int] = None, sid: int = 0):
+    def __init__(self, entries: tp.Dict[int, SymEntry] =None, sid: int = 0):
         self.entries = entries if entries is not None else {}
-        self._name_to_sid = name_to_sid if name_to_sid is not None else {}
+        self._name_to_sid = {e.name:sid for sid, e in entries.items()}
         self._sid = sid
 
     def copy(self, sids: tp.Set[int] = None) -> 'SymTable':
@@ -47,21 +48,19 @@ class SymTable:
             sid=self._sid
         )
 
-    def new_var(self, name: str, role: str):
-        assert role in ('P', 'G', 'D')
-        if name in self._name_to_sid:
-            raise ValueError(f"Var, {name}, already exists")
-        entry = SymEntry(name, role)
+    def new_var(self, name: str, role: str, public: bool):
         sid = self._sid
         self._sid += 1
-        self.entries[sid] = entry
-        self._name_to_sid[name] = sid
+        self.add_var(sid, name, role, public)
         return sid
 
-    def add_var(self, sid: int, name: str, role: str):
+    def add_var(self, sid: int, name: str, role: str, public: bool):
+        if name in self._name_to_sid:
+            raise ValueError(f"Var, {name}, already exists")
+        assert role in ('P', 'G', 'D')
         if sid in self.entries:
             raise ValueError(f"Cannot add var {name} to sid {sid} because it already exists")
-        entry = SymEntry(name, role)
+        entry = SymEntry(name, role, public)
         self.entries[sid] = entry
         self._name_to_sid[name] = sid
   
@@ -97,41 +96,36 @@ class SymTable:
         for sid in self.entries:
             yield sid
 
-
-#TODO START HERE TOMORROW. unify env by including a unit type for base types
-class ShapeEnv:
-    # Stores shape information about variables
-    # if variable is a base type, stores the unit type
-    # if variable is a list, stores the size
-    # if variable is a dict, stores the keys
-    def __init__(self, shapes: tp.Dict[int, ir.Node] = None):
-        if shapes is None:
-            shapes: tp.Dict[int, ir.Node] = {}
-        self.shapes = {}
-        for sid, shape in shapes.items():
-            self.add(sid, shape)
+@dataclass
+class DomEnvEntry:
+    dom_nodes: tp.Tuple[ir.Node]
+    domTs: tp.Tuple[irT.DomT]
+ 
+class DomEnv:
+    # Stores Domain Information about variables
+    def __init__(self, entries: tp.Dict[int, DomEnvEntry] = None):
+        self.entries = {}
+        if entries is None:
+            entries: tp.Dict[int, DomEnvEntry] = {}
+        for sid, entry in entries.items():
+            self.add(sid, entry.dom_nodes, entry.domTs)
     
-    def terms_node(self) -> ir.Node:
-        return ir.Tuple(*self.shapes.values())
-
-    #def terms(self) -> ast.TupleExpr:
-    #    return ast.TupleExpr.make(*[ast.IntExpr.make(size) for size in self.lists.values()], *[ast.ListExpr.make(keys) for keys in self.dicts.values()])
-
-    def make_from_terms_node(self, node: ir.Node):
-        terms = node._children
-        if len(terms) != len(self.shapes):
-            raise ValueError(f"Expected {len(self.shapes)} terms, got {len(terms)}")
-        new_shapes = {}
-        for sid, shape in zip(self.shapes.keys(), terms):
-            new_shapes[sid] = shape
-        return ShapeEnv(shapes=new_shapes)
-
-    def add(self, sid: int, shape: ir.Node):
-        self.shapes[sid] = shape
+    def add(self,
+        sid: int,
+        dom_nodes: tp.Tuple[ir.Node],
+        domTs: tp.Tuple[irT.DomT],
+    ):
+        assert len(dom_nodes) == len(domTs)
+        self.entries[sid] = DomEnvEntry(dom_nodes, domTs)
    
-    def get_shape(self, sid: int) -> tp.Optional[ir.Node]:
-        return self.shapes.get(sid, None)
+    def get_doms(self, sid: int) -> tp.Tuple[ir.Node]:
+        return self[sid].dom_nodes
 
-    def __getitem__(self, sid: int):
-        return self.get_shape(sid)
+    def get_domTs(self, sid: int) -> tp.Tuple[irT.DomT]:
+        return self[sid].domTs
 
+    def __getitem__(self, sid) -> DomEnvEntry:
+        e = self.entries.get(sid, None)
+        if e is None:
+            raise ValueError(f"Variable {sid} not found in DomEnv")
+        return e

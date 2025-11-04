@@ -75,36 +75,19 @@ class Node:
                 setattr(cls, name, make_getter(i))
         setattr(cls, "__match_args__", match_args)
 
+# Core Nodes
+
+# Background info: Containers are represented a 'Func[Dom(A) -> B]'
+# So a 'List[B]' would be Func(Fin(n) -> B).
+# And a Set[B] would be Func(Dom(B) -> Bool)
+# A Func[Dom(A) -> B] is typed as Arrow[carrier(A) -> B]
+# Every Func has an tag stored in an envrionment indicating typeclass-like properties (seq, etc...) along with the Dom stored (or that info is derivable)
+
 # Unit node 
-class Unit_(Node):
+class Unit(Node):
     _fields = ()
     _numc = 0
     def __init__(self):
-        super().__init__()
-
-    def __repr__(self):
-        return "Unit"
-
-# Literal value
-class Lit(Node):
-    _fields = ("val", "T")
-    _numc = 0
-    def __init__(self, val: tp.Any, T: irT.Type_):
-        assert T in (irT.Bool, irT.Int)
-        self.T = T
-        self.val = T.cast_as(val)
-        super().__init__()
-
-
-# User-defined parameter
-# Eventually gets transformed into a normal VarRef with a 'P' role
-class _Param(Node):
-    _fields = ("name", "T")
-    _numc = 0
-    def __init__(self, name: str, T: irT.Type_):
-        assert T in (irT.Bool, irT.Int)
-        self.name = name
-        self.T = T
         super().__init__()
 
 class VarRef(Node):
@@ -121,17 +104,268 @@ class BoundVar(Node):
         self.idx = idx
         super().__init__()
 
-class _BoundVarPlaceholder(Node):
+# (lamda x:paramT body) -> (paramT -> type(body))
+class Lambda(Node):
+    _fields = ('paramT',)
+    _numc = 1
+    def __init__(self, body: Node, paramT: irT.Type_):
+        self.paramT = paramT
+        super().__init__(body)
+
+
+### Int/Bool 
+
+# Literal value for any base type
+class Lit(Node):
+    _fields = ("val", "T")
     _numc = 0
-    def __init__(self):
+    def __init__(self, val: tp.Any, T: irT.Type_):
+        assert T in (irT.Bool, irT.Int, irT.CellIdxT)
+        self.T = T
+        self.val = T.cast_as(val)
         super().__init__()
 
-# Arith + Boolean
 class Eq(Node):
     _numc = 2
     def __init__(self, a: Node, b: Node):
         super().__init__(a, b)
 
+class Lt(Node):
+    _numc = 2
+    def __init__(self, a: Node, b: Node):
+        super().__init__(a, b)
+
+class LtEq(Node):
+    _numc = 2
+    def __init__(self, a: Node, b: Node):
+        super().__init__(a, b)
+
+class Ite(Node):
+    _numc = 3
+    def __init__(self, pred: Node, t: Node, f: Node):
+        super().__init__(pred, t, f)
+
+class Not(Node):
+    _numc = 1
+    def __init__(self, a: Node):
+        super().__init__(a)
+
+class Neg(Node):
+    _numc = 1
+    def __init__(self, a: Node):
+        super().__init__(a)
+
+class Div(Node):
+    _numc = 2
+    def __init__(self, a: Node, b: Node):
+        super().__init__(a, b)
+
+class Mod(Node):
+    _numc = 2
+    def __init__(self, a: Node, b: Node):
+        super().__init__(a, b)
+
+class Conj(Node):
+    _numc = -1
+    def __init__(self, *args: Node):
+        super().__init__(*args)
+
+class Disj(Node):
+    _numc = -1
+    def __init__(self, *args: Node):
+        super().__init__(*args)
+
+# integer sum
+class Sum(Node):
+    _numc = -1
+    def __init__(self, *args: Node):
+        super().__init__(*args)
+
+# integer product
+class Prod(Node):
+    _numc = -1
+    def __init__(self, *args: Node):
+        super().__init__(*args)
+
+## Domains
+
+# Dom(T)
+class Universe(Node):
+    _fields = ('T',)
+    _numc = 0
+    def __init__(self, T: irT.Type_):
+        self.T = T
+        super().__init__()
+
+# Int -> Dom[Int]
+class Fin(Node):
+    _numc = 1
+    def __init__(self, N: Node):
+        super().__init__(N)
+
+# Get the size of a domain
+# Dom(A) -> Int
+class Card(Node):
+    _numc = 1
+    def __init__(self, domain: Node):
+        super().__init__(domain)
+
+# Dom(A) -> A -> Bool 
+class IsMember(Node):
+    _numc = 2
+    def __init__(self, domain: Node, val: Node):
+        super().__init__(domain, val)
+
+## Cartesian Products
+
+# (Dom[A], Dom[B],...) -> Dom(AxBx...)
+class CartProd(Node):
+    _numc = -1
+    def __init__(self, *doms: Node):
+        super().__init__(*doms)
+
+# Dom(AxB,...) -> 0 -> A | 1 -> B | ...
+class DomProj(Node):
+    _fields = ('idx',)
+    _numc = 1
+    def __init__(self, dom: Node, idx: int):
+        assert isinstance(idx, int)
+        self.idx = idx
+        super().__init__(dom)
+
+class TupleLit(Node):
+    _numc = -1
+    def __init__(self, *vals: Node):
+        super().__init__(*vals)
+
+class Proj(Node):
+    _fields = ('idx',)
+    _numc = 1
+    def __init__(self, tup: Node, idx: int):
+        assert isinstance(idx, int)
+        self.idx = idx
+        super().__init__(tup)
+
+class DisjUnion(Node):
+    _numc = -1
+    def __init__(self, *doms: Node):
+        super().__init__(*doms)
+
+class DomInj(Node):
+    _fields = ('idx', 'T')
+    _numc = 1
+    def __init__(self, dom: Node, idx: int, T: irT.Type_):
+        assert isinstance(idx, int)
+        self.idx = idx
+        self.T = T
+        super().__init__(dom)
+
+# Injection for disjoint unions
+class Inj(Node):
+    _fields = ("idx", "T")
+    _numc = 1
+    def __init__(self, val: Node, idx: int, T: irT.Type_):
+        assert isinstance(idx, int)
+        self.T = T
+        self.idx = idx
+        super().__init__(val)
+
+# (A|B|...) -> (A->T, B->T,...) -> T
+class Match(Node):
+    _numc = 2
+    def __init__(self, scrut: Node, branches: Node):
+        # Branches should be tuple of lambdas. checked during type checking
+        super().__init__(scrut, branches)
+
+# Dom(A) -> (A->Bool) -> Dom(A)
+class Restrict(Node):
+    _numc = 2
+    def __init__(self, domain: Node, pred: Node):
+        super().__init__(domain, pred)
+
+# Dom(A) -> (A -> Bool) -> Bool
+class Forall(Node):
+    _numc = 2
+    def __init__(self, domain: Node, fun: Node):
+        super().__init__(domain, fun)
+
+# Dom(A) -> (A -> Bool) -> Bool
+class Exists(Node):
+    _numc = 2
+    def __init__(self, domain: Node, fun: Node):
+        super().__init__(domain, fun)
+
+
+## Funcs (i.e., containers)
+
+# Dom(A) -> (A->B) -> Func(Dom(A)->B)
+class Tabulate(Node):
+    def __init__(self, dom: Node, fun: Node):
+        super().__init__(dom, fun)
+
+# Get domain of container
+# Func(Dom(A) -> B) -> Dom(A)
+class DomOf(Node):
+    _numc = 1
+    def __init__(self, func: Node):
+        super().__init__(func)
+
+class ImageOf(Node):
+    _numc = 1
+    def __init__(self, func: Node):
+        super().__init__(func)
+
+# Func(Dom(A)->B) -> A -> B
+class Apply(Node):
+    _numc = 2
+    def __init__(self, func: Node, arg: Node):
+        super().__init__(func, arg)
+
+#(v0:A,v1:A,...) -> Func(Fin(n) -> A)
+class ListLit(Node):
+    _numc = -1
+    def __init__(self, *vals: Node):
+        super().__init__(*vals)
+
+## TODO This could be implemented using Tabulate and Apply (put in surface?)
+## Func[Dom(A)->B] -> (B -> C) -> Func(Dom(A) -> C)
+#class Map(Node):
+#    _numc = 2
+#    def __init__(self, func: Node, fun: Node):
+#        super().__init__(func, fun)
+
+# only used on Seq Funcs TODO maybe should have scan as the fundimental IR node
+# Seq[A] -> ((A,B) -> B) -> B -> B
+class Fold(Node):
+    _numc = 3
+    def __init__(self, func: Node, fun: Node, init: Node):
+        super().__init__(func, fun, init)
+
+
+##############################
+## constructor-level IR nodes (Used for construction but immediatley gets transformed)
+##############################
+
+# gets tranformed to a de-bruijn BoundVar
+class _BoundVarPlaceholder(Node):
+    _fields = ('domT',)
+    _numc = 1
+    def __init__(self, dom: Node, domT: irT.DomT):
+        self.domT = domT
+        super().__init__(dom)
+
+class _LambdaPlaceholder(Node):
+    _fields = ('paramT',)
+    _numc = 2
+    def __init__(self, bound_var: Node, body: Node, paramT: irT.Type_):
+        self.paramT = paramT
+        super().__init__(bound_var, body)
+
+##############################
+## 'Surface level' IR
+##############################
+
+## Bool/Int operators
 class And(Node):
     _numc = 2
     def __init__(self, a: Node, b: Node):
@@ -146,16 +380,6 @@ class Or(Node):
     _numc = 2
     def __init__(self, a: Node, b: Node):
         super().__init__(a, b)
-
-class Not(Node):
-    _numc = 1
-    def __init__(self, a: Node):
-        super().__init__(a)
-
-class Neg(Node):
-    _numc = 1
-    def __init__(self, a: Node):
-        super().__init__(a)
 
 class Add(Node):
     _numc = 2
@@ -172,16 +396,6 @@ class Mul(Node):
     def __init__(self, a: Node, b: Node):
         super().__init__(a, b)
 
-class Div(Node):
-    _numc = 2
-    def __init__(self, a: Node, b: Node):
-        super().__init__(a, b)
-
-class Mod(Node):
-    _numc = 2
-    def __init__(self, a: Node, b: Node):
-        super().__init__(a, b)
-
 class Gt(Node):
     _numc = 2
     def __init__(self, a: Node, b: Node):
@@ -192,147 +406,21 @@ class GtEq(Node):
     def __init__(self, a: Node, b: Node):
         super().__init__(a, b)
 
-class Lt(Node):
-    _numc = 2
-    def __init__(self, a: Node, b: Node):
-        super().__init__(a, b)
-
-class LtEq(Node):
-    _numc = 2
-    def __init__(self, a: Node, b: Node):
-        super().__init__(a, b)
-
-# VARIADIC
-class Conj(Node):
-    _numc = -1
-    def __init__(self, *args: Node):
-        super().__init__(*args)
-
-class Disj(Node):
-    _numc = -1
-    def __init__(self, *args: Node):
-        super().__init__(*args)
-
-class Sum(Node):
-    _numc = -1
-    def __init__(self, *args: Node):
-        super().__init__(*args)
-
-class Prod(Node):
-    _numc = -1
-    def __init__(self, *args: Node):
-        super().__init__(*args)
-
-
-
-## COLLECTIONS
-
-## Tuple nodes
-
-# Concrete tuple
-class Tuple(Node):
-    _numc = -1
-    def __init__(self, *elements: Node):
-        super().__init__(*elements)
-
-# No Tuple tabulate till I need it
-class TupleGet(Node):
-    _fields = ('idx',)
-    _numc = 1
-    def __init__(self, tup: Node, idx: int):
-        self.idx = idx
-        super().__init__(tup)
-
-## List Nodes
-
-# Concrete list
-class List(Node):
-    _numc = -1
-    def __init__(self, *elements: Node):
-        super().__init__(*elements)
-
-# Represents a symbolic list
-class Range(Node):
-    _numc = 1
-    def __init__(self, N: Node):
-        super().__init__(N)
-
-# Operations on lists
-class ListGet(Node):
-    _numc = 2
-    def __init__(self, list: Node, idx: Node):
-        super().__init__(list, idx)
-
-class ListLength(Node):
-    _numc = 1
-    def __init__(self, list: Node):
-        super().__init__(list)
-
-# Enumerate a list of windows
-class ListWindow(Node):
+# SeqDom[A] -> Int -> Int -> Func[Fin(n) -> SeqDom[A]]
+class Windows(Node):
     _numc = 3
     def __init__(self, list: Node, size: Node, stride: Node):
         super().__init__(list, size, stride)
 
-class ListConcat(Node): 
-    _numc = 2
-    def __init__(self, a: Node, b: Node):
-        super().__init__(a, b)
-
-# List predicates/utilities
-class ListContains(Node):
-    _numc = 2
-    def __init__(self, list: Node, elem: Node):
-        super().__init__(list, elem)
-
-# Func
-# Total Function: (i.e., a Dict with a complete domain)
-class Func(Node):
-    _numc = -1
-    def __init__(self, *flat_key_vals: Node):
-        super().__init__(*flat_key_vals)
-
-# Represents a symbolic dict (Tabulated from keys)
-class FuncFromList(Node):
-    _numc = 2
-    def __init__(self, keys: Node, fun: Node):
-        super().__init__(keys, fun)
-
-# Operators on dicts
-class DictGet(Node):
-    _numc = 2
-    def __init__(self, dict: Node, key: Node):
-        super().__init__(dict, key)
-
-class DictMap(Node):
-    _numc = 2
-    def __init__(self, dict: Node, fun: Node):
-        super().__init__(dict, fun)
-
-class DictLength(Node):
-    _numc = 1
-    def __init__(self, dict: Node):
-        super().__init__(dict)
+# GridDom[A] -> int -> int -> int -> int -> Func[Fin(r) x Fin(c) -> GridDom[A]]
+class Tiles(Node):
+    _numc = 5
+    def __init__(self, grid: Node, size_r: Node, size_c: Node, stride_r: Node, stride_c: Node):
+        super().__init__(grid, size_r, size_c, stride_r, stride_c)
 
 
-# PRIORITY 1
+
 ## Grid Nodes
-
-# A concrete grid
-class Grid(Node):
-    _fields = ("nR", "nC")
-    _numc = -1
-    def __init__(self, *elements: Node, nR: int, nC: int):
-        self.nR = nR
-        self.nC = nC
-        assert len(elements) == nR*nC
-        super().__init__(*elements)
-
-# A symbolic Grid
-class GridTabulate(Node):
-    _numc = 3
-    def __init__(self, nR: Node, nC: Node, fun: Node):
-        super().__init__(nR, nC, fun)
 
 # enumerate cells, rows, cols, edges, etc
 # TODO might want to split into individual nodes
@@ -346,54 +434,10 @@ class GridEnumNode(Node):
         self.cellT = cellT
         super().__init__(nR, nC)
 
-class GridFlatNode(Node):
-    _numc = 1
-    def __init__(self, grid: Node):
-        super().__init__(grid)
-
-# 2-D sliding window
-class GridWindowNode(Node):
-    _numc = 5
-    def __init__(self, grid: Node, size_r: Node, size_c: Node, stride_r: Node, stride_c: Node):
-        super().__init__(grid, size_r, size_c, stride_r, stride_c)
-
 class GridDims(Node):
     _numc = 1
     def __init__(self, grid: Node):
         super().__init__(grid)
-
-class CartProd(Node):
-    _numc = -1
-    def __init__(self, *args: Node):
-        super().__init__(*args)
-
-# TODO disjoint union
-
-## PRIORITY 0   
-## Higher Order Operators
-class Lambda(Node):
-    _fields = ('paramT',)
-    _numc = 1
-    def __init__(self, body: Node, paramT: irT.Type_):
-        self.paramT = paramT
-        super().__init__(body)
-
-class _LambdaPlaceholder(Node):
-    _fields = ('paramT',)
-    _numc = 2
-    def __init__(self, bound_var: Node, body: Node, paramT: irT.Type_):
-        self.paramT = paramT
-        super().__init__(bound_var, body)
-
-class Map(Node):
-    _numc = 2
-    def __init__(self, domain: Node, fun: Node):
-        super().__init__(domain, fun)
-
-class Fold(Node):
-    _numc = 3
-    def __init__(self, domain: Node, fun: Node, init: Node):
-        super().__init__(domain, fun, init)
 
 # Common Fold Nodes
 class SumReduce(Node):
@@ -406,16 +450,6 @@ class ProdReduce(Node):
     def __init__(self, vals: Node):
         super().__init__(vals)
 
-class Forall(Node):
-    _numc = 2
-    def __init__(self, domain: Node, fun: Node):
-        super().__init__(domain, fun)
-
-class Exists(Node):
-    _numc = 2
-    def __init__(self, domain: Node, fun: Node):
-        super().__init__(domain, fun)
-
 class Distinct(Node):
     _numc = 1
     def __init__(self, vals: Node):
@@ -425,7 +459,7 @@ class Distinct(Node):
 # Mapping from Node classes to a priority integer.
 # This is probably way overengineered and there are probably better priorities
 NODE_PRIORITY: tp.Dict[tp.Type[Node], int] = {
-    Unit_: -1,
+    Unit: -1,
     Lit: 0,
     _Param: 1,
     VarRef: 1,
@@ -482,5 +516,3 @@ NODE_PRIORITY: tp.Dict[tp.Type[Node], int] = {
     Distinct: 14,
 }
 
-# Singleton unit node
-Unit = Unit_()

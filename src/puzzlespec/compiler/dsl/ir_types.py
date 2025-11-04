@@ -43,38 +43,51 @@ class _CellIdxT(BaseType):
     
 CellIdxT = _CellIdxT()
 
-class _VertexIdxT(BaseType):
-    _pytype = None
-    def __repr__(self):
-        return "𝒱"
-VertexIdxT = _VertexIdxT()
+#class _VertexIdxT(BaseType):
+#    _pytype = None
+#    def __repr__(self):
+#        return "𝒱"
+#VertexIdxT = _VertexIdxT()
+#
+#class _EdgeIdxT(BaseType):
+#    _pytype = None
+#    def __repr__(self):
+#        return "𝓔"
+#EdgeIdxT = _EdgeIdxT()
 
-class _EdgeIdxT(BaseType):
-    _pytype = None
-    def __repr__(self):
-        return "𝓔"
-EdgeIdxT = _EdgeIdxT()
+@dataclass
+class DomCap:
+    finite: Bool=True
+    enumerable: int=0 #represeents the 'rank' of enumberability
+    ordered: Bool=False
 
-class GridT(Type_):
+class DomT(Type_):
     _cache = {}
-    __match_args__ = ("valueT", "domain")
+    __match_args__ = ("carT", 'cap')
+    carT: Type_
+    cap: DomCap
 
-    def __new__(cls, valueT: Type_, domain: str):
-        key = (valueT, domain)
+    def __new__(cls, carT: Type_, cap: DomCap):
+        assert isinstance(carT, Type_)
+        assert isinstance(cap, DomT)
+        key = (carT, cap)
         if key not in cls._cache:
             instance = super().__new__(cls)
-            instance.valueT = valueT
-            instance.domain = domain
+            instance.carT = carT
+            instance.cap = cap
             cls._cache[key] = instance
         return cls._cache[key]
-
+    
     def __repr__(self):
-        return f"GridT({repr(self.valueT)}, {self.domain})"
+        return f"Dom[{self.carT}]"
+
+    def cast_as(self, val):
+        raise NotImplementedError("Cannot construct value of DomT")
 
 class TupleT(Type_):
     _cache = {}
     __match_args__ = ("elemTs",)
-    
+    elemTs: tp.Tuple[Type_, ...]
     def __new__(cls, *elemTs: Type_):
         if len(elemTs)==0:
             return UnitType
@@ -93,41 +106,32 @@ class TupleT(Type_):
         if isinstance(val, tp.Iterable) and len(val)==len(self.elemTs):
             return tuple(T.cast_as(v) for T, v in zip(self.elemTs, val))
 
-class ListT(Type_):
+class SumT(Type_):
     _cache = {}
-    __match_args__ = ("elemT",)
-
-    def __new__(cls, elemT: Type_):
-        assert isinstance(elemT, Type_)
-        if elemT not in cls._cache:
-            instance = super().__new__(cls)
-            instance.elemT = elemT
-            cls._cache[elemT] = instance
-        return cls._cache[elemT]
-    
-    def __repr__(self):
-        return f"[{repr(self.elemT)}]"
-
-class DictT(Type_):
-    _cache = {}
-    __match_args__ = ("keyT", "valT")
-
-    def __new__(cls, keyT: Type_, valT: Type_):
-        key = (keyT, valT)
+    __match_args__ = ("elemTs",)
+    elemTs: tp.Tuple[Type_, ...]
+    def __new__(cls, *elemTs: Type_):
+        if len(elemTs)==0:
+            raise NotImplementedError("Cannot handle empty sum type")
+        assert all(isinstance(T, Type_) for T in elemTs)
+        key = tuple(elemTs)
         if key not in cls._cache:
             instance = super().__new__(cls)
-            instance.keyT = keyT
-            instance.valT = valT
+            instance.elemTs = key
             cls._cache[key] = instance
         return cls._cache[key]
     
     def __repr__(self):
-        return f"{{{repr(self.keyT)} ↦ {repr(self.valT)}}}"
+        return f"{'⊕'.join(repr(t) for t in self.elemTs)}"
+
+    def cast_as(self, val):
+        raise NotImplementedError
 
 class ArrowT(Type_):
     _cache = {}
     __match_args__ = ("argT", "resT")
-
+    argT: Type_
+    resT: Type_
     def __new__(cls, argT: Type_, resT: Type_):
         key = (argT, resT)
         if key not in cls._cache:
@@ -140,9 +144,29 @@ class ArrowT(Type_):
     def __repr__(self):
         return f"{repr(self.argT)} -> {repr(self.resT)}"
 
-# Common concrete CellIdx types
-CellIdxT_RC = TupleT(Int, Int)
-CellIdxT_linear = Int
+class FuncT(Type_):
+    _cache = {}
+    __match_args__ = ("domT", "resT")
+    domT: DomT
+    resT: Type_
+    def __new__(cls, domT: DomT, resT: Type_):
+        if not isinstance(domT, DomT):
+            raise ValueError(f"domT must be a DomT, got {domT}")
+        key = (domT, resT)
+        if key not in cls._cache:
+            instance = super().__new__(cls)
+            instance.domT = domT
+            instance.resT = resT
+            cls._cache[key] = instance
+        return cls._cache[key]
+
+    def __repr__(self):
+        return f"{repr(self.domT)} -> {repr(self.resT)}"
+
+    def underlyingT(self):
+        return ArrowT(self.domT.carT, self.resT)
 
 
-
+## Common concrete CellIdx types
+#CellIdxT_RC = TupleT(Int, Int)
+#CellIdxT_linear = Int

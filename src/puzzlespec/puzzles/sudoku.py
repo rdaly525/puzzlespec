@@ -1,35 +1,70 @@
-from ..compiler.dsl.ast import IntParam
 from ..compiler.dsl.ir_types import Bool, Int
-from ..compiler.dsl.topology import Grid2D as Grid
 from ..compiler.dsl.spec_builder import PuzzleSpecBuilder
 from ..compiler.dsl.spec import PuzzleSpec
+from ..compiler.dsl.libs import std, optional as opt, topo
 
 
-def build_sudoku_spec() -> PuzzleSpec:
+def build_sudoku_spec(gw=False) -> PuzzleSpec:
     # Grid and Puzzle
-    grid = Grid(9, 9)
-    p = PuzzleSpecBuilder(name="Sudoku", desc="Sudoku", topo=grid)
+    p: PuzzleSpecBuilder = PuzzleSpecBuilder()
+    # Value domain (1..9)
+    digits = std.Range(1, 10)
+
+    # Underlying grid
+    grid = topo.Grid2D(9, 9)
 
     # Generator parameters
-    given_mask = p.var_dict(grid.C(), sort=Bool, gen=True, name="given_mask")
-    given_vals = p.var_dict(grid.C(), sort=Int, gen=True, name="given_vals")
-    p += grid.C().forall(lambda c: given_vals[c].between(1, 9))
-
+    num_clues = p.gen_var(sort=Int, name='num_clues')
+    givens = p.func_var(role='G', dom=grid.cells(), codom=opt.Optional(digits), name="givens")
+    # clue constraints
+    p += opt.count_some(givens)==num_clues
+    
     # Decision variables
-    cell_vals = p.var_dict(grid.C(), sort=Int, name="cell_vals")
-
+    cell_vals = p.decision_var(dom=grid.cells(), codom=digits, name="cell_vals")
+    
     # Puzzle Rules
     
-    # Handle the givens
-    p += grid.C().forall(lambda c: given_mask[c].implies((cell_vals[c] == given_vals[c])))
-
+    # Given vals must be consistent with cell_vals
+    p += grid.cells().forall(
+        lambda c: opt.fold(givens[c], on_none=True, on_some=lambda v: cell_vals[c]==v)
+    )
+    
     # All values in each row, column, and tile are distinct
-    for rc in (
-        grid.rows(),
-        grid.cols(),
+    for rct in (
+        cell_vals.rows(),
+        cell_vals.cols(),
+        cell_vals.tiles(size=[3,3], stride=[3,3]),
     ):
-        p += rc.forall(lambda region: region.distinct())
-    p += grid.tiles(size=[3,3], stride=[3,3]).forall(lambda region: region.flat().distinct())
+        p += rct.forall(lambda region: std.distinct(region))
+
+    # german whispers
+    if gw:
+        # german whisper 'megavar'
+        whispers = std.Fin(p.gen_var(sort=Int, name='num_whispers')).tabulate(
+            lambda i: std.Fin(p.gen_var(sort=Int, dep=i, name='whisper_lens')).tabulate(
+                lambda j: p.gen_var(dom=grid.cells(), dep=(i,j), name='whispers_locs')
+            )
+        ) # Typed Func[Fin(Int) -> Func[Fin(Int) -> CellIdxT]]
+        # A:() -> () == 4
+        # B:(i) -> [(4)] == 6
+        # C: (i, j) -> [(4), (4,6)] == 9
+        # (j, i) -> [(4,6), (4)] == BAD
+
+        foo = std.Fin(6).restrict(lambda i: p.gen_var(Int, dep=i)>3)
+
+        # structural constraint: German whisper cells must be neighbors
+        p += whispers.forall(
+            lambda whisper: whisper.windows(2).map(
+                lambda cells: grid.cell_adjacent(8, cells[0], cells[1])
+            )
+        )
+
+        # puzzle rule: neighboring whisper cells must have a difference of at least 5
+        p += whispers.forall(
+            lambda whisper: whisper.windows(2).map(
+                lambda cells: abs(whisper[cells[0]]-whisper[cells[1]])>=5
+            )
+        )
 
 
     return p.build()

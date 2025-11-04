@@ -2,12 +2,12 @@ from ast import Pass, Sub
 from re import A
 import typing as tp
 
+from puzzlespec.compiler.passes.analyses import EnvsObj
 from puzzlespec.compiler.passes.analyses.ssa_printer import SSAPrinter
 from puzzlespec.compiler.passes.transforms.substitution import SubMapping, SubstitutionPass
 from . import ast, ir, ir_types as irT
-from .topology import Topology, Grid2D
 
-from .envs import SymTable, TypeEnv, ShapeEnv
+from .envs import SymTable, TypeEnv, DomEnv
 from ..passes.pass_base import PassManager, Context
 from ..passes.transforms import CanonicalizePass, ConstFoldPass, AlgebraicSimplificationPass
 from ..passes.transforms.concretize_types import TypeEncoding, ConcretizeTypes
@@ -22,111 +22,86 @@ class PuzzleSpec:
     def __init__(self,
         name: str,
         desc: str,
-        topo: Topology,
         sym: SymTable,
         tenv: TypeEnv,
-        shape_env: ShapeEnv,
-        rules: ir.List
+        domenv: DomEnv,
+        rules: tp.List,
+        obligations: tp.List,
     ):
         self.name = name
         self.desc = desc
-        self.topo = topo
         self.sym = sym
         self.tenv = tenv
-        self.shape_env = shape_env
+        self.domenv = domenv
         self._rules = rules
+        self._obligations = obligations
         self._type_check()
         self._categorize_constraints()
 
-    def _categorize_constraints(self):
-        pm = PassManager(ConstraintCategorizer())
-        ctx = Context()
-        ctx.add(SymTableEnv_(self.sym))
-        pm.run(self._rules, ctx)
-        ccmapping = tp.cast(ConstraintCategorizerVals, ctx.get(ConstraintCategorizerVals)).mapping
-        param_rules = []
-        gen_rules = []
-        decision_rules = []
-        constant_rules = []
+    @property
+    def envs_obj(self) -> EnvsObj:
+        return EnvsObj(sym=self.sym, tenv=self.tenv, domenv=self.domenv)
 
-        for rule in self._rules._children:
-            assert rule in ccmapping
-            match (ccmapping[rule]):
-                case "D":
-                    decision_rules.append(rule)
-                case "G":
-                    gen_rules.append(rule)
-                case "P":
-                    param_rules.append(rule)
-                case "C":
-                    constant_rules.append(rule)
-        self._param_rules = ir.List(*param_rules)
-        self._gen_rules = ir.List(*gen_rules)
-        self._decision_rules = ir.List(*decision_rules)
-        self._constant_rules = ir.List(*constant_rules)
+    @property
+    def rules_node(self) -> ir.TupleLit:
+        return ir.TupleLit(*self._rules)
 
-    @classmethod
-    def make(cls,
-        name: str,
-        desc: str,
-        topo: Topology,
-        vars: tp.List[tp.Tuple[int, str, irT.Type_, str, ir.Node]] , # (cid, name, T, Role, shape)
-        rules: tp.List[ir.Node]
-    ):
+    @property
+    def obligations_node(self) -> ir.TupleLit:
+        return ir.TupleLit(*self._obligations)
 
-        # Environments
-        sym = SymTable()
-        tenv = TypeEnv()
-        shape_env = ShapeEnv()
-        for (sid, name, T, role, shape) in vars:
-            sym.add_var(sid=sid, name=name, role=role)
-            tenv.add(sid=sid, sort=T)
-            shape_env.add(sid=sid, shape=shape)
+    @property
+    def domains_node(self) -> ir.TupleLit:
+        doms = [self.domenv.get_doms(sid) for sid in self.domenv.entries.keys()]
+        return ir.TupleLit(*doms)
 
-        return cls(name=name, desc=desc, topo=topo, sym=sym, tenv=tenv, shape_env=shape_env, rules=rules)
-
-    def _type_check(self):
-        if len(self._rules._children)==0:
-            return
-        pm = PassManager(TypeInferencePass())
-        ctx = Context()
-        ctx.add(TypeEnv_(self.tenv))
-        pm.run(self._rules, ctx)
-        tvals = ctx.get(TypeValues).mapping
-        if tvals[self._rules] != irT.ListT(irT.Bool):
-            for c in self._rules._children:
-                if tvals[c] != irT.Bool:
-                    raise ValueError(f"Constraint {c} is not bool, {tvals[c]}")
+    def make_domenv(self, node: ir.Node) -> DomEnv:
+        terms = node._children
+        if len(terms) != len(self.domenv.entries):
+            raise ValueError(f"Expected {len(self.domenv.entries)} terms, got {len(terms)}")
+        domenv = DomEnv()
+        for sid, doms_node in zip(self.domenv.entries.keys(), terms):
+            domenv.add(sid, doms_node, self.domenv.get_domTs(sid))
+        return domenv
 
     @property
     def _spec_node(self) -> ir.Node:
-        return ir.Tuple(
-            self.topo.terms_node(),
-            self.shape_env.terms_node(),
-            self._rules
+        return ir.TupleLit(
+            self.domains_node,
+            self.rules_node,
+            self.obligations_node
         )
 
+    def unpack_spec_node(self, spec_node: ir.TupleLit) -> tp.Tuple[ir.Node,...]:
+        assert isinstance(spec_node, ir.TupleLit)
+        assert len(spec_node._children) == 3
+        return spec_node._children
+
     # applies passes to the spec, returns the new topo, shape env, and rules
-    def _transform(self, passes: tp.List[Pass], ctx: Context = None) -> tp.Tuple[Topology, ShapeEnv, ir.Node]:
+    def _transform(self, passes: tp.List[Pass], ctx: Context = None) -> tp.Tuple[ir.Node, ir.Node, ir.Node, tp.Set[int]]:
         if ctx is None:
             ctx = Context()
         spec_node = self._spec_node
         pm = PassManager(*passes, VarGetter(), verbose=True)
         spec_node = pm.run(spec_node, ctx)
-        topo_dim_node = spec_node._children[0]
-        shape_env_node = spec_node._children[1]
-        rules_node = spec_node._children[2]
-        new_topo = Grid2D.make_from_terms_node(topo_dim_node)
-        new_shape_env = self.shape_env.make_from_terms_node(shape_env_node)
-        return new_topo, new_shape_env, rules_node, ctx.get(VarSet)
+        dn, rn, on = self.unpack_spec_node(spec_node)
+        return dn, rn, on, set(v.sid for v in ctx.get(VarSet).vars)
 
     # applies passes, copies the tenv and sym table, returns a new spec
     def transform(self, passes: tp.List[Pass], ctx: Context = None) -> 'PuzzleSpec':
-        new_topo, new_shape_env, new_rules, varset = self._transform(passes, ctx)
-        sids = set(v.sid for v in varset.vars)
+        dn, rn, on, sids = self._transform(passes, ctx)
         new_tenv = self.tenv.copy(sids)
         new_sym = self.sym.copy(sids)
-        return PuzzleSpec(name=self.name, desc=self.desc, topo=new_topo, sym=new_sym, tenv=new_tenv, shape_env=new_shape_env, rules=new_rules)
+        new_domenv = self.make_domenv(dn)
+        return PuzzleSpec(
+            name=self.name,
+            desc=self.desc,
+            sym=new_sym,
+            tenv=new_tenv,
+            domenv=new_domenv,
+            rules=rn,
+            obligations=on
+        )
 
     def analyze(self, passes: tp.List[Pass], node: ir.Node=None, ctx: Context = None) -> Context:
         if ctx is None:
@@ -172,9 +147,73 @@ class PuzzleSpec:
     def constant_constraints(self) -> ast.BoolExpr:
         return tp.cast(ast.BoolExpr, ast.wrap(self._constant_rules, irT.ListT(irT.Bool)))
 
-    @property
-    def rules(self) -> ast.BoolExpr:
-        return tp.cast(ast.BoolExpr, ast.wrap(self._rules, irT.ListT(irT.Bool)))
+    def _categorize_constraints(self):
+        pm = PassManager(ConstraintCategorizer())
+        ctx = Context()
+        ctx.add(SymTableEnv_(self.sym))
+        pm.run(self._rules, ctx)
+        ccmapping = tp.cast(ConstraintCategorizerVals, ctx.get(ConstraintCategorizerVals)).mapping
+        param_rules = []
+        gen_rules = []
+        decision_rules = []
+        constant_rules = []
+
+        for rule in self._rules._children:
+            assert rule in ccmapping
+            match (ccmapping[rule]):
+                case "D":
+                    decision_rules.append(rule)
+                case "G":
+                    gen_rules.append(rule)
+                case "P":
+                    param_rules.append(rule)
+                case "C":
+                    constant_rules.append(rule)
+        self._param_rules = ir.List(*param_rules)
+        self._gen_rules = ir.List(*gen_rules)
+        self._decision_rules = ir.List(*decision_rules)
+        self._constant_rules = ir.List(*constant_rules)
+
+    #@classmethod
+    #def make(cls,
+    #    name: str,
+    #    desc: str,
+    #    vars: tp.List[tp.Tuple[int, str, irT.Type_, str, ir.Node]] , # (cid, name, T, Role, shape)
+    #    rules: tp.List[ir.Node]
+    #):
+
+    #    # Environments
+    #    sym = SymTable()
+    #    tenv = TypeEnv()
+    #    shape_env = ShapeEnv()
+    #    for (sid, name, T, role, shape) in vars:
+    #        sym.add_var(sid=sid, name=name, role=role)
+    #        tenv.add(sid=sid, sort=T)
+    #        shape_env.add(sid=sid, shape=shape)
+
+    #    return cls(name=name, desc=desc, topo=topo, sym=sym, tenv=tenv, shape_env=shape_env, rules=rules)
+
+    def _type_check(self):
+        ctx = Context(self.envs_obj)
+        ctx = self.analyze([TypeInferencePass()], self._spec_node, ctx)
+        tvals = ctx.get(TypeValues).mapping
+        dn, rn, on = self.unpack_spec_node(self._spec_node)
+
+        # dn must be tuple of doms
+        if not isinstance(tvals[dn], ir.TupleLit):
+            raise ValueError(f"{dn} must be a tuple, got {type(tvals[dn])}")
+        for d in dn._children:
+            if not isinstance(tvals[d], irT.DomT):
+                raise ValueError(f"{d} must be a DomT, got {type(tvals[d])}")
+
+        # rn and on must be tuple of bool
+        for cn in (rn, on):
+            if not isinstance(tvals[cn], ir.TupleLit):
+                raise ValueError(f"{cn} must be a tuple, got {type(tvals[cn])}")
+            for c in cn._children:
+                if tvals[c] != irT.Bool:
+                    raise ValueError(f"{c} must be a bool, got {type(tvals[c])}")
+
 
     # Returns a new spec with the params set
     def set_params(self, **kwargs) -> 'PuzzleSpec':
@@ -208,32 +247,32 @@ class PuzzleSpec:
             #CollectionSimplificationPass(),
         ]], ctx)
 
-    def concretize_types(self, cellIdxT):
-        ctx = Context()
-        ctx.add(TypeEncoding(c_encoding=cellIdxT))
-        new_topo, new_shape_env, new_rules, varset = self._transform([ConcretizeTypes()], ctx)
-        sids = set(v.sid for v in varset.vars)
-        new_tenv = TypeEnv()
-        for sid in sids:
-            oldT = self.tenv[sid]
-            match oldT:
-                case irT.CellIdxT:
-                    newT = cellIdxT
-                case irT.DictT(irT.CellIdxT, valT):
-                    newT = irT.DictT(cellIdxT, valT)
-                case _:
-                    newT = oldT
-            new_tenv.add(sid, newT)
-        new_sym = self.sym.copy(sids)
-        return PuzzleSpec(
-            name=self.name,
-            desc=self.desc,
-            topo=new_topo,
-            sym=new_sym,
-            tenv=new_tenv,
-            shape_env=new_shape_env,
-            rules=new_rules
-        ).optimize()
+    #def concretize_types(self, cellIdxT):
+    #    ctx = Context()
+    #    ctx.add(TypeEncoding(c_encoding=cellIdxT))
+    #    new_topo, new_shape_env, new_rules, varset = self._transform([ConcretizeTypes()], ctx)
+    #    sids = set(v.sid for v in varset.vars)
+    #    new_tenv = TypeEnv()
+    #    for sid in sids:
+    #        oldT = self.tenv[sid]
+    #        match oldT:
+    #            case irT.CellIdxT:
+    #                newT = cellIdxT
+    #            case irT.DictT(irT.CellIdxT, valT):
+    #                newT = irT.DictT(cellIdxT, valT)
+    #            case _:
+    #                newT = oldT
+    #        new_tenv.add(sid, newT)
+    #    new_sym = self.sym.copy(sids)
+    #    return PuzzleSpec(
+    #        name=self.name,
+    #        desc=self.desc,
+    #        topo=new_topo,
+    #        sym=new_sym,
+    #        tenv=new_tenv,
+    #        shape_env=new_shape_env,
+    #        rules=new_rules
+    #    ).optimize()
 
     def clue_setter(self, cellIdxT: tp.Optional[irT.Type_]=None) -> 'Setter':
         if cellIdxT:
