@@ -3,7 +3,7 @@ import typing as tp
 from puzzlespec.compiler.passes.transforms.resolve_bound_vars import ResolveBoundVars
 from . import ast, ir, ir_types as irT
 from .envs import SymTable, DomEnv, TypeEnv
-from ..passes.pass_base import PassManager, Context
+from ..passes.pass_base import Context
 from ..passes.transforms.cse import CSE
 from ..passes.analyses.getter import VarGetter, VarSet
 from ..passes.analyses import EnvsObj
@@ -59,10 +59,10 @@ class PuzzleSpecBuilder(PuzzleSpec):
             dep = (dep,)
         if not all(isinstance(d.node, ir._BoundVarPlaceholder) for d in dep):
             raise ValueError(f"{err_prefix}dep must be bound variables, got {type(dep)}")
-        dep_dom_nodes = tuple(d.node._children[0] for d in dep)
-        dep_domTs = tuple(d.node.domT for d in dep)
+        dep_dom_nodes = tuple(d.node.dom for d in dep)
+        dep_domTs = tuple(irT.DomT(d.node.T) for d in dep)
         assert all(isinstance(domT, irT.DomT) for domT in dep_domTs)
-        if any(isinstance(n, ir.Unit) for n in dep_dom_nodes):
+        if not all(n.is_tabulate for n in dep_dom_nodes):
             raise NotImplementedError(f"{err_prefix}Only DomExpr.tabulate dependencies are supported")
        
         # Do dependency analysis
@@ -151,32 +151,5 @@ class PuzzleSpecBuilder(PuzzleSpec):
         spec = self.transform([ResolveBoundVars()])
         # 2: Run CSE
         spec = self.transform([CSE()])
-        #self._replace_rules(pm.run(self._rules))
-        # 1) Unify parameters (change parameters to vars)
-        all_vars = []
-        for sid in self.sym:
-            name = self.sym.get_name(sid)
-            T = self.tenv[sid]
-            role = self.sym.get_role(sid)
-            shape = self.shape_env.get_shape(sid)
-            all_vars.append((sid, name, T, role, shape))
 
-        spec = PuzzleSpec.make(
-            self.name,
-            self.desc,
-            self.topo,
-            all_vars,
-            self._rules
-        )
         return spec.optimize()
-
-        # TODO run passes on spec
-
-        # Print AST
-        # 3) Fold/invalidate the shape_env
-        #   - eg, replace any Len(Var) with the shape_env size
-        #   - eg, Replace any Keys(Var) with shape_env keys
-        # 2) Run simplification loop
-        # Do type checking/shape validation
-        # Extract implicit constraints
-    

@@ -1,33 +1,31 @@
 from __future__ import annotations
-from multiprocessing import Value
-from re import T
+
 from ..pass_base import Context, AnalysisObject, Analysis, handles
-from ...dsl import ir, ast, ir_types as irT
+from ..envobj import EnvsObj
+from ...dsl import ir, ir_types as irT
 import typing as tp
 
 if tp.TYPE_CHECKING:
     from ...dsl import spec
 
 
-class TypeEnv_(AnalysisObject):
-    def __init__(self, env: spec.TypeEnv):
-        self.env = env
-
 class TypeValues(AnalysisObject):
     def __init__(self, mapping):
         self.mapping: tp.Dict[ir.Node, irT.Type_] = mapping
 
+
 class TypeInferencePass(Analysis):
     #_debug=True
-    requires = (TypeEnv_,)
+    requires = (EnvsObj,)
     produces = (TypeValues,)
     name = "type_inference"
+    
     def __init__(self):
         super().__init__()
 
     def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
-        self.tenv: tp.Dict[int, irT.Type_] = ctx.get(TypeEnv_).env
-        self.bctx = []
+        self.tenv: tp.Dict[int, irT.Type_] = ctx.get(EnvsObj).tenv.vars
+        self.bctx: tp.List[irT.Type_] = []
         # Walk and populate
         root_T = self.visit(root)
         tv = TypeValues(self._cache)
@@ -37,48 +35,72 @@ class TypeInferencePass(Analysis):
         raise ValueError(f"Should never occur! {node}")
         # All visitors have been defined
 
-    # Literals and basic nodes
-    @handles(ir.Unit_)
-    def _(self, node: ir.Unit_):
+    ##############################
+    ## Core-level IR nodes (Used throughout entire compiler flow)
+    ##############################
+
+    @handles(ir.Unit)
+    def _(self, node: ir.Unit):
         return irT.UnitType
+
+    @handles(ir.VarRef)
+    def _(self, node: ir.VarRef):
+        if node.sid not in self.tenv:
+            raise TypeError(f"Variable with sid={node.sid} not found in type environment")
+        return self.tenv[node.sid]
+
+    @handles(ir.BoundVar)
+    def _(self, node: ir.BoundVar):
+        if node.idx >= len(self.bctx):
+            raise TypeError(f"BoundVar index {node.idx} out of bounds (bctx length: {len(self.bctx)})")
+        return self.bctx[-(node.idx+1)]
+
+    @handles(ir.Lambda)
+    def _(self, node: ir.Lambda):
+        self.bctx.append(node.paramT)
+        bodyT, = self.visit_children(node)
+        self.bctx.pop()
+        return irT.ArrowT(node.paramT, bodyT)
 
     @handles(ir.Lit)
     def _(self, node: ir.Lit):
         return node.T
 
-    @handles(ir._Param)
-    def _(self, node: ir._Param):
-        return node.T
-
-    @handles(ir.VarRef)
-    def _(self, var: ir.VarRef):
-        assert var.sid in self.tenv
-        return self.tenv[var.sid]
-
-    @handles(ir.BoundVar)
-    def visit_bound_var(self, var: ir.BoundVar):
-        assert var.idx < len(self.bctx)
-        return self.bctx[-(var.idx+1)]
-
-    # Arithmetic + Boolean
     @handles(ir.Eq)
-    def visit_equality(self, op: ir.Node):
-        T0, T1 = self.visit_children(op)
-        # Check children are same type
-        if T0 != T1:
-            raise TypeError(f"{op} has children of inconsistent types\n  {T0}!={T1}")
+    def _(self, node: ir.Eq):
+        leftT, rightT = self.visit_children(node)
+        if leftT != rightT:
+            raise TypeError(f"Eq has children of inconsistent types: {leftT} != {rightT}")
         return irT.Bool
 
-    @handles(ir.And)
-    @handles(ir.Implies)
-    @handles(ir.Or)
+    @handles(ir.Lt)
+    def _(self, node: ir.Lt):
+        leftT, rightT = self.visit_children(node)
+        if leftT != irT.Int or rightT != irT.Int:
+            raise TypeError(f"Lt expects Int operands, got {leftT} and {rightT}")
+        return irT.Bool
+
+    @handles(ir.LtEq)
+    def _(self, node: ir.LtEq):
+        leftT, rightT = self.visit_children(node)
+        if leftT != irT.Int or rightT != irT.Int:
+            raise TypeError(f"LtEq expects Int operands, got {leftT} and {rightT}")
+        return irT.Bool
+
+    @handles(ir.Ite)
+    def _(self, node: ir.Ite):
+        predT, tT, fT = self.visit_children(node)
+        if predT != irT.Bool:
+            raise TypeError(f"Ite predicate must be Bool, got {predT}")
+        if tT != fT:
+            raise TypeError(f"Ite branches must have same type: {tT} != {fT}")
+        return tT
+
     @handles(ir.Not)
-    def visit_bool_op(self, op: ir.Node):
-        cTs = self.visit_children(op)
-        # Check children are bool
-        for c, T in zip(op._children, cTs):
-            if T != irT.Bool:
-                raise TypeError(f"Child {c} of {op} is not bool")
+    def _(self, node: ir.Not):
+        childT, = self.visit_children(node)
+        if childT != irT.Bool:
+            raise TypeError(f"Not expects Bool, got {childT}")
         return irT.Bool
 
     @handles(ir.Neg)
@@ -88,351 +110,406 @@ class TypeInferencePass(Analysis):
             raise TypeError(f"Neg expects Int, got {childT}")
         return irT.Int
 
-    @handles(ir.Add)
-    @handles(ir.Sub)
-    @handles(ir.Mul)
     @handles(ir.Div)
-    @handles(ir.Mod)
-    def visit_int_to_int(self, op: ir.Node):
-        cTs = self.visit_children(op)
-        # Check children are int
-        for c, T in zip(op._children, cTs):
-            if T != irT.Int:
-                raise TypeError(f"Child {c} of {op} is not Int")
+    def _(self, node: ir.Div):
+        leftT, rightT = self.visit_children(node)
+        if leftT != irT.Int or rightT != irT.Int:
+            raise TypeError(f"Div expects Int operands, got {leftT} and {rightT}")
         return irT.Int
 
-    @handles(ir.Gt)
-    @handles(ir.GtEq)
-    @handles(ir.Lt)
-    @handles(ir.LtEq)
-    def visit_int_to_bool(self, op: ir.Node):
-        cTs = self.visit_children(op)
-        # Check children are int
-        for c, T in zip(op._children, cTs):
-            if T != irT.Int:
-                raise TypeError(f"Child {c} of {op} is not Int")
+    @handles(ir.Mod)
+    def _(self, node: ir.Mod):
+        leftT, rightT = self.visit_children(node)
+        if leftT != irT.Int or rightT != irT.Int:
+            raise TypeError(f"Mod expects Int operands, got {leftT} and {rightT}")
+        return irT.Int
+
+    @handles(ir.Conj)
+    def _(self, node: ir.Conj):
+        childTs = self.visit_children(node)
+        for child, childT in zip(node._children, childTs):
+            if childT != irT.Bool:
+                raise TypeError(f"Conj child {child} must be Bool, got {childT}")
         return irT.Bool
 
-    # Variadic
-    @handles(ir.Conj)
     @handles(ir.Disj)
-    def visit_variadic_bool_op(self, op: ir.Node):
-        cTs = self.visit_children(op)
-        # Check children are bool
-        for c, T in zip(op._children, cTs):
-            if T != irT.Bool:
-                raise TypeError(f"Child {c} of {op} is not bool")
+    def _(self, node: ir.Disj):
+        childTs = self.visit_children(node)
+        for child, childT in zip(node._children, childTs):
+            if childT != irT.Bool:
+                raise TypeError(f"Disj child {child} must be Bool, got {childT}")
         return irT.Bool
 
     @handles(ir.Sum)
+    def _(self, node: ir.Sum):
+        childTs = self.visit_children(node)
+        for child, childT in zip(node._children, childTs):
+            if childT != irT.Int:
+                raise TypeError(f"Sum child {child} must be Int, got {childT}")
+        return irT.Int
+
     @handles(ir.Prod)
-    def visit_variadic_int_op(self, op: ir.Node):
-        cTs = self.visit_children(op)
-        # Check children are int
-        for c, T in zip(op._children, cTs):
-            if T != irT.Int:
-                raise TypeError(f"Child {c} of {op} is not Int")
+    def _(self, node: ir.Prod):
+        childTs = self.visit_children(node)
+        for child, childT in zip(node._children, childTs):
+            if childT != irT.Int:
+                raise TypeError(f"Prod child {child} must be Int, got {childT}")
         return irT.Int
 
-    # Collections - Tuple nodes
-    @handles(ir.Tuple)
-    def visit_tuple(self, op: ir.Tuple):
-        cTs = self.visit_children(op)
-        return irT.TupleT(*(cT for cT in cTs))
+    @handles(ir.Universe)
+    def _(self, node: ir.Universe):
+        return irT.DomT(node.T, irT.DomCap())
 
-    @handles(ir.TupleGet)
-    def _(self, node: ir.TupleGet):
-        tupT, = self.visit_children(node)
-        if not isinstance(tupT, irT.TupleT):
-            raise TypeError("TupleGet expects a tuple")
-        if node.idx >= len(tupT.elementTs):
-            raise TypeError(f"TupleGet index {node.idx} out of bounds for tuple of length {len(tupT.elementTs)}")
-        return tupT.elementTs[node.idx]
+    @handles(ir.Fin)
+    def _(self, node: ir.Fin):
+        NT, = self.visit_children(node)
+        if NT != irT.Int:
+            raise TypeError(f"Fin expects Int argument, got {NT}")
+        # TODO: Verify the domain type construction
+        return irT.DomT(irT.Int, irT.DomCap(finite=True, enumerable=1, ordered=True))
 
-    # Collections - List nodes
-    @handles(ir.List)
-    def _(self, node: ir.List):
-        # children: (length, elem0, elem1, ...)
-        cTs = self.visit_children(node)
-        if len(cTs) == 0:
-            raise NotImplementedError("Cannot support empty list yet")
-        elemT0 = cTs[0]
-        for T in cTs[1:]:
-            if T != elemT0:
-                raise TypeError("Heterogeneous list literal elements")
-        return irT.ListT(elemT0)
-
-    @handles(ir.ListTabulate)
-    def _(self, node: ir.ListTabulate):
-        # size: Int, fun: Int -> V
-        sizeT, lamT = self.visit_children(node)
-        if sizeT is not irT.Int:
-            raise TypeError("ListTabulate size must be Int")
-        if lamT.argT is not irT.Int:
-            raise TypeError("ListTabulate lambda key must be Int")
-        return irT.ListT(lamT.resT)
-
-    @handles(ir.ListGet)
-    def _(self, node: ir.ListGet):
-        lstT, idxT = self.visit_children(node)
-        if not isinstance(lstT, irT.ListT):
-            raise TypeError("ListGet expects a list as first operand")
-        if idxT is not irT.Int:
-            raise TypeError("ListGet index must be Int")
-        return lstT.elemT
-
-    @handles(ir.ListLength)
-    def _(self, node: ir.ListLength):
-        lstT, = self.visit_children(node)
-        if not isinstance(lstT, irT.ListT):
-            raise TypeError("ListLength expects a list")
+    @handles(ir.Card)
+    def _(self, node: ir.Card):
+        domT, = self.visit_children(node)
+        if not isinstance(domT, irT.DomT):
+            raise TypeError(f"Card expects DomT, got {domT}")
         return irT.Int
 
-    @handles(ir.ListWindow)
-    def _(self, node: ir.ListWindow):
-        lstT, sizeT, strideT = self.visit_children(node)
-        if not isinstance(lstT, irT.ListT):
-            raise TypeError("ListWindow expects a list")
-        if sizeT is not irT.Int or strideT is not irT.Int:
-            raise TypeError("ListWindow size and stride must be Int")
-        return irT.ListT(irT.ListT(lstT.elemT))
-
-    @handles(ir.ListConcat)
-    def _(self, node: ir.ListConcat):
-        aT, bT = self.visit_children(node)
-        if not isinstance(aT, irT.ListT) or not isinstance(bT, irT.ListT):
-            raise TypeError("ListConcat expects list operands")
-        if aT.elemT != bT.elemT:
-            raise TypeError("ListConcat element types must match")
-        return aT
-
-    @handles(ir.ListContains)
-    def _(self, node: ir.ListContains):
-        listT, elemT = self.visit_children(node)
-        if not isinstance(listT, irT.ListT):
-            raise TypeError("ListContains expects a list as first operand")
-        if elemT != listT.elemT:
-            raise TypeError("ListContains element type must match list element type")
+    @handles(ir.IsMember)
+    def _(self, node: ir.IsMember):
+        domT, valT = self.visit_children(node)
+        if not isinstance(domT, irT.DomT):
+            raise TypeError(f"IsMember expects DomT as first argument, got {domT}")
+        if valT != domT.carT:
+            raise TypeError(f"IsMember value type {valT} does not match domain carrier type {domT.carT}")
         return irT.Bool
 
-    @handles(ir.OnlyElement)
-    def _(self, node: ir.OnlyElement):
-        listT, = self.visit_children(node)
-        if not isinstance(listT, irT.ListT):
-            raise TypeError("OnlyElement expects a list")
-        return listT.elemT
+    @handles(ir.CartProd)
+    def _(self, node: ir.CartProd):
+        domTs = self.visit_children(node)
+        for domT in domTs:
+            if not isinstance(domT, irT.DomT):
+                raise TypeError(f"CartProd expects DomT arguments, got {domT}")
+        # TODO: Verify cartesian product domain construction
+        # The carrier type should be a tuple of the carrier types
+        carTs = tuple(domT.carT for domT in domTs)
+        carT = irT.TupleT(*carTs) if len(carTs) > 1 else carTs[0] if len(carTs) == 1 else irT.UnitType
+        # TODO: What should the capabilities be?
+        return irT.DomT(carT, irT.DomCap())
 
-    # Collections - Dict nodes
-    @handles(ir.Dict)
-    def _(self, node: ir.Dict):
-        # Flat children alternating key, value
-        Ts = self.visit_children(node)
-        keyTs = Ts[::2]
-        valTs= Ts[1::2]
-        assert len(keyTs) == len(valTs) # True by construction
-        if len(keyTs) == 0:
-            raise TypeError("Cannot infer type of empty dict literal")
-        keyT0 = keyTs[0]
-        valT0 = valTs[0]
-        for kT in keyTs[1:]:
-            if kT is not keyT0:
-                raise TypeError("Heterogeneous dict keys")
-        for vT in valTs:
-            if vT is not valT0:
-                raise TypeError("Heterogeneous dict values")
-        return irT.DictT(keyT0, valT0)
+    @handles(ir.DomProj)
+    def _(self, node: ir.DomProj):
 
-    @handles(ir.DictTabulate)
-    def _(self, node: ir.DictTabulate):
-        keysT, lamT = self.visit_children(node)
-        if not isinstance(keysT, irT.ListT):
-            raise TypeError("DictTabulate keys must be a list")
-        if not isinstance(lamT, irT.ArrowT):
-            raise TypeError("DictTabulate expects a Lambda as second child")
-        if lamT.argT != keysT.elemT:
-            raise TypeError(f"DictTabulate lambda argument type {lamT.argT} does not match keys list element type {keysT.elemT}")
-        return irT.DictT(keysT.elemT, lamT.resT)
+        domT, = self.visit_children(node)
+        if not isinstance(domT, irT.DomT):
+            raise TypeError(f"DomProj expects DomT, got {domT}")
+        # TODO: Verify domain projection - should extract one component from cartesian product
+        if not isinstance(domT.carT, irT.TupleT):
+            raise TypeError(f"DomProj expects tuple carrier type, got {domT.carT}")
+        if node.idx >= len(domT.carT.elemTs):
+            raise TypeError(f"DomProj index {node.idx} out of bounds for tuple of length {len(domT.carT.elemTs)}")
+        return irT.DomT(domT.carT.elemTs[node.idx], domT.cap)
 
-    @handles(ir.DictGet)
-    def _(self, node: ir.DictGet):
-        dT, kT = self.visit_children(node)
-        if not isinstance(dT, irT.DictT):
-            raise TypeError("DictGet expects a dict")
-        if kT is not dT.keyT:
-            raise TypeError(f"{node}: DictGet key type mismatch, expected {dT.keyT}, got {kT}")
-        return dT.valT
+    @handles(ir.TupleLit)
+    def _(self, node: ir.TupleLit):
+        childTs = self.visit_children(node)
+        return irT.TupleT(*childTs)
 
-    @handles(ir.DictMap)
-    def _(self, node: ir.DictMap):
-        dT, lamT = self.visit_children(node)
-        if not isinstance(dT, irT.DictT):
-            raise TypeError("DictMap expects a dict as first child")
-        if not isinstance(lamT, irT.ArrowT):
-            raise TypeError("DictMap expects a Lambda as second child")
-        expected_argT = irT.TupleT(dT.keyT, dT.valT)
-        if lamT.argT != expected_argT:
-            raise TypeError(f"DictMap lambda argument type {lamT.argT} does not match dict key/value types {expected_argT}")
-        return irT.DictT(dT.keyT, lamT.resT)
+    @handles(ir.Proj)
+    def _(self, node: ir.Proj):
+        tupT, = self.visit_children(node)
+        if not isinstance(tupT, irT.TupleT):
+            raise TypeError(f"Proj expects TupleT, got {tupT}")
+        if node.idx >= len(tupT.elemTs):
+            raise TypeError(f"Proj index {node.idx} out of bounds for tuple of length {len(tupT.elemTs)}")
+        return tupT.elemTs[node.idx]
 
-    @handles(ir.DictLength)
-    def _(self, node: ir.DictLength):
-        dT = self.visit_children(node)
-        if not isinstance(dT, irT.DictT):
-            raise TypeError("DictLength expects a dict")
-        return irT.Int
+    @handles(ir.DisjUnion)
+    def _(self, node: ir.DisjUnion):
+        domTs = self.visit_children(node)
+        for domT in domTs:
+            if not isinstance(domT, irT.DomT):
+                raise TypeError(f"DisjUnion expects DomT arguments, got {domT}")
+        # TODO: Verify disjoint union construction
+        # The carrier type should be a sum type
+        carTs = tuple(domT.carT for domT in domTs)
+        carT = irT.SumT(*carTs) if len(carTs) > 0 else irT.UnitType
+        # TODO: What should the capabilities be?
+        return irT.DomT(carT, irT.DomCap())
 
-    # Grid nodes
-    @handles(ir.Grid)
-    def _(self, node: ir.Grid):
-        elemTs = self.visit_children(node)
-        if len(elemTs) == 0:
-            raise TypeError("Cannot infer type of empty grid")
-        elemT0 = elemTs[0]
-        for T in elemTs[1:]:
-            if T is not elemT0:
-                raise TypeError("Heterogeneous grid elements")
-        return irT.GridT(elemT0, "C")
+    @handles(ir.DomInj)
+    def _(self, node: ir.DomInj):
+        domT, = self.visit_children(node)
+        if not isinstance(domT, irT.DomT):
+            raise TypeError(f"DomInj expects DomT, got {domT}")
+        # TODO: Verify domain injection - should inject into one component of disjoint union
+        if not isinstance(domT.carT, irT.SumT):
+            raise TypeError(f"DomInj expects sum carrier type, got {domT.carT}")
+        if node.idx >= len(domT.carT.elemTs):
+            raise TypeError(f"DomInj index {node.idx} out of bounds for sum of length {len(domT.carT.elemTs)}")
+        if domT.carT.elemTs[node.idx] != node.T:
+            raise TypeError(f"DomInj type mismatch: expected {domT.carT.elemTs[node.idx]}, got {node.T}")
+        return irT.DomT(node.T, domT.cap)
 
-    @handles(ir.GridTabulate)
-    def _(self, node: ir.GridTabulate):
-        rT, cT, lamT = self.visit_children(node)
-        if rT is not irT.Int or cT is not irT.Int:
-            raise TypeError("GridTabulate nR and nC must be Int")
-        if not isinstance(lamT, irT.ArrowT):
-            raise TypeError("GridTabulate expects a Lambda as third child")
-        if lamT.argT != irT.CellIdxT:
-            raise TypeError(f"GridTabulate lambda argument type {lamT.argT} does not match CellIdxT")
-        # TODO, something off about the 'mode'
-        return irT.GridT(lamT.resT, "C")
+    @handles(ir.Inj)
+    def _(self, node: ir.Inj):
+        valT, = self.visit_children(node)
+        if valT != node.T:
+            raise TypeError(f"Inj value type {valT} does not match node type {node.T}")
+        # TODO: Verify injection type - should construct sum type
+        # The result should be a sum type containing node.T at index node.idx
+        # But we don't know the full sum type from just this node
+        return irT.SumT(node.T)  # TODO: This is likely incomplete
 
-    @handles(ir.GridEnumNode)
-    def _(self, node: ir.GridEnumNode):
-        rT, cT = self.visit_children(node)
-        if rT is not irT.Int or cT is not irT.Int:
-            raise TypeError("GridEnumNode nR and nC must be Int")
-        mode = node.mode
-        if mode in ("Cells",):
-            elemT = node.cellT
-            T = irT.ListT(elemT)
-        elif mode in ("Rows", "Cols"):
-            # List of lists of cell indices
-            T = irT.ListT(irT.ListT(node.cellT))
-        elif mode in ("CellGrid",):
-            T = irT.GridT(node.cellT, "C")
-        else:
-            raise TypeError(f"Unknown GridEnumNode mode: {mode}")
-        return T
+    @handles(ir.Match)
+    def _(self, node: ir.Match):
+        scrutT, branchesT = self.visit_children(node)
+        # TODO: Verify match node structure
+        # scrutinee should be a sum type
+        if not isinstance(scrutT, irT.SumT):
+            raise TypeError(f"Match scrutinee must be SumT, got {scrutT}")
+        # branches should be a tuple of lambdas
+        if not isinstance(branchesT, irT.TupleT):
+            raise TypeError(f"Match branches must be TupleT, got {branchesT}")
+        if len(branchesT.elemTs) != len(scrutT.elemTs):
+            raise TypeError(f"Match branches count {len(branchesT.elemTs)} does not match sum type count {len(scrutT.elemTs)}")
+        # Verify each branch is an ArrowT matching the corresponding sum component
+        branchTs = branchesT.elemTs
+        if len(branchTs) == 0:
+            raise TypeError("Match must have at least one branch")
+        resT = None
+        for i, (sumElemT, branchT) in enumerate(zip(scrutT.elemTs, branchTs)):
+            if not isinstance(branchT, irT.ArrowT):
+                raise TypeError(f"Match branch {i} must be ArrowT, got {branchT}")
+            if branchT.argT != sumElemT:
+                raise TypeError(f"Match branch {i} argument type {branchT.argT} does not match sum component {sumElemT}")
+            if resT is None:
+                resT = branchT.resT
+            elif branchT.resT != resT:
+                raise TypeError(f"Match branches must have same result type: {resT} != {branchT.resT}")
+        return resT
 
-    @handles(ir.GridFlatNode)
-    def _(self, node: ir.GridFlatNode):
-        gridT, = self.visit_children(node)
-        if not isinstance(gridT, irT.GridT):
-            raise TypeError("GridFlatNode expects a grid")
-        return irT.ListT(gridT.valueT)
-
-    @handles(ir.GridWindowNode)
-    def _(self, node: ir.GridWindowNode):
-        gridT, size_rT, size_cT, stride_rT, stride_cT = self.visit_children(node)
-        if not isinstance(gridT, irT.GridT):
-            raise TypeError("GridWindowNode expects a grid")
-        for s in (size_rT, size_cT, stride_rT, stride_cT):
-            if s is not irT.Int:
-                raise TypeError("GridWindowNode sizes/strides must be Int")
-        # Windows enumerate grids of cells
-        return irT.ListT(irT.GridT(gridT.valueT, "C"))
-
-    @handles(ir.GridDims)
-    def _(self, node: ir.GridDims):
-        dimT = self.visit_children(node)
-        if dimT is not irT.TupleT(irT.Int, irT.Int):
-            raise TypeError("GridDims expects a tuple of Ints")
-        return dimT
-
-    # Higher Order Operators
-    @handles(ir.Lambda)
-    def _(self, lam: ir.Lambda):
-        self.bctx.append(lam.paramT)
-        resT, = self.visit_children(lam)
-        self.bctx.pop()
-        argT = lam.paramT
-        return irT.ArrowT(argT, resT)
-
-    @handles(ir.Map)
-    def _(self, node: ir.Map):
-        domainT, funT = self.visit_children(node)
-        if not isinstance(domainT, irT.ListT):
-            raise TypeError(f"Map expects a list as domain, got {domainT}")
-        if not isinstance(funT, irT.ArrowT):
-            raise TypeError(f"Map expects a Lambda as second child, got {funT}")
-        if funT.argT != domainT.elemT:
-            raise TypeError(f"Map lambda argument type {funT.argT} does not match domain element type {domainT.elemT}")
-        return irT.ListT(funT.resT)
-
-    @handles(ir.Fold)
-    def _(self, node: ir.Fold):
-        domainT, funT, initT = self.visit_children(node)
-        if not isinstance(domainT, irT.ListT):
-            raise TypeError("Fold expects a list as domain")
-        if not isinstance(funT, irT.ArrowT):
-            raise TypeError("Fold expects a Lambda as second child")
-        # Should be (a -> b -> b) -> b ->List[a] -> b
-        aT = domainT.elemT
-        bT = funT.resT
-        if initT != bT:
-            raise TypeError(f"Fold init type {initT} does not match domain element type {domainT.elemT}")
-        if funT != irT.ArrowT(irT.TupleT(aT, bT), bT):
-            raise TypeError(f"Fold lambda must have argument type {aT} and result type {bT}")
-        return bT
-
-    @handles(ir.SumReduce)
-    def _(self, node: ir.SumReduce):
-        valsT, = self.visit_children(node)
-        if not isinstance(valsT, irT.ListT) or valsT.elemT not in (irT.Int, irT.Bool):
-            raise TypeError(f"SumReduce expects a list of Int or Bool, got {valsT}")
-        return irT.Int
-
-    @handles(ir.ProdReduce)
-    def _(self, node: ir.ProdReduce):
-        valsT, = self.visit_children(node)
-        if not isinstance(valsT, irT.ListT) or valsT.elemT is not irT.Int:
-            raise TypeError("ProdReduce expects a list of Int")
-        return irT.Int
+    @handles(ir.Restrict)
+    def _(self, node: ir.Restrict):
+        domT, predT = self.visit_children(node)
+        if not isinstance(domT, irT.DomT):
+            raise TypeError(f"Restrict expects DomT as first argument, got {domT}")
+        if not isinstance(predT, irT.ArrowT):
+            raise TypeError(f"Restrict expects ArrowT as second argument, got {predT}")
+        if predT.argT != domT.carT:
+            raise TypeError(f"Restrict predicate argument type {predT.argT} does not match domain carrier type {domT.carT}")
+        if predT.resT != irT.Bool:
+            raise TypeError(f"Restrict predicate must return Bool, got {predT.resT}")
+        return domT
 
     @handles(ir.Forall)
     def _(self, node: ir.Forall):
-        domainT, lamT = self.visit_children(node)
-        if not isinstance(domainT, irT.ListT):
-            raise TypeError("Forall domain must be a list")
-        if not isinstance(lamT, irT.ArrowT):
-            raise TypeError("Forall expects a Lambda as second child")
-        if lamT.resT is not irT.Bool:
-            raise TypeError("Forall lambda must return Bool")
-        if lamT.argT != domainT.elemT:
-            raise TypeError(f"Forall lambda argument type {lamT.argT} does not match domain element type {domainT.elemT}")
+        domT, funT = self.visit_children(node)
+        if not isinstance(domT, irT.DomT):
+            raise TypeError(f"Forall expects DomT as first argument, got {domT}")
+        if not isinstance(funT, irT.ArrowT):
+            raise TypeError(f"Forall expects ArrowT as second argument, got {funT}")
+        if funT.argT != domT.carT:
+            raise TypeError(f"Forall function argument type {funT.argT} does not match domain carrier type {domT.carT}")
+        if funT.resT != irT.Bool:
+            raise TypeError(f"Forall function must return Bool, got {funT.resT}")
         return irT.Bool
 
     @handles(ir.Exists)
     def _(self, node: ir.Exists):
-        domainT, lamT = self.visit_children(node)
-        if not isinstance(domainT, irT.ListT):
-            raise TypeError("Exists domain must be a list")
-        if not isinstance(lamT, irT.ArrowT):
-            raise TypeError("Exists expects a Lambda as second child")
-        if lamT.resT is not irT.Bool:
-            raise TypeError("Exists lambda must return Bool")
-        if lamT.argT != domainT.elemT:
-            raise TypeError(f"Exists lambda argument type {lamT.argT} does not match domain element type {domainT.elemT}")
+        domT, funT = self.visit_children(node)
+        if not isinstance(domT, irT.DomT):
+            raise TypeError(f"Exists expects DomT as first argument, got {domT}")
+        if not isinstance(funT, irT.ArrowT):
+            raise TypeError(f"Exists expects ArrowT as second argument, got {funT}")
+        if funT.argT != domT.carT:
+            raise TypeError(f"Exists function argument type {funT.argT} does not match domain carrier type {domT.carT}")
+        if funT.resT != irT.Bool:
+            raise TypeError(f"Exists function must return Bool, got {funT.resT}")
         return irT.Bool
+
+    @handles(ir.Tabulate)
+    def _(self, node: ir.Tabulate):
+        domT, funT = self.visit_children(node)
+        if not isinstance(domT, irT.DomT):
+            raise TypeError(f"Tabulate expects DomT as first argument, got {domT}")
+        if not isinstance(funT, irT.ArrowT):
+            raise TypeError(f"Tabulate expects ArrowT as second argument, got {funT}")
+        if funT.argT != domT.carT:
+            raise TypeError(f"Tabulate function argument type {funT.argT} does not match domain carrier type {domT.carT}")
+        return irT.FuncT(domT, funT.resT)
+
+    @handles(ir.DomOf)
+    def _(self, node: ir.DomOf):
+        funcT, = self.visit_children(node)
+        if not isinstance(funcT, irT.FuncT):
+            raise TypeError(f"DomOf expects FuncT, got {funcT}")
+        return funcT.domT
+
+    @handles(ir.ImageOf)
+    def _(self, node: ir.ImageOf):
+        funcT, = self.visit_children(node)
+        if not isinstance(funcT, irT.FuncT):
+            raise TypeError(f"ImageOf expects FuncT, got {funcT}")
+        # TODO: Verify image domain construction
+        # The image domain should have the result type as carrier and appropriate capabilities
+        return irT.DomT(funcT.resT, funcT.domT.cap)
+
+    @handles(ir.Apply)
+    def _(self, node: ir.Apply):
+        funcT, argT = self.visit_children(node)
+        if not isinstance(funcT, irT.FuncT):
+            raise TypeError(f"Apply expects FuncT as first argument, got {funcT}")
+        if argT != funcT.domT.carT:
+            raise TypeError(f"Apply argument type {argT} does not match function domain carrier type {funcT.domT.carT}")
+        return funcT.resT
+
+    @handles(ir.ListLit)
+    def _(self, node: ir.ListLit):
+        childTs = self.visit_children(node)
+        if len(childTs) == 0:
+            raise NotImplementedError("Cannot infer type of empty list literal")
+        elemT = childTs[0]
+        for i, childT in enumerate(childTs[1:], 1):
+            if childT != elemT:
+                raise TypeError(f"ListLit has heterogeneous elements: element 0 is {elemT}, element {i} is {childT}")
+        # List[B] is Func(Fin(n) -> B)
+        # TODO: Verify list domain construction
+        n = len(childTs)
+        finDom = irT.DomT(irT.Int, irT.DomCap(finite=True, enumerable=1, ordered=True))
+        return irT.FuncT(finDom, elemT)
+
+    @handles(ir.Fold)
+    def _(self, node: ir.Fold):
+        funcT, funT, initT = self.visit_children(node)
+        if not isinstance(funcT, irT.FuncT):
+            raise TypeError(f"Fold expects FuncT as first argument, got {funcT}")
+        if not isinstance(funT, irT.ArrowT):
+            raise TypeError(f"Fold expects ArrowT as second argument, got {funT}")
+        # Fold signature: Seq[A] -> ((A,B) -> B) -> B -> B
+        # So fun should be (elemT, resT) -> resT
+        elemT = funcT.resT
+        resT = funT.resT
+        if initT != resT:
+            raise TypeError(f"Fold init type {initT} does not match function result type {resT}")
+        expectedFunT = irT.ArrowT(irT.TupleT(elemT, resT), resT)
+        if funT != expectedFunT:
+            raise TypeError(f"Fold function type {funT} does not match expected type ArrowT(TupleT({elemT}, {resT}), {resT})")
+        return resT
+
+    ##############################
+    ## Surface-level IR nodes (Used for analysis, but can be collapsed)
+    ##############################
+
+    @handles(ir.And)
+    def _(self, node: ir.And):
+        leftT, rightT = self.visit_children(node)
+        if leftT != irT.Bool or rightT != irT.Bool:
+            raise TypeError(f"And expects Bool operands, got {leftT} and {rightT}")
+        return irT.Bool
+
+    @handles(ir.Implies)
+    def _(self, node: ir.Implies):
+        leftT, rightT = self.visit_children(node)
+        if leftT != irT.Bool or rightT != irT.Bool:
+            raise TypeError(f"Implies expects Bool operands, got {leftT} and {rightT}")
+        return irT.Bool
+
+    @handles(ir.Or)
+    def _(self, node: ir.Or):
+        leftT, rightT = self.visit_children(node)
+        if leftT != irT.Bool or rightT != irT.Bool:
+            raise TypeError(f"Or expects Bool operands, got {leftT} and {rightT}")
+        return irT.Bool
+
+    @handles(ir.Add)
+    def _(self, node: ir.Add):
+        leftT, rightT = self.visit_children(node)
+        if leftT != irT.Int or rightT != irT.Int:
+            raise TypeError(f"Add expects Int operands, got {leftT} and {rightT}")
+        return irT.Int
+
+    @handles(ir.Sub)
+    def _(self, node: ir.Sub):
+        leftT, rightT = self.visit_children(node)
+        if leftT != irT.Int or rightT != irT.Int:
+            raise TypeError(f"Sub expects Int operands, got {leftT} and {rightT}")
+        return irT.Int
+
+    @handles(ir.Mul)
+    def _(self, node: ir.Mul):
+        leftT, rightT = self.visit_children(node)
+        if leftT != irT.Int or rightT != irT.Int:
+            raise TypeError(f"Mul expects Int operands, got {leftT} and {rightT}")
+        return irT.Int
+
+    @handles(ir.Gt)
+    def _(self, node: ir.Gt):
+        leftT, rightT = self.visit_children(node)
+        if leftT != irT.Int or rightT != irT.Int:
+            raise TypeError(f"Gt expects Int operands, got {leftT} and {rightT}")
+        return irT.Bool
+
+    @handles(ir.GtEq)
+    def _(self, node: ir.GtEq):
+        leftT, rightT = self.visit_children(node)
+        if leftT != irT.Int or rightT != irT.Int:
+            raise TypeError(f"GtEq expects Int operands, got {leftT} and {rightT}")
+        return irT.Bool
+
+    @handles(ir.Windows)
+    def _(self, node: ir.Windows):
+        listT, sizeT, strideT = self.visit_children(node)
+        if not isinstance(listT, irT.FuncT):
+            raise TypeError(f"Windows expects FuncT as first argument, got {listT}")
+        if sizeT != irT.Int or strideT != irT.Int:
+            raise TypeError(f"Windows expects Int for size and stride, got {sizeT} and {strideT}")
+        # Windows: SeqDom[A] -> Int -> Int -> Func[Fin(n) -> SeqDom[A]]
+        # Returns a function from finite domain to sequences
+        elemT = listT.resT
+        # TODO: Verify window domain construction
+        windowSizeDom = irT.DomT(irT.Int, irT.DomCap(finite=True, enumerable=1, ordered=True))
+        windowSeqT = irT.FuncT(listT.domT, elemT)
+        nWindowsDom = irT.DomT(irT.Int, irT.DomCap(finite=True, enumerable=1, ordered=True))
+        return irT.FuncT(nWindowsDom, windowSeqT)
+
+    @handles(ir.Tiles)
+    def _(self, node: ir.Tiles):
+        gridT, size_rT, size_cT, stride_rT, stride_cT = self.visit_children(node)
+        if not isinstance(gridT, irT.FuncT):
+            raise TypeError(f"Tiles expects FuncT as first argument, got {gridT}")
+        for name, sT in [("size_r", size_rT), ("size_c", size_cT), ("stride_r", stride_rT), ("stride_c", stride_cT)]:
+            if sT != irT.Int:
+                raise TypeError(f"Tiles {name} must be Int, got {sT}")
+        # Tiles: GridDom[A] -> int -> int -> int -> int -> Func[Fin(r) x Fin(c) -> GridDom[A]]
+        # TODO: Verify tiles domain construction
+        elemT = gridT.resT
+        tileDom = gridT.domT  # TODO: This should be the tile domain
+        nTilesDom = irT.DomT(irT.Int, irT.DomCap(finite=True, enumerable=1, ordered=True))
+        tileGridT = irT.FuncT(tileDom, elemT)
+        return irT.FuncT(nTilesDom, tileGridT)
+
+    @handles(ir.SumReduce)
+    def _(self, node: ir.SumReduce):
+        funcT, = self.visit_children(node)
+        if not isinstance(funcT, irT.FuncT):
+            raise TypeError(f"SumReduce expects FuncT, got {funcT}")
+        if funcT.resT != irT.Int:
+            raise TypeError(f"SumReduce expects FuncT with Int element type, got {funcT.resT}")
+        return irT.Int
+
+    @handles(ir.ProdReduce)
+    def _(self, node: ir.ProdReduce):
+        funcT, = self.visit_children(node)
+        if not isinstance(funcT, irT.FuncT):
+            raise TypeError(f"ProdReduce expects FuncT, got {funcT}")
+        if funcT.resT != irT.Int:
+            raise TypeError(f"ProdReduce expects FuncT with Int element type, got {funcT.resT}")
+        return irT.Int
 
     @handles(ir.Distinct)
     def _(self, node: ir.Distinct):
-        valsT, = self.visit_children(node)
-        if not isinstance(valsT, irT.ListT):
-            raise TypeError(f"{node}: Distinct expects a list, got {valsT}")
+        funcT, = self.visit_children(node)
+        if not isinstance(funcT, irT.FuncT):
+            raise TypeError(f"Distinct expects FuncT, got {funcT}")
         return irT.Bool
-
-    # Functions that should not be here - moved to bottom
-    @handles(ir._LambdaPlaceholder)
-    @handles(ir._BoundVarPlaceholder)
-    def _(self, node: ir.Node): 
-        raise ValueError(f"SHOULD NOT BE HERE {node}")

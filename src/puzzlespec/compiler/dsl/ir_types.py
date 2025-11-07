@@ -36,45 +36,41 @@ class _Int(BaseType):
 
 Int = _Int()
 
-class _CellIdxT(BaseType):
-    _pytype = None
-    def __repr__(self):
-        return "𝒞"
+class EnumT(Type_):
+    _cache = {}
+    __match_args__ = ("name",)
+
+    def __new__(cls, name: str, *labels: str):
+        key = name
+        if key not in cls._cache:
+            instance = super().__new__(cls)
+            instance.name = name
+            instance.labels = labels
+            cls._cache[key] = instance
+        else:
+            T = cls._cache[key]
+            if T.labels != labels:
+                raise ValueError("Cannot construct two different EnumTs with different labels!")
+        return T
     
-CellIdxT = _CellIdxT()
+    def __repr__(self):
+        return f"Enum<{self.name}"
 
-#class _VertexIdxT(BaseType):
-#    _pytype = None
-#    def __repr__(self):
-#        return "𝒱"
-#VertexIdxT = _VertexIdxT()
-#
-#class _EdgeIdxT(BaseType):
-#    _pytype = None
-#    def __repr__(self):
-#        return "𝓔"
-#EdgeIdxT = _EdgeIdxT()
+    def cast_as(self):
+        raise NotImplementedError()
 
-@dataclass
-class DomCap:
-    finite: Bool=True
-    enumerable: int=0 #represeents the 'rank' of enumberability
-    ordered: Bool=False
 
 class DomT(Type_):
     _cache = {}
-    __match_args__ = ("carT", 'cap')
+    __match_args__ = ("carT",)
     carT: Type_
-    cap: DomCap
 
-    def __new__(cls, carT: Type_, cap: DomCap):
+    def __new__(cls, carT: Type_):
         assert isinstance(carT, Type_)
-        assert isinstance(cap, DomT)
-        key = (carT, cap)
+        key = carT
         if key not in cls._cache:
             instance = super().__new__(cls)
             instance.carT = carT
-            instance.cap = cap
             cls._cache[key] = instance
         return cls._cache[key]
     

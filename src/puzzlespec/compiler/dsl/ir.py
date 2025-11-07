@@ -83,9 +83,11 @@ class Node:
 # A Func[Dom(A) -> B] is typed as Arrow[carrier(A) -> B]
 # Every Func has an tag stored in an envrionment indicating typeclass-like properties (seq, etc...) along with the Dom stored (or that info is derivable)
 
-# Unit node 
+##############################
+## Core-level IR nodes (Used throughout entire compiler flow)
+##############################
+
 class Unit(Node):
-    _fields = ()
     _numc = 0
     def __init__(self):
         super().__init__()
@@ -111,7 +113,6 @@ class Lambda(Node):
     def __init__(self, body: Node, paramT: irT.Type_):
         self.paramT = paramT
         super().__init__(body)
-
 
 ### Int/Bool 
 
@@ -202,6 +203,23 @@ class Fin(Node):
     _numc = 1
     def __init__(self, N: Node):
         super().__init__(N)
+
+# Dom[EnumT]
+class Enum(Node):
+    _fields = ("enumT",)
+    _numc = 0
+    def __init__(self, enumT: irT.EnumT):
+        self.enumT = enumT
+        super().__init__()
+
+# Dom[EnumT] -> EnumT
+class EnumLit(Node):
+    _fields = ("enumT", "label")
+    _numc = 0
+    def __init__(self, enumT: irT.EnumT, label: str):
+        self.enumT = enumT
+        self.label = label
+        super().__init__()
 
 # Get the size of a domain
 # Dom(A) -> Int
@@ -300,6 +318,7 @@ class Exists(Node):
 
 # Dom(A) -> (A->B) -> Func(Dom(A)->B)
 class Tabulate(Node):
+    _numc=2
     def __init__(self, dom: Node, fun: Node):
         super().__init__(dom, fun)
 
@@ -327,13 +346,6 @@ class ListLit(Node):
     def __init__(self, *vals: Node):
         super().__init__(*vals)
 
-## TODO This could be implemented using Tabulate and Apply (put in surface?)
-## Func[Dom(A)->B] -> (B -> C) -> Func(Dom(A) -> C)
-#class Map(Node):
-#    _numc = 2
-#    def __init__(self, func: Node, fun: Node):
-#        super().__init__(func, fun)
-
 # only used on Seq Funcs TODO maybe should have scan as the fundimental IR node
 # Seq[A] -> ((A,B) -> B) -> B -> B
 class Fold(Node):
@@ -341,31 +353,10 @@ class Fold(Node):
     def __init__(self, func: Node, fun: Node, init: Node):
         super().__init__(func, fun, init)
 
-
 ##############################
-## constructor-level IR nodes (Used for construction but immediatley gets transformed)
-##############################
-
-# gets tranformed to a de-bruijn BoundVar
-class _BoundVarPlaceholder(Node):
-    _fields = ('domT',)
-    _numc = 1
-    def __init__(self, dom: Node, domT: irT.DomT):
-        self.domT = domT
-        super().__init__(dom)
-
-class _LambdaPlaceholder(Node):
-    _fields = ('paramT',)
-    _numc = 2
-    def __init__(self, bound_var: Node, body: Node, paramT: irT.Type_):
-        self.paramT = paramT
-        super().__init__(bound_var, body)
-
-##############################
-## 'Surface level' IR
+## Surface-level IR nodes (Used for analyis, but can be collapes)
 ##############################
 
-## Bool/Int operators
 class And(Node):
     _numc = 2
     def __init__(self, a: Node, b: Node):
@@ -406,54 +397,64 @@ class GtEq(Node):
     def __init__(self, a: Node, b: Node):
         super().__init__(a, b)
 
-# SeqDom[A] -> Int -> Int -> Func[Fin(n) -> SeqDom[A]]
+# Array[A] -> Int -> Int -> Array[Fin(n) -> Array[A]]
 class Windows(Node):
     _numc = 3
     def __init__(self, list: Node, size: Node, stride: Node):
         super().__init__(list, size, stride)
 
-# GridDom[A] -> int -> int -> int -> int -> Func[Fin(r) x Fin(c) -> GridDom[A]]
+# NDDom[A] -> (Int,...) -> (Int,...) -> Array[Fin(n1) x Fin(n2) x ... -> NDDom[A]]
 class Tiles(Node):
-    _numc = 5
-    def __init__(self, grid: Node, size_r: Node, size_c: Node, stride_r: Node, stride_c: Node):
-        super().__init__(grid, size_r, size_c, stride_r, stride_c)
+    _numc = 3
+    def __init__(self, dom: Node, sizes: Node, strides: Node):
+        super().__init__(dom, sizes, strides)
 
-
-
-## Grid Nodes
-
-# enumerate cells, rows, cols, edges, etc
-# TODO might want to split into individual nodes
-class GridEnumNode(Node):
-    _fields = ("mode", "cellT")
-    _numc = 2
-    def __init__(self, nR: Node, nC: Node, mode: str, cellT: irT.Type_=irT.CellIdxT):
-        if mode not in ('CellGrid', 'Cells', 'Rows', 'Cols'):
-            raise NotImplementedError(f"{mode} not supported for GridEnum")
-        self.mode = mode
-        self.cellT = cellT
-        super().__init__(nR, nC)
-
-class GridDims(Node):
+# creates an array of slices in a given index
+class Slices(Node):
+    _fields = ('idx',)
     _numc = 1
-    def __init__(self, grid: Node):
-        super().__init__(grid)
+    def __init__(self, dom: Node, idx: int):
+        assert isinstance(idx, int)
+        self.idx = idx
+        super().__init__(dom)
 
 # Common Fold Nodes
 class SumReduce(Node):
     _numc = 1
-    def __init__(self, vals: Node):
-        super().__init__(vals)
+    def __init__(self, func: Node):
+        super().__init__(func)
 
 class ProdReduce(Node):
     _numc = 1
-    def __init__(self, vals: Node):
-        super().__init__(vals)
+    def __init__(self, func: Node):
+        super().__init__(func)
 
 class Distinct(Node):
     _numc = 1
-    def __init__(self, vals: Node):
-        super().__init__(vals)
+    def __init__(self, func: Node):
+        super().__init__(func)
+
+
+##############################
+## Constructor-level IR nodes (Used for construction but immediatley gets transformed)
+##############################
+
+# gets tranformed to a de-bruijn BoundVar
+class _BoundVarPlaceholder(Node):
+    _fields = ('dom', 'T','is_tabulate')
+    _numc = 0
+    def __init__(self, dom: Node, T: irT.Type_, is_tabulate: bool):
+        self.T = T
+        self.dom = dom
+        self.is_tabulate = is_tabulate
+        super().__init__()
+
+class _LambdaPlaceholder(Node):
+    _fields = ('paramT',)
+    _numc = 2
+    def __init__(self, bound_var: Node, body: Node, paramT: irT.Type_):
+        self.paramT = paramT
+        super().__init__(bound_var, body)
 
 
 # Mapping from Node classes to a priority integer.
@@ -461,15 +462,14 @@ class Distinct(Node):
 NODE_PRIORITY: tp.Dict[tp.Type[Node], int] = {
     Unit: -1,
     Lit: 0,
-    _Param: 1,
     VarRef: 1,
     BoundVar: 2,
     _BoundVarPlaceholder: 2,
     Not: 3,
+    Neg: 3,
     And: 4,
     Or: 4,
     Implies: 5,
-    Neg: 3,
     Add: 4,
     Sub: 4,
     Mul: 5,
@@ -480,34 +480,33 @@ NODE_PRIORITY: tp.Dict[tp.Type[Node], int] = {
     GtEq: 7,
     Lt: 7,
     LtEq: 7,
+    Ite: 8,
     Conj: 8,
     Disj: 8,
     Sum: 8,
     Prod: 8,
-    Tuple: 9,
-    TupleGet: 9,
-    List: 9,
-    ListTabulate: 9,
-    ListGet: 9,
-    ListLength: 9,
-    ListWindow: 9,
-    ListConcat: 9,
-    ListContains: 9,
-    OnlyElement: 9,
-    Dict: 10,
-    DictTabulate: 10,
-    DictGet: 10,
-    DictMap: 10,
-    DictLength: 10,
-    Grid: 11,
-    GridTabulate: 11,
-    GridEnumNode: 11,
-    GridFlatNode: 11,
-    GridWindowNode: 11,
-    GridDims: 11,
+    Universe: 9,
+    Fin: 9,
+    Card: 9,
+    IsMember: 9,
+    CartProd: 9,
+    DomProj: 9,
+    TupleLit: 9,
+    Proj: 9,
+    DisjUnion: 9,
+    DomInj: 9,
+    Inj: 9,
+    Match: 9,
+    Restrict: 9,
+    Tabulate: 10,
+    DomOf: 10,
+    ImageOf: 10,
+    Apply: 10,
+    ListLit: 10,
+    Windows: 10,
+    Tiles: 10,
     Lambda: 12,
     _LambdaPlaceholder: 12,
-    Map: 13,
     Fold: 13,
     SumReduce: 14,
     ProdReduce: 14,

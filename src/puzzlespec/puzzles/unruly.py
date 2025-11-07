@@ -1,7 +1,7 @@
 from ..compiler.dsl import ast
 from ..compiler.dsl.ir_types import Bool, Int
 from ..compiler.dsl import PuzzleSpecBuilder, PuzzleSpec
-from ..compiler.dsl.lib import std, topo, optional as opt
+from ..compiler.dsl.libs import std, topo, optional as opt
 
 def build_unruly_spec() -> PuzzleSpec:
     p = PuzzleSpecBuilder()
@@ -34,10 +34,10 @@ def build_unruly_spec() -> PuzzleSpec:
 
     ## Equal balance of colors in all rows and cols
     p += grid.cells().rows().forall(lambda row: std.count(color[row], lambda v: v==BW_enum.B) == nC // 2)
-    p += grid.cells().rows().forall(lambda row: std.count(color[row], lambda v: v==BW_enum.B) == nR // 2)
+    p += grid.cells().cols().forall(lambda col: std.count(color[col], lambda v: v==BW_enum.B) == nR // 2)
 
     ## No triple of the same color
-    for rcs in (grid.rows(), grid.cols()):
+    for rcs in (grid.cells().rows(), grid.cells().cols()):
         p += rcs.forall(
             lambda line: line.windows(3).forall(
                 lambda w: ~std.all_same(color[w])

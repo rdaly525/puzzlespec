@@ -2,6 +2,21 @@ from .. import ast, ir, ir_types as irT
 import typing as tp
 from enum import Enum as _Enum
 
+
+def Enum(*labels: str, name: str=None) -> ast.EnumDomainExpr:
+    expr = ast.EnumDomainExpr.make_from_labels(*labels, name=name)
+    return expr, expr.members
+
+#def Enum(*labels: str) -> tp.Tuple[ast.DomainExpr, _Enum]:
+#    if not all(isinstance(str, l) for l in labels):
+#        raise ValueError("Labels must be strings")
+#    enum_val = _Enum('_custom_enum', [(l, i) for i, l in enumerate(labels)])
+#    dom = Fin(len(labels))
+#    return dom, enum_val
+
+
+
+
 def count(dom: ast.DomainExpr, pred: tp.Callable) -> ast.IntExpr:
     return len(dom.restrict(pred))
 
@@ -13,13 +28,6 @@ def Fin(n:ast.IntOrExpr)-> ast.IterDomainExpr:
 
 def Range(lo: ast.IntOrExpr, hi: ast.IntOrExpr) -> ast.IterDomainExpr:
     return Fin(hi-lo).tabulate(lambda i: i+lo).image
-
-def Enum(*labels: str) -> tp.Tuple[ast.DomainExpr, _Enum]:
-    if not all(isinstance(str, l) for l in labels):
-        raise ValueError("Labels must be strings")
-    enum_val = _Enum('_custom_enum', [(l, i) for i, l in enumerate(labels)])
-    dom = Fin(len(labels))
-    return dom, enum_val
 
 def sum(func: ast.FuncExpr) -> ast.IntExpr:
     if not (isinstance(func, ast.FuncExpr) and func.elemT == irT.Int):

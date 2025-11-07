@@ -42,16 +42,9 @@ def build_sudoku_spec(gw=False) -> PuzzleSpec:
         # german whisper 'megavar'
         whispers = std.Fin(p.gen_var(sort=Int, name='num_whispers')).tabulate(
             lambda i: std.Fin(p.gen_var(sort=Int, dep=i, name='whisper_lens')).tabulate(
-                lambda j: p.gen_var(dom=grid.cells(), dep=(i,j), name='whispers_locs')
+                lambda j: p.gen_var(dom=grid.cells(), dep=(i, j), name='whispers_locs')
             )
-        ) # Typed Func[Fin(Int) -> Func[Fin(Int) -> CellIdxT]]
-        # A:() -> () == 4
-        # B:(i) -> [(4)] == 6
-        # C: (i, j) -> [(4), (4,6)] == 9
-        # (j, i) -> [(4,6), (4)] == BAD
-
-        foo = std.Fin(6).restrict(lambda i: p.gen_var(Int, dep=i)>3)
-
+        )
         # structural constraint: German whisper cells must be neighbors
         p += whispers.forall(
             lambda whisper: whisper.windows(2).map(
@@ -62,7 +55,7 @@ def build_sudoku_spec(gw=False) -> PuzzleSpec:
         # puzzle rule: neighboring whisper cells must have a difference of at least 5
         p += whispers.forall(
             lambda whisper: whisper.windows(2).map(
-                lambda cells: abs(whisper[cells[0]]-whisper[cells[1]])>=5
+                lambda cells: abs(whisper[cells[0]]-whisper[cells[1]]) >= 5
             )
         )
 

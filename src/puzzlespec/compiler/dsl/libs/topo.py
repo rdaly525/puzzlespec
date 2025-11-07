@@ -13,38 +13,44 @@ class Grid2D(Topology):
         self.nC = nC
 
     # Cells
-    def cells(self) -> ast.GridDomExpr:
-        return ast.GridDomExpr.make(self.nR, self.nC)
-        
-    def vertices(self) -> ast.GridDomExpr:
-        return ast.GridDomExpr.make(self.nR+1, self.nC+1)
+    def cells(self) -> ast.NDIterDomainExpr:
+        return self.nR.fin() * self.nC.fin()
+    
+
+    def vertices(self) -> ast.NDIterDomainExpr:
+        return (self.nR+1).fin() * (self.nC+1).fin()
 
     # Vertical edges
-    def edgesV(self) -> ast.GridDomExpr:
-        return ast.GridDomExpr.make(self.nR, self.nC+1)
+    def edgesV(self) -> ast.NDIterDomainExpr:
+        return self.nR.fin() * (self.nC+1).fin()
 
     # Horizontal edges
-    def edgesH(self) -> ast.GridDomExpr:
-        return ast.GridDomExpr.make(self.nR+1, self.nC)
+    def edgesH(self) -> ast.NDIterDomainExpr:
+        return (self.nR+1).fin() * self.nC.fin()
 
     # Disjoint union of vertical and horizontal edges
     def edges(self) -> ast.DomainExpr:
         return self.edgesV() + self.edgesH()
 
+    @property
     def CellIdxT(self) -> irT.Type_:
-        return self.cells().carrier_type
+        return self.cells().carT
 
+    @property
     def VertexIdxT(self) -> irT.Type_:
-        return self.vertices().carrier_type
+        return self.vertices().carT
 
+    @property
     def EdgeVIdxT(self) -> irT.Type_:
-        return self.edgesV().carrier_type
+        return self.edgesV().carT
 
+    @property
     def EdgeHIdxT(self) -> irT.Type_:
-        return self.edgesH().carrier_type
+        return self.edgesH().carT
 
+    @property
     def EdgeIdxT(self) -> irT.Type_:
-        return self.edges().carrier_type
+        return self.edges().carT
 
     ### relations among cells, vertices, edges
 
