@@ -1,6 +1,5 @@
 from .. import ir, ast, ir_types as irT
 import typing as tp
-from . import count
 
 def OptT(T: irT.Type_) -> irT.Type_:
     return irT.SumT(irT.UnitType, T)
@@ -8,10 +7,9 @@ def OptT(T: irT.Type_) -> irT.Type_:
 def Optional(dom: ast.DomainExpr):
     if not isinstance(dom, ast.DomainExpr):
         raise ValueError(f"Expected DomainExpr, got {type(dom)}")
-    # T = Unit | dom
-    T = OptT(dom.T.carT)
-    node = ir.DisjUnion(ir.Unit(), dom.node)
-    return tp.cast(ast.SumExpr, ast.wrap(node, T))
+    # domT = Universe(Unit) | dom
+    node = ir.DisjUnion(ir.Universe(irT.UnitType), dom.node)
+    return tp.cast(ast.SumExpr, ast.wrap(node))
 
 def _check_optT(T: irT.Type_):
     if not isinstance(T, irT.SumT):
@@ -21,25 +19,12 @@ def _check_optT(T: irT.Type_):
     return T.elemTs[1]
 
 def fold(val: ast.SumExpr, on_none: ast.Expr, on_some: tp.Callable[[ast.Expr], ast.Expr]) -> ast.Expr:
-    if not isinstance(val, ast.SumExpr):
-        raise ValueError(f"Expected SumExpr, got {type(val)}")
-    if not isinstance(on_none, ast.Expr):
-        raise ValueError(f"Expected Expr, got {type(on_none)}")
-    if not isinstance(on_some, ast.LambdaExpr):
-        raise ValueError(f"Expected LambdaExpr, got {type(on_some)}")
-    sumT = val.T
-    argT = _check_optT(sumT)
-    resT = on_none.T
-    some_lam_expr = ast.make_lambda(on_some, argT)
-    if some_lam_expr.resT != resT:
-        raise ValueError(f"Expected LambdaExpr with result type {resT}, got {some_lam_expr.res_type}")
-    none_lam_expr = ast.make_lambda(lambda _: on_none, irT.UnitType)
-    node = ir.Match(val.node, ir.TupleLit(none_lam_expr.node, some_lam_expr.node))
-    return tp.cast(ast.Expr, ast.wrap(node, resT))
+    return val.match(lambda _: on_none, on_some)
 
 def count_some(func: ast.FuncExpr) -> ast.IntExpr:
     if not isinstance(func, ast.FuncExpr):
         raise ValueError(f"Expected FuncExpr, got {type(func)}")
     funcT = tp.cast(irT.ArrowT, func.T)
     _check_optT(funcT.resT)
-    return len(func.domain.restrict(lambda i: func(i).match(lambda _: False, lambda _: True)))
+    some_dom = func.domain.restrict(lambda i: func(i).match(lambda _: False, lambda _: True))
+    return some_dom.size

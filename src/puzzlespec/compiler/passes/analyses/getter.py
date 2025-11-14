@@ -4,7 +4,7 @@ import typing as tp
 
 from ..pass_base import Analysis, AnalysisObject, Context, handles
 from ...dsl import ir, ir_types as irT
-from . import EnvsObj
+from ..envobj import EnvsObj, DomEnv
 
 class VarSet(AnalysisObject):
     def __init__(self, vars: tp.Set[ir.Node]):
@@ -16,7 +16,7 @@ class VarGetter(Analysis):
     name = 'var_getter'
 
     def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
-        self.domenv: 'DomEnv' = ctx.get(EnvsObj).domenv
+        self.domenv: DomEnv = ctx.get(EnvsObj).domenv
         return VarSet(self.visit(root))
 
     def visit(self, node: ir.Node):

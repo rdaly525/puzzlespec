@@ -1,9 +1,9 @@
 from .pass_base import AnalysisObject
-from ..dsl.envs import SymTable, TypeEnv, DomEnv
+from ..dsl.envs import SymTable, DomEnv
 
 # Common Analysis Object
 class EnvsObj(AnalysisObject):
-    def __init__(self, sym: SymTable, tenv: TypeEnv, domenv: DomEnv):
+    def __init__(self, sym: SymTable, domenv: DomEnv, penv):
         self.sym = sym
-        self.tenv = tenv
         self.domenv = domenv
+        self.penv = penv

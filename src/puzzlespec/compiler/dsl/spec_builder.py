@@ -1,17 +1,17 @@
 import typing as tp
 
 from puzzlespec.compiler.passes.transforms.resolve_bound_vars import ResolveBoundVars
-from . import ast, ir, ir_types as irT
-from .envs import SymTable, DomEnv, TypeEnv
+from . import ast, ir, ir_types as irT, proof_lib as pf
+from .envs import SymTable, DomEnv
 from ..passes.pass_base import Context
 from ..passes.transforms.cse import CSE
 from ..passes.analyses.getter import VarGetter, VarSet
-from ..passes.analyses import EnvsObj
+from ..passes.envobj import EnvsObj
 from .spec import PuzzleSpec
 
 class PuzzleSpecBuilder(PuzzleSpec):
     def __init__(self):
-        super().__init__("", "", SymTable(), TypeEnv(), DomEnv(), [], [])
+        super().__init__("", "", SymTable(), DomEnv())
         self._name_name_cnt = 0
         # sid -> "sids which key depends on"
         self._depends = {}
@@ -53,28 +53,34 @@ class PuzzleSpecBuilder(PuzzleSpec):
         if dom is not None and sort is not None and dom.carT:
             raise ValueError(f"{err_prefix}dom.carT must be equal to sort, got {dom.carT} and {sort}")
         if dom is None:
-            dom = ast.wrap(ir.Universe(sort), irT.DomT(sort))
-        dom_obl = dom
+            dom_expr = ast.wrap(ir.Universe(sort))
+        else:
+            dom_expr = dom
         if not isinstance(dep, tp.Tuple):
             dep = (dep,)
         if not all(isinstance(d.node, ir._BoundVarPlaceholder) for d in dep):
-            raise ValueError(f"{err_prefix}dep must be bound variables, got {type(dep)}")
-        dep_dom_nodes = tuple(d.node.dom for d in dep)
-        dep_domTs = tuple(irT.DomT(d.node.T) for d in dep)
-        assert all(isinstance(domT, irT.DomT) for domT in dep_domTs)
-        if not all(n.is_tabulate for n in dep_dom_nodes):
-            raise NotImplementedError(f"{err_prefix}Only DomExpr.tabulate dependencies are supported")
-       
-        # Do dependency analysis
-        dep_sid_sets= tuple(set(v.sid for v in self.analyze([VarGetter()], d.node, Context(self._envs_obj)).get(VarSet).vars) for d in dep)
-        sids_in_context = set()
-        for i, dep_set in enumerate(dep_sid_sets):
-            for sid in dep_set:
-                for dep_sid in self._depends[sid]:
-                    if dep_sid not in sids_in_context:
-                        msg =f"{err_prefix}Variable Dependency Error!\n . bound_var in Dom:{dep[i]} is dependent on {self.sym.get_name(dep_sid)} which is not in context."
-                        raise ValueError(msg)
-            sids_in_context |= dep_set
+            raise ValueError(f"{err_prefix}dep must be bound variables, got {dep}")
+        if not all(d.node.is_tabulate for d in dep):
+            raise ValueError(f"{err_prefix}dep must be tabulated bound variables, got {dep}")
+        dep_doms = []
+        for bv in dep:
+            wit = bv.penv[bv.node].get_wit(pf.DomsWit)
+            assert len(wit.doms) ==1
+            dep_dom = wit.doms[0]
+            dep_doms.append(ast.wrap(dep_dom, bv.penv))
+
+        #dep_dom_nodes = tuple(d.node.dom for d in dep)
+      
+        ## Do dependency analysis
+        #dep_sid_sets= tuple(set(v.sid for v in self.analyze([VarGetter()], d.node, Context(self._envs_obj)).get(VarSet).vars) for d in dep)
+        #sids_in_context = set()
+        #for i, dep_set in enumerate(dep_sid_sets):
+        #    for sid in dep_set:
+        #        for dep_sid in self._depends[sid]:
+        #            if dep_sid not in sids_in_context:
+        #                msg =f"{err_prefix}Variable Dependency Error!\n . bound_var in Dom:{dep[i]} is dependent on {self.sym.get_name(dep_sid)} which is not in context."
+        #                raise ValueError(msg)
+        #    sids_in_context |= dep_set
         
         public = True
         if name is None:
@@ -83,32 +89,28 @@ class PuzzleSpecBuilder(PuzzleSpec):
         
         new_sid = self.sym.new_var(name, role, public)
 
-        self._depends[new_sid] = sids_in_context
-        
+        #self._depends[new_sid] = sids_in_context
+        doms = (*dep_doms, dom_expr)
+        doms_nodes = tuple(dom.node for dom in doms)
         # update domain env
-        self.domenv.add(
-            sid=new_sid,
-            dom_nodes = dep_dom_nodes,
-            dom_Ts = dep_domTs,
-        )
-
-        # Calc T
-        T = dom.carT
-        for domT in reversed(dep_domTs):
-            T = irT.FuncT(domT, T)
-        self.tenv.add(sid, T)
-        
+        self.domenv.add(new_sid, doms_nodes)
+       
         #Calculate expr of var
-        var = tp.cast(T, ast.wrap(ir.VarRef(new_sid), T))
+        var_node = ir.VarRef(new_sid)
+        penv = ast._mix_envs(*doms)
+        def _T(doms):
+            if len(doms)==1:
+                return doms[0].T.carT
+            else:
+                return irT.FuncT(domT=doms[0].T, resT=_T(doms[1:]))
+        varT = _T(doms)
+        penv[var_node] = pf.ProofState(
+            pf.DomsWit(doms=doms_nodes, subject=var_node),
+            pf.TypeWit(T=varT, subject=var_node)
+        )
+        var = ast.wrap(var_node, penv)
         for d in dep:
             var = var.apply(d)
-
-        # Add obligations
-        def oblig(val:ast.Expr, doms:tp.Tuple)->ast.Expr:
-            if doms==():
-                return val in dom_obl
-            return doms[0].forall(lambda i: oblig(val.apply(i), doms[1:]))
-        self._obligations.append(oblig(var, dep))
         return var
 
     def param(self, sort: irT.Type_=None, dom: ast.DomainExpr=None, name: str=None, dep=()) -> ast.Expr:
@@ -121,13 +123,16 @@ class PuzzleSpecBuilder(PuzzleSpec):
         return self.var(sort=sort, dom=dom, name=name, dep=dep)
 
     def func_var(self, dom: ast.DomainExpr, role: str='G', sort: irT.Type_=None, codom: ast.DomainExpr=None, name: str=None) -> ast.Expr:
-        return dom.tabulate(lambda i: self.var(role, sort, codom, name, dep=i))
+        return dom.map(lambda i: self.var(role, sort, codom, name, dep=i))
 
     def _replace_rules(self, new_rules: tp.Iterable[ir.Node]):
-        self._rules = new_rules
+        self._penv = None
+        self._rules = ir.TupleLit(*new_rules)
+        self._spec_node = ir.TupleLit(self._rules, self._obligations)
+        self._inference()
  
     def _add_rules(self, *new_rules: ast.Expr):
-        nodes = [*self._rules._children, *[r.node for r in new_rules]]
+        nodes = [*self._rules, *[r.node for r in new_rules]]
         self._replace_rules(nodes)
 
     def __iadd__(self, other: tp.Union[ast.BoolExpr, tp.Iterable[ast.BoolExpr]]) -> tp.Self:
@@ -141,15 +146,13 @@ class PuzzleSpecBuilder(PuzzleSpec):
             raise ValueError(f"Constraints, {constraints}, is not a BoolExpr")
         
         self._add_rules(*constraints)
-
-        self._type_check()
         return self
 
     # Freezes the spec and makes it immutable 
-    def build(self, name: str, desc: str) -> PuzzleSpec:
+    def build(self, name: str) -> PuzzleSpec:
         # 1: Resolve Placeholders (for bound bars/lambdas)
-        spec = self.transform([ResolveBoundVars()])
         # 2: Run CSE
-        spec = self.transform([CSE()])
-
-        return spec.optimize()
+        spec = self.transform([ResolveBoundVars(), CSE()])
+        # 3: Optimize/canonicalize
+        spec_opt = spec.optimize()
+        return spec_opt

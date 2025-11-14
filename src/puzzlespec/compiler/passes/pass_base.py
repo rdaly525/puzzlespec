@@ -39,6 +39,10 @@ class Context:
             return None
         return self._store[cls]
     
+    def invalidate(self):
+        self._store = {}
+
+    
 class Pass(ABC):
     _debug: bool=False
     name: str
@@ -297,12 +301,16 @@ class PassManager:
         if self.verbose:
             print(f"P: {p.__class__.__name__} on {id(root)}")
         if isinstance(p, Transform):
-            root = p(root, ctx)
+            new_root = p(root, ctx)
+            if new_root != root:
+                # Invalidate context
+                ctx.invalidate()
         else:
             assert isinstance(p, Analysis)
             anal_obj = p(root, ctx)
             ctx.add(anal_obj)
-        return root
+            new_root = root
+        return new_root
     
     def _run_passes(self, root: ir.Node, passes: tp.Iterable[Pass], ctx: Context) -> ir.Node:
         for p in passes:

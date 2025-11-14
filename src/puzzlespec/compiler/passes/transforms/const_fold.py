@@ -85,8 +85,8 @@ class ConstFoldPass(Transform):
                     return ir.Lit(self._variadic_ops[ir.Prod](*vals), irT.Int)
         return node.replace(lst)
 
-    @handles(ir.Distinct)
-    def _(self, node: ir.Distinct) -> ir.Node:
+    @handles(ir.AllDistinct)
+    def _(self, node: ir.AllDistinct) -> ir.Node:
         lst, = self.visit_children(node)
         match (lst):
             case ir.List(elems):

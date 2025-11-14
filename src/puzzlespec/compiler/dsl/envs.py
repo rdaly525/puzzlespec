@@ -1,27 +1,29 @@
 from dataclasses import dataclass
+
+from puzzlespec.compiler.dsl.proof_lib import DomsWit
 from . import ast, ir, ir_types as irT
 import typing as tp
 
-class TypeEnv:
-    def __init__(self, vars: tp.Dict[int, irT.Type_] = None):
-        self.vars = vars if vars is not None else {}
-
-    def __getitem__(self, sid: int) -> irT.Type_:
-        return self.vars.get(sid, None)
-
-    def __contains__(self, sid: int):
-        return sid in self.vars
-
-    def copy(self, sids: tp.Set[int] = None) -> 'TypeEnv':
-        if sids is None:
-            sids = self.vars.keys()
-        return TypeEnv(vars={sid: self.vars[sid] for sid in sids})
-
-    def add(self, sid: int, sort: irT.Type_):
-        if sid in self.vars:
-            raise ValueError(f"Variable with sid={sid} already defined")
-        self.vars[sid] = sort
-
+#class TypeEnv:
+#    def __init__(self, vars: tp.Dict[int, irT.Type_] = None):
+#        self.vars = vars if vars is not None else {}
+#
+#    def __getitem__(self, sid: int) -> irT.Type_:
+#        return self.vars.get(sid, None)
+#
+#    def __contains__(self, sid: int):
+#        return sid in self.vars
+#
+#    def copy(self, sids: tp.Set[int] = None) -> 'TypeEnv':
+#        if sids is None:
+#            sids = self.vars.keys()
+#        return TypeEnv(vars={sid: self.vars[sid] for sid in sids})
+#
+#    def add(self, sid: int, sort: irT.Type_):
+#        if sid in self.vars:
+#            raise ValueError(f"Variable with sid={sid} already defined")
+#        self.vars[sid] = sort
+#
 
 
 # Symbol table that stores params/vars and their role. 
@@ -36,7 +38,7 @@ class SymEntry:
 class SymTable:
     def __init__(self, entries: tp.Dict[int, SymEntry] =None, sid: int = 0):
         self.entries = entries if entries is not None else {}
-        self._name_to_sid = {e.name:sid for sid, e in entries.items()}
+        self._name_to_sid = {e.name:sid for sid, e in self.entries.items()}
         self._sid = sid
 
     def copy(self, sids: tp.Set[int] = None) -> 'SymTable':
@@ -96,35 +98,32 @@ class SymTable:
         for sid in self.entries:
             yield sid
 
-@dataclass
-class DomEnvEntry:
-    dom_nodes: tp.Tuple[ir.Node]
-    domTs: tp.Tuple[irT.DomT]
- 
+#@dataclass
+#class DomEnvEntry:
+#    dom_nodes: tp.Tuple[ir.Node]
+#    #domTs: tp.Tuple[irT.DomT]
+
+# sid -> (Dom, Dom, ...)
+# 1 Dom means 'base' variable with a domain constraint
+# 2 Doms means Func[Dom0 -> Dom1]
+# 3 Doms means Func[Dom0 -> Func[Dom1 -> Dom2]
+
+DomsT = tp.Tuple[ir.Node, ...]
 class DomEnv:
     # Stores Domain Information about variables
-    def __init__(self, entries: tp.Dict[int, DomEnvEntry] = None):
+    def __init__(self, entries: tp.Dict[int, DomsT] = None):
         self.entries = {}
-        if entries is None:
-            entries: tp.Dict[int, DomEnvEntry] = {}
-        for sid, entry in entries.items():
-            self.add(sid, entry.dom_nodes, entry.domTs)
+        if entries is not None:
+            for sid, doms in entries.items():
+                self.add(sid, doms)
     
-    def add(self,
-        sid: int,
-        dom_nodes: tp.Tuple[ir.Node],
-        domTs: tp.Tuple[irT.DomT],
-    ):
-        assert len(dom_nodes) == len(domTs)
-        self.entries[sid] = DomEnvEntry(dom_nodes, domTs)
+    def add(self, sid: int, doms: DomsT):
+        self.entries[sid] = doms
    
-    def get_doms(self, sid: int) -> tp.Tuple[ir.Node]:
-        return self[sid].dom_nodes
+    def get_doms(self, sid: int) -> DomsT:
+        return self[sid]
 
-    def get_domTs(self, sid: int) -> tp.Tuple[irT.DomT]:
-        return self[sid].domTs
-
-    def __getitem__(self, sid) -> DomEnvEntry:
+    def __getitem__(self, sid) -> DomsT:
         e = self.entries.get(sid, None)
         if e is None:
             raise ValueError(f"Variable {sid} not found in DomEnv")

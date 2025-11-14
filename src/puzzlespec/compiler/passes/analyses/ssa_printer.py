@@ -1,13 +1,10 @@
 from __future__ import annotations
 
-from multiprocessing import Value
 import typing as tp
 
 from ..pass_base import Analysis, AnalysisObject, Context, handles
-from .sym_table import SymTableEnv_
-from .type_inference import TypeEnv_, TypeValues
+from ..envobj import EnvsObj, SymTable, DomEnv
 from ...dsl import ir, ir_types as irT
-from ...dsl.envs import SymTable, TypeEnv
 
 class UsesResult(AnalysisObject):
     def __init__(self, use_cnt):
@@ -43,14 +40,14 @@ class SSAPrinter(Analysis):
 
     """
 
-    requires = (SymTableEnv_, TypeValues)  
+    requires = (EnvsObj,)  
     produces = (SSAResult,)  
     name = "ssa_printer"
 
     def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
         """Main entry point for the analysis pass."""
-        self.tenv = ctx.get(TypeValues).mapping
-        self.sym: SymTable = ctx.get(SymTableEnv_).sym
+        self.tenv: TypeEnv = ctx.get(EnvsObj).tenv
+        self.sym: SymTable = ctx.get(EnvsObj).sym
         self.decls = {}
         self.var_names = set()
         self.use_cnt = Uses()(root, ctx).use_cnt
@@ -117,6 +114,6 @@ class SSAPrinter(Analysis):
         """Analyze bound variable nodes."""
         return f"#{node.idx}"
     
-    @handles(ir._Param, ir._BoundVarPlaceholder, ir._LambdaPlaceholder, mark_invalid=True)
-    def _(self, node: ir._Param) -> tp.Any:
+    @handles(ir._BoundVarPlaceholder, ir._LambdaPlaceholder, mark_invalid=True)
+    def _(self, node: ir.Node) -> tp.Any:
         ...

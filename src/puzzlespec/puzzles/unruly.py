@@ -1,5 +1,5 @@
 from ..compiler.dsl import ast
-from ..compiler.dsl.ir_types import Bool, Int
+from ..compiler.dsl import Bool, Int
 from ..compiler.dsl import PuzzleSpecBuilder, PuzzleSpec
 from ..compiler.dsl.libs import std, topo, optional as opt
 
@@ -8,7 +8,7 @@ def build_unruly_spec() -> PuzzleSpec:
     # Structural parameters
     nR, nC = p.param(sort=Int, name='nR'), p.param(sort=Int, name='nC')
     # Structural constraints
-    p += [nR % 2 == 0, nC % 2 == 0, nR > 1, nC > 1]
+    p += [nR % 2 == 0, nC % 2 == 0]
 
     grid = topo.Grid2D(nR, nC)
 
@@ -17,19 +17,22 @@ def build_unruly_spec() -> PuzzleSpec:
 
     # Generator parameters, i.e., the 'clues' of the puzzle
     num_clues = p.gen_var(sort=Int, name='num_clues')
-    givens = p.gen_var(dom=grid.cells(), codom=opt.Optional(BW_dom), name='givens') # Cell -> Optional[Bool]
+    #givens = p.func_var(role='G', dom=grid.cells(), codom=opt.Optional(BW_dom), name='givens') # Cell -> Optional[Bool]
+    givens = grid.cells().map(
+        lambda c: p.gen_var(dom=opt.Optional(BW_dom), dep=c, name='givens') # Cell -> Optional[Bool]
+    )
 
     # clue constraints
     p += opt.count_some(givens)==num_clues
 
     # Decision variables, i.e., what the end user will solve for
-    color = p.decision_var(dom=grid.cells(), codom=BW_dom, name="color")
+    color = p.func_var(role='D', dom=grid.cells(), codom=BW_dom, name="color")
 
     ## Puzzle Rules
 
     # Handle the givens
     p += grid.cells().forall(
-        lambda c: opt.fold(givens[c], on_none=True, on_some=lambda v: color[c]==v)
+        lambda c: opt.fold(givens(c), on_none=True, on_some=lambda v: color(c)==v)
     )
 
     ## Equal balance of colors in all rows and cols

@@ -13,19 +13,18 @@ class Grid2D(Topology):
         self.nC = nC
 
     # Cells
-    def cells(self) -> ast.NDIterDomainExpr:
+    def cells(self) -> ast.NDSeqDomainExpr:
         return self.nR.fin() * self.nC.fin()
-    
 
-    def vertices(self) -> ast.NDIterDomainExpr:
+    def vertices(self) -> ast.NDSeqDomainExpr:
         return (self.nR+1).fin() * (self.nC+1).fin()
 
     # Vertical edges
-    def edgesV(self) -> ast.NDIterDomainExpr:
+    def edgesV(self) -> ast.NDSeqDomainExpr:
         return self.nR.fin() * (self.nC+1).fin()
 
     # Horizontal edges
-    def edgesH(self) -> ast.NDIterDomainExpr:
+    def edgesH(self) -> ast.NDSeqDomainExpr:
         return (self.nR+1).fin() * self.nC.fin()
 
     # Disjoint union of vertical and horizontal edges

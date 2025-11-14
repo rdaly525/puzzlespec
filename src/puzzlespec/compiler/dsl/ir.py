@@ -121,7 +121,7 @@ class Lit(Node):
     _fields = ("val", "T")
     _numc = 0
     def __init__(self, val: tp.Any, T: irT.Type_):
-        assert T in (irT.Bool, irT.Int, irT.CellIdxT)
+        assert T in (irT.Bool, irT.Int)
         self.T = T
         self.val = T.cast_as(val)
         super().__init__()
@@ -313,6 +313,13 @@ class Exists(Node):
     def __init__(self, domain: Node, fun: Node):
         super().__init__(domain, fun)
 
+# Dom(A) -> (AxA->Bool) -> Dom(Dom(A))
+class Quotient(Node):
+    _numc = 2
+    def __init__(self, domain: Node, eqrel: Node):
+        super().__init__(domain, eqrel)
+
+
 
 ## Funcs (i.e., containers)
 
@@ -429,11 +436,15 @@ class ProdReduce(Node):
     def __init__(self, func: Node):
         super().__init__(func)
 
-class Distinct(Node):
+class AllDistinct(Node):
     _numc = 1
     def __init__(self, func: Node):
         super().__init__(func)
 
+class AllSame(Node):
+    _numc = 1
+    def __init__(self, func: Node):
+        super().__init__(func)
 
 ##############################
 ## Constructor-level IR nodes (Used for construction but immediatley gets transformed)
@@ -450,10 +461,10 @@ class _BoundVarPlaceholder(Node):
         super().__init__()
 
 class _LambdaPlaceholder(Node):
-    _fields = ('paramT',)
+    #_fields = ('paramT',)
     _numc = 2
-    def __init__(self, bound_var: Node, body: Node, paramT: irT.Type_):
-        self.paramT = paramT
+    def __init__(self, bound_var: Node, body: Node):
+        #self.paramT = paramT
         super().__init__(bound_var, body)
 
 
@@ -487,6 +498,8 @@ NODE_PRIORITY: tp.Dict[tp.Type[Node], int] = {
     Prod: 8,
     Universe: 9,
     Fin: 9,
+    Enum: 9,
+    EnumLit: 9,
     Card: 9,
     IsMember: 9,
     CartProd: 9,
@@ -498,6 +511,7 @@ NODE_PRIORITY: tp.Dict[tp.Type[Node], int] = {
     Inj: 9,
     Match: 9,
     Restrict: 9,
+    Quotient: 9,
     Tabulate: 10,
     DomOf: 10,
     ImageOf: 10,
@@ -505,6 +519,7 @@ NODE_PRIORITY: tp.Dict[tp.Type[Node], int] = {
     ListLit: 10,
     Windows: 10,
     Tiles: 10,
+    Slices: 10,
     Lambda: 12,
     _LambdaPlaceholder: 12,
     Fold: 13,
@@ -512,6 +527,7 @@ NODE_PRIORITY: tp.Dict[tp.Type[Node], int] = {
     ProdReduce: 14,
     Forall: 14,
     Exists: 14,
-    Distinct: 14,
+    AllDistinct: 14,
+    AllSame: 14,
 }
 

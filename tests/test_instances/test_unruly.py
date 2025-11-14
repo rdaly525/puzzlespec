@@ -8,7 +8,7 @@ import numpy as np
 Unruly = get_puzzle("unruly")
 
 def t0():
-    print(Unruly.pretty(Unruly._rules, dag=False))
+    print(Unruly.pretty(dag=False))
     print(Unruly.pretty(dag=True))
     params = Unruly.params
     assert 'nR' in params

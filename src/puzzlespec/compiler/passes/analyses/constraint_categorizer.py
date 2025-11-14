@@ -10,23 +10,19 @@ import typing as tp
 
 from ..pass_base import Analysis, AnalysisObject, Context, handles
 from ...dsl import ir, ir_types as irT
-from . import SymTableEnv_
+from ..envobj import EnvsObj, SymTable
 
 class ConstraintCategorizerVals(AnalysisObject):
     def __init__(self, mapping: tp.Dict[ir.Node, str]):
         self.mapping = mapping
 
 class ConstraintCategorizer(Analysis):
-    requires = (SymTableEnv_,)
+    requires = (EnvsObj,)
     produces = (ConstraintCategorizerVals,)
     name = "constraint_categorizer"
 
-    # Include categorization of _Param ?
-    def __init__(self, include_params: bool=False):
-        self.include_params = include_params
-
     def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
-        self.sym = tp.cast(SymTableEnv_, ctx.get(SymTableEnv_)).sym
+        self.sym = tp.cast(SymTable, ctx.get(EnvsObj)).sym
         # Visit the constraint to categorize it and collect variables
         self.visit(root)
         return ConstraintCategorizerVals(self._cache)
@@ -45,7 +41,3 @@ class ConstraintCategorizer(Analysis):
     def _(self, var: ir.VarRef):
         role = self.sym.get_role(var.sid)
         return role
-
-    @handles(ir._Param, mark_invalid=True)
-    def _(self, node):
-        ...

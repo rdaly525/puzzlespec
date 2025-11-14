@@ -7,6 +7,11 @@ class Type_:
     def cast_as(self, val: tp.Any):
         ...
 
+class TopT_:
+    def __repr__(self):
+        return '⊤'
+TopT = TopT_()
+
 class _UnitType(Type_):
     def __repr__(self):
         return "𝟙"
@@ -51,7 +56,7 @@ class EnumT(Type_):
             T = cls._cache[key]
             if T.labels != labels:
                 raise ValueError("Cannot construct two different EnumTs with different labels!")
-        return T
+        return cls._cache[key]
     
     def __repr__(self):
         return f"Enum<{self.name}"

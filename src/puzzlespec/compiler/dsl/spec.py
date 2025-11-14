@@ -2,106 +2,63 @@ from ast import Pass, Sub
 from re import A
 import typing as tp
 
-from puzzlespec.compiler.passes.analyses import EnvsObj
-from puzzlespec.compiler.passes.analyses.ssa_printer import SSAPrinter
+from puzzlespec.compiler.passes.envobj import EnvsObj
+#from puzzlespec.compiler.passes.analyses.ssa_printer import SSAPrinter
 from puzzlespec.compiler.passes.transforms.substitution import SubMapping, SubstitutionPass
-from . import ast, ir, ir_types as irT
+from . import ast, ir, ir_types as irT, proof_lib as pf
 
-from .envs import SymTable, TypeEnv, DomEnv
+from .envs import SymTable, DomEnv
 from ..passes.pass_base import PassManager, Context
 from ..passes.transforms import CanonicalizePass, ConstFoldPass, AlgebraicSimplificationPass
-from ..passes.transforms.concretize_types import TypeEncoding, ConcretizeTypes
-from ..passes.analyses.type_inference import TypeInferencePass, TypeEnv_, TypeValues
-from ..passes.analyses.sym_table import SymTableEnv_
 from ..passes.analyses.constraint_categorizer import ConstraintCategorizer, ConstraintCategorizerVals
 from ..passes.analyses.getter import VarGetter, VarSet
-from ..passes.analyses.ast_printer import AstPrinterPass, PrintedAST
+#from ..passes.analyses.ast_printer import AstPrinterPass, PrintedAST
 from ..passes.analyses.evaluator import EvalPass, EvalResult, VarMap
+from ..passes.analyses.inference import InferencePass, ProofResults
 class PuzzleSpec:
 
     def __init__(self,
         name: str,
-        desc: str,
         sym: SymTable,
-        tenv: TypeEnv,
         domenv: DomEnv,
-        rules: tp.List,
-        obligations: tp.List,
+        rules: ir.TupleLit=None,
+        obligations: ir.TupleLit=None,
     ):
         self.name = name
-        self.desc = desc
         self.sym = sym
-        self.tenv = tenv
         self.domenv = domenv
-        self._rules = rules
-        self._obligations = obligations
-        self._type_check()
-        self._categorize_constraints()
+        if rules is None:
+            rules = ir.TupleLit()
+        if obligations is None:
+            obligations = ir.TupleLit()
+        self._spec_node = ir.TupleLit(rules, obligations)
+        self._penv = self._inference()
 
     @property
     def envs_obj(self) -> EnvsObj:
-        return EnvsObj(sym=self.sym, tenv=self.tenv, domenv=self.domenv)
+        return EnvsObj(sym=self.sym, domenv=self.domenv, penv=self._penv)
 
     @property
     def rules_node(self) -> ir.TupleLit:
-        return ir.TupleLit(*self._rules)
+        return self._spec_node._children[0]
 
     @property
-    def obligations_node(self) -> ir.TupleLit:
-        return ir.TupleLit(*self._obligations)
+    def obls_node(self) -> ir.TupleLit:
+        return self._spec_node._children[1]
 
-    @property
-    def domains_node(self) -> ir.TupleLit:
-        doms = [self.domenv.get_doms(sid) for sid in self.domenv.entries.keys()]
-        return ir.TupleLit(*doms)
+    #@property
+    #def domains_node(self) -> ir.TupleLit:
+    #    doms = [self.domenv.get_doms(sid) for sid in self.domenv.entries.keys()]
+    #    return ir.TupleLit(*doms)
 
-    def make_domenv(self, node: ir.Node) -> DomEnv:
-        terms = node._children
-        if len(terms) != len(self.domenv.entries):
-            raise ValueError(f"Expected {len(self.domenv.entries)} terms, got {len(terms)}")
-        domenv = DomEnv()
-        for sid, doms_node in zip(self.domenv.entries.keys(), terms):
-            domenv.add(sid, doms_node, self.domenv.get_domTs(sid))
-        return domenv
-
-    @property
-    def _spec_node(self) -> ir.Node:
-        return ir.TupleLit(
-            self.domains_node,
-            self.rules_node,
-            self.obligations_node
-        )
-
-    def unpack_spec_node(self, spec_node: ir.TupleLit) -> tp.Tuple[ir.Node,...]:
-        assert isinstance(spec_node, ir.TupleLit)
-        assert len(spec_node._children) == 3
-        return spec_node._children
-
-    # applies passes to the spec, returns the new topo, shape env, and rules
-    def _transform(self, passes: tp.List[Pass], ctx: Context = None) -> tp.Tuple[ir.Node, ir.Node, ir.Node, tp.Set[int]]:
-        if ctx is None:
-            ctx = Context()
-        spec_node = self._spec_node
-        pm = PassManager(*passes, VarGetter(), verbose=True)
-        spec_node = pm.run(spec_node, ctx)
-        dn, rn, on = self.unpack_spec_node(spec_node)
-        return dn, rn, on, set(v.sid for v in ctx.get(VarSet).vars)
-
-    # applies passes, copies the tenv and sym table, returns a new spec
-    def transform(self, passes: tp.List[Pass], ctx: Context = None) -> 'PuzzleSpec':
-        dn, rn, on, sids = self._transform(passes, ctx)
-        new_tenv = self.tenv.copy(sids)
-        new_sym = self.sym.copy(sids)
-        new_domenv = self.make_domenv(dn)
-        return PuzzleSpec(
-            name=self.name,
-            desc=self.desc,
-            sym=new_sym,
-            tenv=new_tenv,
-            domenv=new_domenv,
-            rules=rn,
-            obligations=on
-        )
+    #def make_domenv(self, node: ir.Node) -> DomEnv:
+    #    terms = node._children
+    #    if len(terms) != len(self.domenv.entries):
+    #        raise ValueError(f"Expected {len(self.domenv.entries)} terms, got {len(terms)}")
+    #    domenv = DomEnv()
+    #    for sid, doms_nodes in zip(self.domenv.entries.keys(), terms):
+    #        domenv.add(sid, doms_nodes)
+    #    return domenv
 
     def analyze(self, passes: tp.List[Pass], node: ir.Node=None, ctx: Context = None) -> Context:
         if ctx is None:
@@ -111,6 +68,47 @@ class PuzzleSpec:
         pm = PassManager(*passes)
         pm.run(node, ctx)
         return ctx
+
+    # Runs inference and returns new penv
+    def _inference(self) -> tp.Dict[ir.Node, pf.ProofState]:
+        ctx = Context(self.envs_obj)
+        ctx = self.analyze([InferencePass()], self._spec_node, ctx)
+        penv = ctx.get(ProofResults).penv
+        rn, on = self.rules_node, self.obls_node
+        rn_T, on_T = penv[rn].T, penv[on].T
+        # rn and on must be tuple of bool
+        for cn, cn_T in zip((rn, on), (rn_T, on_T)):
+            if not (cn_T is irT.UnitType or isinstance(cn_T, irT.TupleT)):
+                raise ValueError(f"{cn} must be a tuple, got {type(cn_T)}")
+            for cn_c in cn._children:
+                if penv[cn_c].T != irT.Bool:
+                    raise ValueError(f"{cn_c} must be a bool, got {type(penv[cn_c].T)}")
+        return penv
+
+    # applies passes, copies the tenv and sym table, returns a new spec
+    def transform(self, passes: tp.List[Pass], ctx: Context = None) -> 'PuzzleSpec':
+        if ctx is None:
+            ctx = Context()
+        pm = PassManager(*passes, verbose=True)
+        new_spec_node = pm.run(self._spec_node, ctx)
+        if new_spec_node == self._spec_node:
+            return self
+        
+        # Recompute penv
+        penv = self._inference()
+
+        new_sids = set(v.sid for v in ctx.get(VarSet).vars)
+        new_sym = self.sym.copy(new_sids)
+        new_domenv = self.make_domenv(dn)
+        return PuzzleSpec(
+            name=self.name,
+            sym=new_sym,
+            tenv=new_tenv,
+            domenv=new_domenv,
+            rules=rn,
+            obligations=on
+        )
+
 
     # TODO
     def __repr__(self):
@@ -192,27 +190,6 @@ class PuzzleSpec:
     #        shape_env.add(sid=sid, shape=shape)
 
     #    return cls(name=name, desc=desc, topo=topo, sym=sym, tenv=tenv, shape_env=shape_env, rules=rules)
-
-    def _type_check(self):
-        ctx = Context(self.envs_obj)
-        ctx = self.analyze([TypeInferencePass()], self._spec_node, ctx)
-        tvals = ctx.get(TypeValues).mapping
-        dn, rn, on = self.unpack_spec_node(self._spec_node)
-
-        # dn must be tuple of doms
-        if not isinstance(tvals[dn], ir.TupleLit):
-            raise ValueError(f"{dn} must be a tuple, got {type(tvals[dn])}")
-        for d in dn._children:
-            if not isinstance(tvals[d], irT.DomT):
-                raise ValueError(f"{d} must be a DomT, got {type(tvals[d])}")
-
-        # rn and on must be tuple of bool
-        for cn in (rn, on):
-            if not isinstance(tvals[cn], ir.TupleLit):
-                raise ValueError(f"{cn} must be a tuple, got {type(tvals[cn])}")
-            for c in cn._children:
-                if tvals[c] != irT.Bool:
-                    raise ValueError(f"{c} must be a bool, got {type(tvals[c])}")
 
 
     # Returns a new spec with the params set
