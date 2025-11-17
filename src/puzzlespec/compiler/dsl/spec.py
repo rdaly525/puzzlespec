@@ -7,7 +7,7 @@ from puzzlespec.compiler.passes.envobj import EnvsObj
 from puzzlespec.compiler.passes.transforms.substitution import SubMapping, SubstitutionPass
 from . import ast, ir, ir_types as irT, proof_lib as pf
 
-from .envs import SymTable, DomEnv
+from .envs import SymTable, TypeEnv
 from ..passes.pass_base import PassManager, Context
 from ..passes.transforms import CanonicalizePass, ConstFoldPass, AlgebraicSimplificationPass
 from ..passes.analyses.constraint_categorizer import ConstraintCategorizer, ConstraintCategorizerVals
@@ -20,23 +20,23 @@ class PuzzleSpec:
     def __init__(self,
         name: str,
         sym: SymTable,
-        domenv: DomEnv,
+        tenv: TypeEnv,
         rules: ir.TupleLit=None,
-        obligations: ir.TupleLit=None,
+        num_rules: int = None
     ):
         self.name = name
         self.sym = sym
-        self.domenv = domenv
+        self.tenv = tenv
         if rules is None:
             rules = ir.TupleLit()
-        if obligations is None:
-            obligations = ir.TupleLit()
-        self._spec_node = ir.TupleLit(rules, obligations)
-        self._penv = self._inference()
+        if num_rules is None:
+            num_rules = rules.num_children
+        self.num_rules = num_rules
+        self._type_check()
 
     @property
     def envs_obj(self) -> EnvsObj:
-        return EnvsObj(sym=self.sym, domenv=self.domenv, penv=self._penv)
+        return EnvsObj(sym=self.sym, tenv=self.tenv)
 
     @property
     def rules_node(self) -> ir.TupleLit:
@@ -70,7 +70,7 @@ class PuzzleSpec:
         return ctx
 
     # Runs inference and returns new penv
-    def _inference(self) -> tp.Dict[ir.Node, pf.ProofState]:
+    def _inference(self, root: ir.Node=None) -> tp.Dict[ir.Node, pf.ProofState]:
         ctx = Context(self.envs_obj)
         ctx = self.analyze([InferencePass()], self._spec_node, ctx)
         penv = ctx.get(ProofResults).penv

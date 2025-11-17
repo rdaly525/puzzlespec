@@ -1,50 +1,21 @@
 from __future__ import annotations
 import typing as tp
-
-
 from . import ir
-from . import ir_types as irT
 from . import proof_lib as pf 
 from dataclasses import dataclass, field
 from enum import Enum as _Enum
 
-TExpr = tp.TypeVar('TExpr', bound="Expr")
-KExpr = tp.TypeVar('KExpr', bound="Expr")
-VExpr = tp.TypeVar('VExpr', bound="Expr")
-
-def _mix_envs(*exprs: Expr) -> tp.Dict[ir.Node, pf.ProofState]:
-    if len(exprs)==0:
-        return {}
-    else:
-        env1 = exprs[0].penv
-        env2 = _mix_envs(*exprs[1:])
-        env = {}
-        for n in (set(env1.keys()) | set((env2.keys()))):
-            ps1 = env1.get(n, None)
-            ps2 = env2.get(n, None)
-            match (ps1, ps2):
-                case (None, ps2):
-                    env[n] = ps2
-                case (ps1, None):
-                    env[n] = ps1
-                case (ps1, ps2):
-                    env[n] = ps1 + ps2
-                case _:
-                    raise ValueError(f"Expected pf.ProofState, got {type(ps1)} and {type(ps2)}")
-        return env
-
-
 @dataclass
 class Expr:
-    node: ir.Node
-    penv: tp.Dict[ir.Node, pf.ProofState] #= field(default_factory=dict)
+    node: ir.Value
 
     def __post_init__(self):
-        ...
+        if not isinstance(self.node, ir.Value):
+            raise ValueError("Expr must be an ir.Value, got {self.node}")
 
     @property
-    def _T(self) -> irT.Type_:
-        return self.penv[self.node].T
+    def _T(self) -> ir.Type:
+        return self.node.T
 
     @classmethod
     def make(cls, val: tp.Any) -> Expr:
@@ -72,81 +43,70 @@ class UnitExpr(Expr):
             raise ValueError(f"Expected UnitExpr, got {self}")
 
     @property
-    def T(self) -> irT.UnitType:
-        return tp.cast(irT.UnitType, self._T)
+    def T(self) -> ir.UnitT:
+        return tp.cast(ir.UnitT, self._T)
     
     @staticmethod
     def make(cls) -> UnitExpr:
-        node = ir.Unit()
-        penv = pf.inference(node)
-        return UnitExpr(node, penv)
+        return UnitExpr(ir.Unit())
 
 class BoolExpr(Expr):
     def __post_init__(self):
         super().__post_init__()
-        if not is_BoolExpr(self.node, self.penv):
+        if not is_BoolExpr(self.node):
             raise ValueError(f"Expected BoolExpr, got {self}")
 
     @property
-    def T(self) -> irT._Bool:
-        assert self._T == irT.Bool
-        return tp.cast(irT._Bool, self._T)
+    def T(self) -> ir.BoolT:
+        return tp.cast(ir.BoolT, self._T)
 
     @classmethod
     def make(cls, val: tp.Any) -> BoolExpr:
         if isinstance(val, BoolExpr):
-            return tp.cast(BoolExpr, val)
+            return val
         try:
             val = bool(val)
-            node = ir.Lit(val, irT.Bool)
-            penv = pf.inference(node)
-            return BoolExpr(node, penv)
+            node = ir.Lit(ir.BoolT(), val)
+            return BoolExpr(node)
         except:
             raise ValueError(f"Cannot make BoolExpr from {val}")
 
     def __invert__(self) -> BoolExpr:
         node = ir.Not(self.node)
-        penv = pf.inference(node, self.penv)
-        return BoolExpr(node, penv)
+        return BoolExpr(node)
 
     def implies(self, other: BoolOrExpr) -> BoolExpr:
         other = BoolExpr.make(other)
         node = ir.Implies(self.node, other.node)
-        penv = pf.inference(node, _mix_envs(self, other))
-        return BoolExpr(node, penv)
+        return BoolExpr(node)
 
     def __and__(self, other: BoolExpr) -> BoolExpr:
         other = BoolExpr.make(other)
         node = ir.And(self.node, other.node)
-        penv = pf.inference(node, _mix_envs(self, other))
-        return BoolExpr(node, penv)
+        return BoolExpr(node)
 
     __rand__ = __and__
 
     def __or__(self, other: BoolExpr) -> BoolExpr:
         node = ir.Or(self.node, other.node)
-        penv = pf.inference(node, _mix_envs(self, other))
-        return BoolExpr(node, penv)
+        return BoolExpr(node)
 
     __ror__ = __or__
 
     def __eq__(self, other: BoolExpr) -> BoolExpr:
         other = BoolExpr.make(other)
         node = ir.Eq(self.node, other.node)
-        penv = pf.inference(node, _mix_envs(self, other))
-        return BoolExpr(node, penv)
+        return BoolExpr(node)
     
     def __ne__(self, other: BoolExpr) -> BoolExpr:
         other = BoolExpr.make(other)
         node = ir.Not(ir.Eq(self.node, other.node))
-        penv = pf.inference(node, _mix_envs(self, other))
-        return BoolExpr(node, penv)
+        return BoolExpr(node)
 
     def ite(self, t: Expr, f: Expr) -> Expr:
         t, f = Expr.make(t), Expr.make(f)
         node = ir.Ite(self.node, t.node, f.node)
-        penv = pf.inference(node, _mix_envs(self, t, f))
-        return wrap(node, penv)
+        return Expr(node)
 
     def __bool__(self) -> bool:
         raise TypeError("BoolExpr cannot be used as a python boolean")
@@ -159,26 +119,24 @@ class BoolExpr(Expr):
         if len(args) == 0:
             return BoolExpr.make(True)
         node = ir.Conj(*[BoolExpr.make(a).node for a in args])
-        penv = pf.inference(node, _mix_envs(*args))
-        return BoolExpr(node, penv)
+        return BoolExpr(node)
 
     @staticmethod
     def any_of(*args: 'BoolExpr') -> 'BoolExpr':
         if len(args) == 0:
             return BoolExpr.make(False)
         node = ir.Disj(*[BoolExpr.make(a).node for a in args])
-        penv = pf.inference(node, _mix_envs(*args))
-        return BoolExpr(node, penv)
+        return BoolExpr(node)
 
 class IntExpr(Expr):
     def __post_init__(self):
         super().__post_init__()
-        if not is_IntExpr(self.node, self.penv):
+        if not is_IntExpr(self.node):
             raise ValueError(f"Expected IntExpr, got {self}")
 
     @property
-    def T(self) -> irT._Int:
-        return tp.cast(irT._Int, self._T)
+    def T(self) -> ir.IntT:
+        return tp.cast(ir.IntT, self._T)
 
     @classmethod
     def make(cls, val: tp.Any) -> IntExpr:
@@ -186,9 +144,8 @@ class IntExpr(Expr):
             return tp.cast(IntExpr, val)
         try:
             val = int(val)
-            node = ir.Lit(val, irT.Int)
-            penv = pf.inference(node, {})
-            return IntExpr(node, penv)
+            node = ir.Lit(ir.IntT(), val)
+            return IntExpr(node)
         except Exception as e:
             print(e)
             raise ValueError(f"Expected Int expression. Got {val}")
@@ -196,19 +153,16 @@ class IntExpr(Expr):
     def __add__(self, other: IntOrExpr) -> IntExpr:
         other = IntExpr.make(other)
         node = ir.Add(self.node, other.node)
-        penv = pf.inference(node, _mix_envs(self, other))
-        return IntExpr(node, penv)
+        return IntExpr(node)
 
     def __sub__(self, other: IntOrExpr) -> IntExpr:
         other = IntExpr.make(other)
         node = ir.Sub(self.node, other.node)
-        penv = pf.inference(node, _mix_envs(self, other))
-        return IntExpr(node, penv)
+        return IntExpr(node)
 
     def __neg__(self) -> IntExpr:
         node = ir.Neg(self.node)
-        penv = pf.inference(node, self.penv)
-        return IntExpr(node, penv)
+        return IntExpr(node)
 
     def __abs__(self) -> IntExpr:
         return (self >= 0).ite(self, -self)
@@ -216,64 +170,53 @@ class IntExpr(Expr):
     def __mul__(self, other: IntOrExpr) -> IntExpr:
         other = IntExpr.make(other)
         node = ir.Mul(self.node, other.node)
-        penv = pf.inference(node, _mix_envs(self, other))
-        return IntExpr(node, penv)
+        return IntExpr(node)
 
     def __floordiv__(self, other: IntOrExpr) -> IntExpr:
         other = IntExpr.make(other)
         node = ir.Div(self.node, other.node)
-        penv = pf.inference(node, _mix_envs(self, other))
-        return IntExpr(node, penv)
+        return IntExpr(node)
 
     def __mod__(self, other: IntOrExpr) -> IntExpr:
         other = IntExpr.make(other)
         node = ir.Mod(self.node, other.node)
-        penv = pf.inference(node, _mix_envs(self, other))
-        return IntExpr(node, penv)
+        return IntExpr(node)
 
     def __gt__(self, other: IntOrExpr) -> BoolExpr:
         other = IntExpr.make(other)
         node = ir.Gt(self.node, other.node)
-        penv = pf.inference(node, _mix_envs(self, other))
-        return BoolExpr(node, penv)
+        return BoolExpr(node)
 
     def __ge__(self, other: IntOrExpr) -> BoolExpr:
         other = IntExpr.make(other)
         node = ir.GtEq(self.node, other.node)
-        penv = pf.inference(node, _mix_envs(self, other))
-        return BoolExpr(node, penv)
+        return BoolExpr(node)
 
     def __lt__(self, other: IntOrExpr) -> BoolExpr:
         other = IntExpr.make(other)
         node = ir.Lt(self.node, other.node)
-        penv = pf.inference(node, _mix_envs(self, other))
-        return BoolExpr(node, penv)
+        return BoolExpr(node)
 
     def __le__(self, other: IntOrExpr) -> BoolExpr:
         other = IntExpr.make(other)
         node = ir.LtEq(self.node, other.node)
-        penv = pf.inference(node, _mix_envs(self, other))
-        return BoolExpr(node, penv)
+        return BoolExpr(node)
 
     def __eq__(self, other: IntOrExpr) -> BoolExpr:
         other = IntExpr.make(other)
         node = ir.Eq(self.node, other.node)
-        penv = pf.inference(node, _mix_envs(self, other))
-        return BoolExpr(node, penv)
+        return BoolExpr(node)
 
     def __ne__(self, other: IntOrExpr) -> BoolExpr:
         other = IntExpr.make(other)
-        node = ir.Not(ir.Eq(self.node, other.node))
-        penv = pf.inference(node, _mix_envs(self, other))
-        return BoolExpr(node, penv)
+        return ~ir.Eq(self.node, other.node)\
 
     def __bool__(self) -> bool:
         raise TypeError("IntExpr cannot be used as a python boolean")
 
     def fin(self) -> SeqDomainExpr:
         node = ir.Fin(self.node)
-        penv = pf.inference(node, self.penv)
-        return SeqDomainExpr(node, penv)
+        return SeqDomainExpr(node)
 
     def __repr__(self):
         return f"Int({self.node})"
@@ -281,12 +224,12 @@ class IntExpr(Expr):
 class EnumExpr(Expr):
     def __post_init__(self):
         super().__post_init__()
-        if not is_EnumExpr(self.node, self.penv):
+        if not is_EnumExpr(self.node):
             raise ValueError(f"Expected EnumExpr, got {self}")
     
     @property
-    def T(self) -> irT.EnumT:
-        return tp.cast(irT.EnumT, self._T)
+    def T(self) -> ir.EnumT:
+        return tp.cast(ir.EnumT, self._T)
 
     @classmethod
     def make(cls, val) -> EnumExpr:
@@ -297,36 +240,50 @@ class EnumExpr(Expr):
     def __eq__(self, other: Expr) -> BoolExpr:
         other = EnumExpr.make(other)
         node = ir.Eq(self.node, other.node)
-        penv = pf.inference(node, _mix_envs(self, other))
-        return BoolExpr(node, penv)
+        return BoolExpr(node)
+
+    def __ne__(self, other: Expr) -> BoolExpr:
+        other = EnumExpr.make(other)
+        return ~ir.Eq(self.node, other.node)
+
+IntOrExpr = tp.Union[int, IntExpr, Expr]
+BoolOrExpr = tp.Union[bool, BoolExpr, Expr]
+EnumOrExpr = tp.Union[str, EnumExpr, Expr]
+
 
 class TupleExpr(Expr):
     def __post_init__(self):
         super().__post_init__()
-        if not is_TupleExpr(self.node, self.penv):
+        if not is_TupleExpr(self.node):
             raise ValueError(f"Expected TupleExpr, got {self}")
 
     @property
-    def T(self) -> irT.TupleT:
-        assert isinstance(self._T, irT.TupleT)
-        return tp.cast(irT._Bool, self._T)
+    def T(self) -> ir.TupleT:
+        assert isinstance(self._T, ir.TupleT)
+        return tp.cast(ir.TupleT, self._T)
    
     @classmethod
-    def make(cls, vals: tp.Tuple[tp.Any, ...]) -> TupleExpr:
+    def make(cls, vals: tp.Tuple[tp.Any, ...]=None) -> TupleExpr:
+        if vals is None:
+            vals = ()
         if isinstance(vals, TupleExpr):
             return vals
         try:
             vals = tuple(Expr.make(v) for v in vals)
-            node = ir.TupleLit(*[e.node for e in vals])
-            penv = pf.inference(node, _mix_envs(*vals))
-            return TupleExpr(node, penv)
+            node = ir.TupleLit(ir.TupleT(*[e.T for e in vals]), *[e.node for e in vals])
+            return TupleExpr(node)
         except:
             raise ValueError(f"Expected Tuple of values, got {vals}")
 
+    @classmethod
+    def empty(cls):
+        return cls.make()
+
     def __getitem__(self, idx: int) -> Expr:
-        node = ir.Proj(self.node, idx)
-        penv = pf.inference(node, self.penv)
-        return wrap(node, penv)
+        if idx < 0 or idx >= len(self):
+            raise IndexError(f"Tuple index out of range: {idx}")
+        node = ir.Proj(self.T[idx], self.node, idx)
+        return Expr(node)
 
     def __len__(self) -> int:
         return len(self.node._children)
@@ -339,116 +296,114 @@ class TupleExpr(Expr):
 class SumExpr(Expr):
     def __post_init__(self):
         super().__post_init__()
-        if not is_SumExpr(self.node, self.penv):
+        if not is_SumExpr(self.node):
             raise ValueError(f"Expected SumExpr, got {self}")
 
     @property
-    def T(self) -> irT.SumT:
-        assert isinstance(self._T, irT.SumT)
-        return tp.cast(irT.SumT, self._T)
+    def T(self) -> ir.SumT:
+        assert isinstance(self._T, ir.SumT)
+        return tp.cast(ir.SumT, self._T)
  
     def match(self, *branches) -> Expr:
         branch_exprs = [make_lambda(fn, sort=T) for fn, T in zip(branches, self.T.elemTs)]
         resT = branch_exprs[0].T.resT
         if not all(e.T.resT == resT for e in branch_exprs):
             raise ValueError(f"Expected all branches to have result type {resT}, got {', '.join([repr(e.T) for e in branch_exprs])}")
-        match_node = ir.Match(self.node, ir.TupleLit(*[e.node for e in branch_exprs]))
-        penv = _mix_envs(self, *branch_exprs)
-        return wrap(match_node, penv)
+        T = branch_exprs[0].T
+        match_node = ir.Match(T, self.node, TupleExpr.make([e.node for e in branch_exprs]))
+        return wrap(match_node)
 
 
-class LambdaExpr(Expr, tp.Generic[TExpr, VExpr]):
+class LambdaExpr(Expr):
+    def __post_init__(self):
+        super().__post_init__()
+        if not is_LambdaExpr(self.node):
+            raise ValueError(f"Expected LambdaExpr, got {self}")
+
     @property
-    def T(self) -> irT.ArrowT:
-        assert isinstance(self._T, irT.ArrowT)
-        return tp.cast(irT.ArrowT, self._T)
+    def T(self) -> ir.ArrowT:
+        assert isinstance(self._T, ir.ArrowT)
+        return tp.cast(ir.ArrowT, self._T)
  
     @property
-    def arg_type(self) -> irT.Type_:
+    def argT(self) -> ir.Type:
         return self.T.argT
 
     @property
-    def res_type(self) -> irT.Type_:
+    def resT(self) -> ir.Type:
         return self.T.resT
 
     def __repr__(self):
-        return f"{self.arg_type} -> {self.res_type}"
+        return f"{self.argT} -> {self.resT}"
 
 
 # Domain expresion is only passed in during tabulate (due to free var creation)
-def make_lambda(fn: tp.Callable[[TExpr], VExpr], *, sort: irT.Type_=None, dom: DomainExpr=None, is_tabulate=False) -> 'LambdaExpr[TExpr, VExpr]':
-    assert sum((sort is not None, dom is not None))==1
-    if dom is None:
-        assert sort is not None
-        dom = wrap(ir.Universe(sort))
-    bv_node = ir._BoundVarPlaceholder(dom.node, dom.T.carT, is_tabulate)
-    bv_expr = wrap(bv_node, dom.penv)
+def make_lambda(fn: tp.Callable, sort: ir.Type) -> LambdaExpr:
+    bv_node = ir._BoundVarPlaceholder(sort)
+    bv_expr = wrap(bv_node)
     ret_expr = fn(bv_expr)
     ret_expr = Expr.make(ret_expr)
-    lambda_node = ir._LambdaPlaceholder(bv_expr.node, ret_expr.node)
-    lam_penv = _mix_envs(bv_expr, ret_expr)
-    lam_penv[lambda_node] = pf.ProofState(
-        pf.TypeWit(subject=lambda_node, T=irT.ArrowT(bv_expr.T, ret_expr.T))
-    )
-    return LambdaExpr(lambda_node, lam_penv)
-
-IntOrExpr = tp.Union[int, IntExpr, Expr]
-BoolOrExpr = tp.Union[bool, BoolExpr, Expr]
-EnumOrExpr = tp.Union[str, EnumExpr, Expr]
+    lambda_node = ir._LambdaPlaceholder(ir.ArrowT(sort, ret_expr.T), bv_expr.node, ret_expr.node)
+    return LambdaExpr(lambda_node)
 
 class DomainExpr(Expr):
     def __post_init__(self):
         super().__post_init__()
-        if not is_DomainExpr(self.node, self.penv):
+        if not is_DomainExpr(self.node):
             raise ValueError(f"Domain must be a DomT, got {type(self.T)}")
 
     @property
-    def T(self) -> irT.DomT:
-        return tp.cast(irT.DomT, self._T)
+    def T(self) -> ir.DomT:
+        return tp.cast(ir.DomT, self._T)
  
     @classmethod
     def make(cls, val):
         raise NotImplementedError()
     
     @property
-    def carT(self) -> irT.Type_:
+    def carT(self) -> ir.Type:
         return self.T.carT
 
-    def restrict(self, pred_fun: tp.Callable[[TExpr], BoolExpr]) -> 'DomainExpr[TExpr]':
-        lambda_expr = make_lambda(pred_fun, dom=self)
-        node = ir.Restrict(self.node, lambda_expr.node)
-        penv = pf.inference(node, _mix_envs(self, lambda_expr))
-        return tp.cast(DomainExpr, wrap(node, penv))
+    def restrict(self, pred_fun: tp.Callable) -> DomainExpr:
+        lambda_expr = make_lambda(pred_fun, sort=self.carT)
+        node = ir.Restrict(ir.DomT(self.T.carT), self.node, lambda_expr.node)
+        return DomainExpr(node)
 
-    def map(self, fn: tp.Callable[[TExpr], TExpr]) -> 'FuncExpr[TExpr]':
-        lambda_expr = make_lambda(fn, dom=self, is_tabulate=True)
-        node = ir.Tabulate(self.node, lambda_expr.node)
-        penv = pf.inference(node, _mix_envs(self, lambda_expr))
-        return tp.cast(FuncExpr, wrap(node, penv))
+    def map(self, fn: tp.Callable) -> FuncExpr:
+        lambda_expr = make_lambda(fn, sort=self.carT)
+        node = ir.Map(self.node, lambda_expr.node)
+        return wrap(node)
 
-    def cartprod(self, *others: 'DomainExpr') -> 'DomainExpr':
-        if not all(isinstance(other, DomainExpr) for other in others):
-            raise ValueError(f"Expected list of DomainExpr, got {others}")
-        cartprod_node = ir.CartProd(self.node, *[other.node for other in others])
-        penv = pf.inference(cartprod_node, _mix_envs(self, *others))
-        return wrap(cartprod_node, penv)
+    @classmethod
+    def cartprod(cls, *doms: 'DomainExpr') -> 'DomainExpr':
+        if not all(isinstance(dom, DomainExpr) for dom in doms):
+            raise ValueError(f"Expected all DomainExpr, got {doms}")
+        carT = ir.TupleT(*[dom.carT for dom in doms])
+        dom_nodes = [dom.node for dom in doms]
+        prod_doms = TupleExpr.make(*dom_nodes)
+        cartprod_node = ir.CartProd(ir.DomT(carT,prod_doms=prod_doms), *dom_nodes)
+        return wrap(cartprod_node)
+
+    def prod(self, *others: 'DomainExpr') -> 'DomainExpr':
+        return DomainExpr.cartprod(self, *others)
 
     def coproduct(self, *others: 'DomainExpr') -> 'DomainExpr':
-        coprod_node = ir.DisjUnion(self.node, *[other.node for other in others])
-        penv = pf.inference(coprod_node, _mix_envs(self, *others))
-        return tp.cast(DomainExpr, wrap(coprod_node, penv))
+        if not all(isinstance(other, DomainExpr) for other in others):
+            raise ValueError(f"Expected list of DomainExpr, got {others}")
+        doms = [self, *others]
+        carT = ir.SumT(*[dom.carT for dom in doms])
+        coprod_node = ir.DisjUnion(ir.DomT(carT), self.node)
+        return wrap(coprod_node)
 
-    def forall(self, pred_fun: tp.Callable[[TExpr], BoolExpr]) -> BoolExpr:
+    def forall(self, pred_fun: tp.Callable) -> BoolExpr:
         lambda_expr = make_lambda(pred_fun, dom=self)
         node = ir.Forall(self.node, lambda_expr.node)
-        penv = pf.inference(node, _mix_envs(self, lambda_expr))
-        return tp.cast(BoolExpr, wrap(node, penv))
+        return BoolExpr(node)
 
-    def exists(self, pred_fun: tp.Callable[[TExpr], BoolExpr]) -> BoolExpr:
+    def exists(self, pred_fun: tp.Callable) -> BoolExpr:
         lambda_expr = make_lambda(pred_fun, dom=self)
         node = ir.Exists(self.node, lambda_expr.node)
-        penv = pf.inference(node, _mix_envs(self, lambda_expr))
-        return tp.cast(BoolExpr, wrap(node, penv))
+        return BoolExpr(node)
 
     # TODO 
     #def partition(self, dom:DomainExpr, color_fun):
@@ -461,13 +416,12 @@ class DomainExpr(Expr):
     @property
     def size(self) -> IntExpr:
         node = ir.Card(self.node)
-        penv = pf.inference(node, self.penv)
-        return tp.cast(IntExpr, wrap(node, penv))
+        return IntExpr(node)
 
-    def __contains__(self, elem: TExpr) -> BoolExpr:
+    def __contains__(self, elem: Expr) -> BoolExpr:
+        elem = Expr.make(elem)
         node = ir.IsMember(self.node, elem.node)
-        penv = pf.inference(node, _mix_envs(self, elem))
-        return tp.cast(BoolExpr, wrap(node, penv))
+        return BoolExpr(node)
 
     def __add__(self, other: 'DomainExpr') -> 'DomainExpr':
         return self.coproduct(other)
@@ -479,18 +433,17 @@ class DomainExpr(Expr):
     # TODO
 
 class _EnumAttrs:
-    def __init__(self, enumT: irT.EnumT):
-        assert isinstance(enumT, irT.EnumT)
+    def __init__(self, enumT: ir.EnumT):
+        assert isinstance(enumT, ir.EnumT)
         for label in enumT.labels:
             label_node = ir.EnumLit(enumT, label)
-            label_penv = pf.inference(label_node)
-            label_expr = wrap(label_node, label_penv)
+            label_expr = Expr(label_node)
             setattr(self, label, label_expr)
 
 class EnumDomainExpr(DomainExpr):
     def __post_init__(self):
         super().__post_init__()
-        if not is_EnumDomainExpr(self.node, self.penv):
+        if not is_EnumDomainExpr(self.node):
             raise ValueError(f"Expected EnumDomainExpr, got {self}")
         self._members = _EnumAttrs(self.T.carT)
 
@@ -512,10 +465,9 @@ class EnumDomainExpr(DomainExpr):
             raise NotImplementedError("cannot have a 0-label Enum")
         if name is None:
             name = "".join(labels)
-        enumT = irT.EnumT(name, *labels)
+        enumT = ir.EnumT(name, *labels)
         node = ir.Enum(enumT)
-        penv = pf.inference(node)
-        return EnumDomainExpr(node, penv)
+        return EnumDomainExpr(node)
 
 class SeqDomainExpr(DomainExpr):
     def __post_init__(self):
@@ -523,171 +475,170 @@ class SeqDomainExpr(DomainExpr):
         if not is_SeqDomainExpr(self.node, self.penv):
             raise ValueError(f"Expected SeqDomainExpr, got {self}")
 
-    def windows(self, size: IntOrExpr, stride: IntOrExpr=1) -> ArrayExpr[SeqDomainExpr[TExpr]]:
+    def windows(self, size: IntOrExpr, stride: IntOrExpr=1) -> ArrayExpr[SeqDomainExpr]:
         size = IntExpr.make(size)
         stride = IntExpr.make(stride)
-        func_node = ir.Windows(self.node, size.node, stride.node)
-        penv = pf.inference(func_node, _mix_envs(self, size, stride))
-        return ArrayExpr(func_node, penv)
+        dom: DomainExpr = ((self.size-(size-stride))/stride).fin()
+        T = ir.FuncT(dom, self.T)
+        func_node = ir.Windows(T, self.node, size.node, stride.node)
+        return ArrayExpr(func_node)
  
 class NDSeqDomainExpr(DomainExpr):
     def __post_init__(self):
         super().__post_init__()
-        if not is_NDSeqDomainExpr(self.node, self.penv):
+        if not is_NDSeqDomainExpr(self.node):
             raise ValueError(f"Expected NDSeqDomainExpr, got {self}")
 
-    def tiles(self, size: tp.Tuple[IntOrExpr, ...], stride: tp.Tuple[IntOrExpr, ...]) -> NDArrayExpr[NDSeqDomainExpr[TExpr]]:
-        node = ir.Tiles(self.node, *[IntExpr.make(s) for s in size], *[IntExpr.make(s) for s in stride])
-        penv = pf.inference(node, _mix_envs(self, *[IntExpr.make(s) for s in size], *[IntExpr.make(s) for s in stride]))
-        return NDArrayExpr(node, penv)
+    def tiles(self, size: tp.Tuple[IntOrExpr, ...], stride: tp.Tuple[IntOrExpr, ...]=None) -> NDArrayExpr:
+        num_dims = len(self)
+        if stride == None:
+            strides = [IntExpr.make(1) for _ in range(num_dims)]
+        else:
+            strides = [IntExpr.make(s) for s in stride]
+        sizes = [IntExpr.make(s) for s in size]
+        if len(sizes) != num_dims or len(strides) != num_dims:
+            raise ValueError(f"Expected size and stride for all dimensions ({num_dims}), got {size} and {stride}")
+        fins = [((self.doms[i].size-(sizes[i]-strides[i]))/strides[i]).fin() for i in range(num_dims)]
+        dom = DomainExpr.cartprod(*fins)
+        T = ir.FuncT(dom, self.T)
+        node = ir.Tiles(T, dom, sizes, strides)
+        return NDArrayExpr(node)
 
     def dom_proj(self, idx: int) -> SeqDomainExpr:
-        node = ir.DomProj(self.node, idx)
-        penv = pf.inference(node, self.penv)
-        return SeqDomainExpr(node, penv)
+        T = self.T.prod_doms.T[idx]
+        node = ir.DomProj(T, self.node, idx)
+        return wrap(node)
 
-    def doms(self) -> TupleExpr[DomainExpr]:
-        return TupleExpr.make([self.dom_proj(i) for i in range(len(self))])
+    @property
+    def doms(self) -> tp.Tuple[DomainExpr]:
+        return tuple(self.dom_proj(i) for i in range(len(self)))
 
+    @property
     def dims(self) -> TupleExpr[IntExpr]:
-        return TupleExpr.make([len(self.dom_proj(i)) for i in range(len(self))])
+        return tuple(dom.size for dom in self.doms)
 
     def slices(self, idx: int) -> ArrayExpr[DomainExpr]:
-        node = ir.Slices(self.node, idx)
-        penv = pf.inference(node, self.penv)
-        return ArrayExpr(node, penv)
+        dom = self.dom_proj(idx)
+        T = ir.FuncT(dom, self.T)
+        node = ir.Slices(T, dom, idx)
+        return ArrayExpr(node)
 
     def rows(self) -> ArrayExpr[SeqDomainExpr]:
-        if not is_2DSeqDomainExpr(self.node, self.penv):
+        if not is_2DSeqDomainExpr(self.node):
             raise ValueError(f"Expected 2D array, got {self.T}")
         return self.slices(0)
 
     def cols(self) -> ArrayExpr[SeqDomainExpr]:
-        if not is_2DSeqDomainExpr(self.node, self.penv):
+        if not is_2DSeqDomainExpr(self.node):
             raise ValueError(f"Expected 2D array, got {self.T}")
         return self.slices(1)
 
-# Texpr represents the carrier type of the function domain
-# Vexpr represents the carrier type of the function image
-class FuncExpr(Expr, tp.Generic[TExpr, VExpr]):
+    def __getitem__(self, idx: int):
+        return self.dom_proj(idx)
+
+    def __len__(self):
+        return len(self.T)
+
+class FuncExpr(Expr):
     def __post_init__(self):
         super().__post_init__()
-        if not is_FuncExpr(self.node, self.penv):
+        if not is_FuncExpr(self.node):
             raise ValueError(f"Expected FuncExpr, got {self.T}")
 
     @property
-    def T(self) -> irT.FuncT:
-        return tp.cast(irT.FuncT, self._T)
+    def T(self) -> ir.FuncT:
+        return tp.cast(ir.FuncT, self._T)
 
     @property
-    def domT(self) -> irT.DomT:
-        return self.T.domT
+    def domT(self) -> ir.DomT:
+        return self.T.dom.carT
 
     @property
     def domain(self) -> DomainExpr:
-        node = ir.DomOf(self.node)
-        penv = pf.inference(node, self.penv)
-        return tp.cast(DomainExpr, wrap(node, penv))
+        return self.T.dom
 
     @property
     def image(self) -> DomainExpr:
-        node = ir.ImageOf(self.node)
-        penv = pf.inference(node, self.penv)
-        return tp.cast(DomainExpr, wrap(node, penv))
+        T = ir.DomT(self.elemT)
+        node = ir.Image(T, self.node)
+        return wrap(node)
 
     @property 
-    def elemT(self) -> irT.Type_:
-        return self.T.resT
+    def elemT(self) -> ir.Type:
+        return self.T.retT
 
     @property
-    def carT(self) -> irT.Type_:
-        return self.T.domT.carT
+    def carT(self) -> ir.Type:
+        return self.domain.carT
 
     def apply(self, arg: Expr) -> Expr:
-        node = ir.Apply(self.node, arg.node)
-        penv = pf.inference(node, _mix_envs(self, arg))
-        return wrap(node, penv)
+        node = ir.Apply(self.elemT, self.node, arg.node)
+        return wrap(node)
 
     # Func[Dom(A) -> B] -> (B -> C) -> Func[Dom(A) -> C]
-    def map(self, fn: tp.Callable[[TExpr], TExpr]) -> 'FuncExpr[TExpr]':
+    def map(self, fn: tp.Callable) -> FuncExpr:
         return self.domain.map(lambda a: fn(self.apply(a)))
 
-    def enumerate(self) -> 'FuncExpr[TExpr]':
+    # Func[Dom(A) -> B] -> Func[Dom(A) -> (A, B)]
+    def enumerate(self) -> FuncExpr:
         return self.domain.map(lambda a: TupleExpr.make((a, self.apply(a))))
 
     # Func[Dom(A) -> B] -> ((A,B) -> C) -> Func[Dom(A) -> C]
-    def imap(self, fn: tp.Callable[[TExpr, TExpr], TExpr]) -> 'FuncExpr[TExpr]':
+    def imap(self, fn: tp.Callable) -> 'FuncExpr':
         return self.enumerate().map(fn)
 
-    def forall(self, pred_fun: tp.Callable[[TExpr], BoolExpr]) -> BoolExpr:
-        applied_fun = lambda a: pred_fun(self.apply(a))
-        return self.domain.forall(applied_fun)
+    def forall(self, pred_fun: tp.Callable) -> BoolExpr:
+        return self.domain.forall(lambda a: pred_fun(self.apply(a)))
 
-    def exists(self, pred_fun: tp.Callable[[TExpr], BoolExpr]) -> BoolExpr:
-        applied_fun = lambda a: pred_fun(self.apply(a))
-        return self.domain.exists(applied_fun)
-
-    def all(self, fn: tp.Callable[[TExpr], BoolExpr]) -> BoolExpr:
-        return self.forall(fn)
-
-    def any(self, fn: tp.Callable[[TExpr], BoolExpr]) -> BoolExpr:
-        return self.exists(fn)
-
-    def distinct(self) -> BoolExpr:
-        node = ir.Distinct(self.node)
-        penv = pf.inference(node, self.penv)
-        return wrap(node, penv)
+    def exists(self, pred_fun: tp.Callable) -> BoolExpr:
+        return self.domain.exists(lambda a: pred_fun(self.apply(a)))
 
     def size(self) -> IntExpr:
         return self.domain.size()
     
-    def __contains__(self, elem: TExpr) -> BoolExpr:
+    def __contains__(self, elem: Expr) -> BoolExpr:
         return elem in self.image
 
-    def __call__(self, val) -> TExpr:
+    def __call__(self, val: Expr) -> Expr:
         return self.apply(val)
 
+    # Basically a 'gather'
     def __getitem__(self, dom: DomainExpr) -> FuncExpr:
-        if not is_DomainExpr(dom.node, dom.penv):
+        if not is_DomainExpr(dom.node):
             raise ValueError(f"Can only index into funcs with a domain.\nFunc: {self}\n Got: {dom}")
         return dom.map(lambda v: self.apply(v))
 
-class ArrayExpr(FuncExpr, tp.Generic[TExpr]):
+class ArrayExpr(FuncExpr):
     def __post_init__(self):
         super().__post_init__()
-        if not is_ArrayExpr(self.node, self.penv):
-            raise ValueError(f"Array domain must be enumerable with rank 1, got {self.T.domT}")
+        if not is_ArrayExpr(self.node):
+            raise ValueError(f"Array domain must be enumerable with rank 1, got {self.T}")
   
     @classmethod
-    def make(cls, val: tp.List[tp.Any]) -> ArrayExpr[TExpr]:
-        if isinstance(val, ArrayExpr[TExpr]):
+    def make(cls, val: tp.List[tp.Any]) -> ArrayExpr:
+        if isinstance(val, ArrayExpr):
             return val
         try:
             vals = [Expr.make(v) for v in val]
         except:
             raise ValueError(f"Expected List of values, got {val}")
-        node = ir.ListLit(*[e.node for e in vals])
-        penv = pf.inference(node, _mix_envs(*vals))
-        return ArrayExpr(node, penv)
+        if not all(v.T == vals[0].T for v in vals):
+            raise ValueError(f"Expected List of values with the same type, got {vals}")
+        node = ir.ListLit(vals[0].T, *[e.node for e in vals])
+        return ArrayExpr(node)
 
     @property
     def domain(self) -> SeqDomainExpr:
         dom = super().domain
-        return as_SeqDomain(dom.node, dom.penv)
-
-    def windows(self, size: IntOrExpr, stride: IntOrExpr=1) -> ArrayExpr[ArrayExpr[TExpr]]:
-        wins = self.domain.windows(size, stride) # Func[Fin(n) -> SeqDom(A)]
-        wins.map(lambda win: win.tabulate(lambda i: self[i]))
-
-    def __getitem__(self, idx: tp.Optional[IntOrExpr, FuncExpr]) -> TExpr:
-        if isinstance(idx, FuncExpr):
-            return super().__getitem__(idx)
-        idx = IntExpr.make(idx)
-        return self.apply(idx)
+        return SeqDomainExpr(dom.node)
 
     @property
     def size(self) -> IntExpr:
         return self.domain.size
+
+    def windows(self, size: IntOrExpr, stride: IntOrExpr=1) -> ArrayExpr:
+        wins = self.domain.windows(size, stride) # Func[Fin(n) -> SeqDom(A)]
+        wins.map(lambda win: win.map(lambda i: self(i)))
 
     def __iter__(self) -> None:
         raise ValueError("ArrayExpr is not iterable at python runtime")
@@ -696,194 +647,106 @@ class ArrayExpr(FuncExpr, tp.Generic[TExpr]):
 class NDArrayExpr(FuncExpr):
     def __post_init__(self):
         super().__post_init__()
-        if not is_NDArrayExpr(self.node, self.penv):
-            raise ValueError(f"NDVec domain must be enumerable with rank 2, got {self.T.domT}")
+        if not is_NDArrayExpr(self.node):
+            raise ValueError(f"NDSeq domain must be enumerable with rank 2, got {self.T}")
 
     @property
     def domain(self) -> NDSeqDomainExpr:
         dom = super().domain
-        return as_NDSeqDomain(dom.node, dom.penv)
+        return NDSeqDomainExpr(dom.node)
 
     @property
-    def dims(self) -> TupleExpr[IntExpr]:
+    def dims(self) -> TupleExpr:
         return self.domain.dims()
 
-    def rows(self) -> ArrayExpr[ArrayExpr[TExpr]]:
-        return self.domain.rows().map(lambda row: row.tabulate(lambda rc: self.apply(rc)))
+    def rows(self) -> ArrayExpr:
+        return self.domain.rows().map(lambda row: self[row])
 
-    def cols(self) -> ArrayExpr[ArrayExpr[TExpr]]:
-        return self.domain.cols().map(lambda col: col.tabulate(lambda rc: self.apply(rc)))
+    def cols(self) -> ArrayExpr:
+        return self.domain.cols().map(lambda col: self[col])
 
     def tiles(self, size: tp.Tuple[IntOrExpr, ...], stride: tp.Tuple[IntOrExpr, ...]=None) -> ArrayExpr[TExpr]:
-        return self.domain.tiles(size, stride).map(lambda tile_dom: tile_dom.tabulate(lambda indices: self.apply(indices)))
+        return self.domain.tiles(size, stride).map(
+            lambda tile_dom: tile_dom.map(lambda indices: self.apply(indices))
+        )
 
-def is_UnitExpr(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> bool:
-    return penv[node].T == irT.UnitType
+def is_UnitExpr(node: ir.Node) -> bool:
+    return isinstance(node, ir.Value) and isinstance(node.T, ir.Unit)
 
-def as_Unit(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> UnitExpr:
-    if is_UnitExpr(node, penv):
-        return UnitExpr(node, penv)
-    raise ValueError(f"Cannot cast node {node} to UnitExpr")
+def is_BoolExpr(node: ir.Node) -> bool:
+    return isinstance(node, ir.Value) and isinstance(node.T, ir.BoolT)
 
-def is_BoolExpr(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> bool:
-    return penv[node].T == irT.Bool
+def is_IntExpr(node: ir.Node) -> bool:
+    return isinstance(node, ir.Value) and isinstance(node.T, ir.IntT)
 
-def as_Bool(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> BoolExpr:
-    if is_BoolExpr(node, penv):
-        return BoolExpr(node, penv)
-    raise ValueError(f"Cannot cast node {node} to BoolExpr")
+def is_EnumExpr(node: ir.Node) -> bool:
+    return isinstance(node, ir.Value) and isinstance(node.T, ir.EnumT)
 
-def is_IntExpr(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> bool:
-    return penv[node].T == irT.Int
+def is_TupleExpr(node: ir.Node) -> bool:
+    return isinstance(node, ir.Value) and isinstance(node.T, ir.TupleT)
 
-def as_Int(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> IntExpr:
-    if is_IntExpr(node, penv):
-        return IntExpr(node, penv)
-    raise ValueError(f"Cannot cast node {node} to IntExpr")
+def is_SumExpr(node: ir.Node) -> bool:
+    return isinstance(node, ir.Value) and isinstance(node.T, ir.SumT)
 
-def is_EnumExpr(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> bool:
-    return isinstance(penv[node].T, irT.EnumT)
+def is_LambdaExpr(node: ir.Node) -> bool:
+    return isinstance(node, ir.Value) and isinstance(node.T, ir.ArrowT)
 
-def as_Enum(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> EnumExpr:
-    if is_EnumExpr(node, penv):
-        return EnumExpr(node, penv)
-    raise ValueError(f"Cannot cast node {node} to EnumExpr")
+def is_DomainExpr(node: ir.Node) -> bool:
+    return isinstance(node, ir.Value) and isinstance(node.T, ir.DomT)
 
-def is_TupleExpr(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> bool:
-    return isinstance(penv[node].T, irT.TupleT)
+def is_EnumDomainExpr(node: ir.Node) -> bool:
+    return is_DomainExpr(node) and isinstance(node.T.carT, ir.EnumT)
 
-def as_Tuple(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> TupleExpr:
-    if is_TupleExpr(node, penv):
-        return TupleExpr(node, penv)
-    raise ValueError(f"Cannot cast node {node} to TupleExpr")
+def is_SeqDomainExpr(node: ir.Node) -> bool:
+    return is_DomainExpr(node) and node.T.ord and node.T.fin
 
-def is_SumExpr(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> bool:
-    return isinstance(penv[node].T, irT.SumT)
+def is_2DSeqDomainExpr(node: ir.Node) -> bool:
+    return is_NDSeqDomainExpr(node) and len(node.T.prod_doms) == 2
 
-def as_Sum(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> SumExpr:
-    if is_SumExpr(node, penv):
-        return SumExpr(node, penv)
-    raise ValueError(f"Cannot cast node {node} to SumExpr")
+def is_NDSeqDomainExpr(node: ir.Node) -> bool:
+    return is_SeqDomainExpr(node) and len(node.T.prod_doms) > 1
 
-def is_LambdaExpr(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> bool:
-    return isinstance(penv[node].T, irT.ArrowT)
+def is_FuncExpr(node: ir.Node) -> bool:
+    return isinstance(node, ir.Value) and isinstance(node.T, ir.FuncT)
 
-def as_Lambda(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> LambdaExpr:
-    if is_LambdaExpr(node, penv):
-        return LambdaExpr(node, penv)
-    raise ValueError(f"Cannot cast node {node} to LambdaExpr")
+def is_ArrayExpr(node: ir.Node) -> bool:
+    return is_FuncExpr(node) and is_SeqDomainExpr(node.T.dom)
 
-def is_DomainExpr(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> bool:
-    return isinstance(penv[node].T, irT.DomT) and penv[node].get_wit(pf.DomAttrWit) is not None
+def is_NDArrayExpr(node: ir.Node) -> bool:
+    return is_ArrayExpr(node) and is_NDSeqDomainExpr(node.T.dom)
 
-def as_Domain(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> DomainExpr:
-    if is_DomainExpr(node, penv):
-        return DomainExpr(node, penv)
-    raise ValueError(f"Cannot cast node {node} to DomainExpr")
-
-def is_EnumDomainExpr(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> bool:
-    T = penv[node].T
-    return is_DomainExpr(node, penv) and isinstance(T.carT, irT.EnumT)
-
-def as_EnumDomain(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> EnumDomainExpr:
-    if is_EnumDomainExpr(node, penv):
-        return EnumDomainExpr(node, penv)
-    raise ValueError(f"Cannot cast node {node} to EnumDomainExpr")
-
-def is_SeqDomainExpr(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> bool:
-    if is_DomainExpr(node, penv):
-        ps = penv[node]
-        if not isinstance(ps.T, irT.DomT):
-            return False
-        wit = ps.get_wit(pf.DomAttrWit)
-        return wit is not None and wit.is_ordered
-    return False
-
-def as_SeqDomain(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> IterDomainExpr:
-    if is_SeqDomainExpr(node, penv):
-        return SeqDomainExpr(node, penv)
-    raise ValueError(f"Cannot cast node {node} to SeqDomainExpr")
-
-def is_2DSeqDomainExpr(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> bool:
-    if is_NDSeqDomainExpr(node, penv):
-        return len(penv[node].get_wit(pf.CartProdWit).doms) == 2
-
-def is_NDSeqDomainExpr(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> bool:
-    if is_DomainExpr(node, penv):
-        ps = penv[node]
-        wit = ps.get_wit(pf.CartProdWit)
-        if wit is None or len(wit.doms) < 2:
-            return False
-        return all(is_SeqDomainExpr(dom, penv) for dom in wit.doms)
-    return False
-
-def as_NDSeqDomain(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> NDIterDomainExpr:
-    if is_NDSeqDomainExpr(node, penv):
-        return NDSeqDomainExpr(node, penv)
-    raise ValueError(f"Cannot cast node {node} to NDSeqDomainExpr")
-
-def is_FuncExpr(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> bool:
-    return isinstance(penv[node].T, irT.FuncT) and penv[node].get_wit(pf.DomsWit) is not None
-
-def as_Func(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> FuncExpr:
-    if is_FuncExpr(node, penv):
-        return FuncExpr(node, penv)
-    raise ValueError(f"Cannot cast node {node} to FuncExpr")
-
-def is_ArrayExpr(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> bool:
-    if is_FuncExpr(node, penv):
-        doms = penv[node].get_wit(pf.DomsWit).doms
-        return len(doms) > 1 and is_SeqDomainExpr(doms[0], penv)
-    return False
-
-def as_Array(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> ArrayExpr:
-    if is_ArrayExpr(node, penv):
-        return ArrayExpr(node, penv)
-    raise ValueError(f"Cannot cast node {node} to ArrayExpr")
-
-def is_NDArrayExpr(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> bool:
-    if is_ArrayExpr(node, penv):
-        doms = penv[node].get_wit(pf.DomsWit).doms
-        return is_NDSeqDomainExpr(doms[0], penv)
-
-def as_NDArray(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]) -> NDArrayExpr:
-    if is_NDArrayExpr(node, penv):
-        return NDArrayExpr(node, penv)
-    raise ValueError(f"Cannot cast node {node} to NDArrayExpr")
-
-def wrap(node: ir.Node, penv: tp.Dict[ir.Node, pf.ProofState]={}) -> Expr:
-    penv = pf.inference(node, penv)
+def wrap(node: ir.Node) -> Expr:
     # Base theory types
-    if is_UnitExpr(node, penv):
-        return as_Unit(node, penv)
-    if is_BoolExpr(node, penv):
-        return as_Bool(node, penv)
-    if is_IntExpr(node, penv):
-        return as_Int(node, penv)
-    if is_EnumExpr(node, penv):
-        return as_Enum(node, penv)
-    if is_LambdaExpr(node, penv):
-        return as_Lambda(node, penv)
-    if is_TupleExpr(node, penv):
-        return as_Tuple(node, penv)
-    if is_SumExpr(node, penv):
-        return as_Sum(node, penv)
+    if is_UnitExpr(node):
+        return UnitExpr(node)
+    if is_BoolExpr(node):
+        return BoolExpr(node)
+    if is_IntExpr(node):
+        return IntExpr(node)
+    if is_EnumExpr(node):
+        return EnumExpr(node)
+    if is_LambdaExpr(node):
+        return LambdaExpr(node)
+    if is_TupleExpr(node):
+        return TupleExpr(node)
+    if is_SumExpr(node):
+        return SumExpr(node)
     # Domain types
-    if is_EnumDomainExpr(node, penv):
-        return as_EnumDomain(node, penv)
-    if is_NDSeqDomainExpr(node, penv):
-        return as_NDSeqDomain(node, penv)
-    if is_SeqDomainExpr(node, penv):
-        return as_SeqDomain(node, penv)
-    if is_EnumDomainExpr(node, penv):
-        return as_EnumDomain(node, penv)
-    if is_DomainExpr(node, penv):
-        return as_Domain(node, penv)
+    if is_EnumDomainExpr(node):
+        return EnumDomainExpr(node)
+    if is_NDSeqDomainExpr(node):
+        return NDSeqDomainExpr(node)
+    if is_SeqDomainExpr(node):
+        return SeqDomainExpr(node)
+    if is_EnumDomainExpr(node):
+        return EnumDomainExpr(node)
+    if is_DomainExpr(node):
+        return DomainExpr(node)
     # Func types
-    if is_NDArrayExpr(node, penv):
-        return as_NDArray(node, penv)
-    if is_ArrayExpr(node, penv):
-        return as_Array(node, penv)
-    if is_FuncExpr(node, penv):
-        return as_Func(node, penv)
+    if is_NDArrayExpr(node):
+        return NDArrayExpr(node)
+    if is_ArrayExpr(node):
+        return ArrayExpr(node)
+    if is_FuncExpr(node):
+        return FuncExpr(node)
     raise NotImplementedError(f"Cannot cast node {node} to Expr")

@@ -1,8 +1,8 @@
 import typing as tp
 
 from puzzlespec.compiler.passes.transforms.resolve_bound_vars import ResolveBoundVars
-from . import ast, ir, ir_types as irT, proof_lib as pf
-from .envs import SymTable, DomEnv
+from . import ast, ir
+from .envs import SymTable, TypeEnv
 from ..passes.pass_base import Context
 from ..passes.transforms.cse import CSE
 from ..passes.analyses.getter import VarGetter, VarSet
@@ -11,10 +11,9 @@ from .spec import PuzzleSpec
 
 class PuzzleSpecBuilder(PuzzleSpec):
     def __init__(self):
-        super().__init__("", "", SymTable(), DomEnv())
-        self._name_name_cnt = 0
+        super().__init__("", "", SymTable(), TypeEnv())
+        self._name_cnt = 0
         # sid -> "sids which key depends on"
-        self._depends = {}
 
     @property
     def rules(self) -> ast.TupleExpr:
@@ -32,86 +31,103 @@ class PuzzleSpecBuilder(PuzzleSpec):
         self._var_name_cnt += 1
         return f"_X{self._var_name_cnt}"
 
-    # Core idea: Only allow vars with deps constructed via tabulate. In a tabulate, I can throw the domain/domT inside the bound var placeholder.
-    # This now gives me the tabulated domains asociated with the bound var and therefore I can eagerly construct the nested Func var
     def var(self, 
-        role: str='D', 
-        sort: tp.Optional[irT.Type_]=None, 
+        role: str, 
+        sort: ir.Type,
         dom: tp.Optional[ast.DomainExpr]=None, 
         name: tp.Optional[str]=None, 
-        dep: tp.Optional[tp.Tuple[ast.Expr, ...]]=None
+        #dep: tp.Optional[tp.Tuple[ast.Expr, ...]]=None
     ) -> ast.Expr:
-        err_prefix=f"ERROR In var {name}: "
-        if dom is not None and not isinstance(dom, ast.DomainExpr):
-            raise ValueError(f"{err_prefix}dom must be a DomainExpr, got {type(dom)}")
-        if sort is not None and not isinstance(sort, irT.Type_):
-            raise ValueError(f"{err_prefix}sort must be a Type_, got {type(sort)}")
-        if role not in "GDP":
-            raise ValueError(f"{err_prefix}role must be G, P, or D, got {role}")
-        if sort is None and dom is None:
-            raise ValueError(f"{err_prefix}Either dom or sort must be provided")
-        if dom is not None and sort is not None and dom.carT:
-            raise ValueError(f"{err_prefix}dom.carT must be equal to sort, got {dom.carT} and {sort}")
-        if dom is None:
-            dom_expr = ast.wrap(ir.Universe(sort))
-        else:
-            dom_expr = dom
-        if not isinstance(dep, tp.Tuple):
-            dep = (dep,)
-        if not all(isinstance(d.node, ir._BoundVarPlaceholder) for d in dep):
-            raise ValueError(f"{err_prefix}dep must be bound variables, got {dep}")
-        if not all(d.node.is_tabulate for d in dep):
-            raise ValueError(f"{err_prefix}dep must be tabulated bound variables, got {dep}")
-        dep_doms = []
-        for bv in dep:
-            wit = bv.penv[bv.node].get_wit(pf.DomsWit)
-            assert len(wit.doms) ==1
-            dep_dom = wit.doms[0]
-            dep_doms.append(ast.wrap(dep_dom, bv.penv))
-
-        #dep_dom_nodes = tuple(d.node.dom for d in dep)
-      
-        ## Do dependency analysis
-        #dep_sid_sets= tuple(set(v.sid for v in self.analyze([VarGetter()], d.node, Context(self._envs_obj)).get(VarSet).vars) for d in dep)
-        #sids_in_context = set()
-        #for i, dep_set in enumerate(dep_sid_sets):
-        #    for sid in dep_set:
-        #        for dep_sid in self._depends[sid]:
-        #            if dep_sid not in sids_in_context:
-        #                msg =f"{err_prefix}Variable Dependency Error!\n . bound_var in Dom:{dep[i]} is dependent on {self.sym.get_name(dep_sid)} which is not in context."
-        #                raise ValueError(msg)
-        #    sids_in_context |= dep_set
-        
         public = True
         if name is None:
             name = self._new_var_name()
             public = False
-        
-        new_sid = self.sym.new_var(name, role, public)
+        sid = self.sym.new_var(name, role, public)
+        self.tenv.add(sid, sort)
+        var = ir._VarPlaceholder(sort, sid)
+        return ast.wrap(var)
 
-        #self._depends[new_sid] = sids_in_context
-        doms = (*dep_doms, dom_expr)
-        doms_nodes = tuple(dom.node for dom in doms)
-        # update domain env
-        self.domenv.add(new_sid, doms_nodes)
-       
-        #Calculate expr of var
-        var_node = ir.VarRef(new_sid)
-        penv = ast._mix_envs(*doms)
-        def _T(doms):
-            if len(doms)==1:
-                return doms[0].T.carT
-            else:
-                return irT.FuncT(domT=doms[0].T, resT=_T(doms[1:]))
-        varT = _T(doms)
-        penv[var_node] = pf.ProofState(
-            pf.DomsWit(doms=doms_nodes, subject=var_node),
-            pf.TypeWit(T=varT, subject=var_node)
-        )
-        var = ast.wrap(var_node, penv)
-        for d in dep:
-            var = var.apply(d)
-        return var
+ 
+    # Core idea: Only allow vars with deps constructed via tabulate. In a tabulate, I can throw the domain/domT inside the bound var placeholder.
+    # This now gives me the tabulated domains asociated with the bound var and therefore I can eagerly construct the nested Func var
+    #def var(self, 
+    #    role: str='D', 
+    #    sort: tp.Optional[irT.Type_]=None, 
+    #    dom: tp.Optional[ast.DomainExpr]=None, 
+    #    name: tp.Optional[str]=None, 
+    #    dep: tp.Optional[tp.Tuple[ast.Expr, ...]]=None
+    #) -> ast.Expr:
+    #    err_prefix=f"ERROR In var {name}: "
+    #    if dom is not None and not isinstance(dom, ast.DomainExpr):
+    #        raise ValueError(f"{err_prefix}dom must be a DomainExpr, got {type(dom)}")
+    #    if sort is not None and not isinstance(sort, irT.Type_):
+    #        raise ValueError(f"{err_prefix}sort must be a Type_, got {type(sort)}")
+    #    if role not in "GDP":
+    #        raise ValueError(f"{err_prefix}role must be G, P, or D, got {role}")
+    #    if sort is None and dom is None:
+    #        raise ValueError(f"{err_prefix}Either dom or sort must be provided")
+    #    if dom is not None and sort is not None and dom.carT:
+    #        raise ValueError(f"{err_prefix}dom.carT must be equal to sort, got {dom.carT} and {sort}")
+    #    if dom is None:
+    #        dom_expr = ast.wrap(ir.Universe(sort))
+    #    else:
+    #        dom_expr = dom
+    #    if not isinstance(dep, tp.Tuple):
+    #        dep = (dep,)
+    #    if not all(isinstance(d.node, ir._BoundVarPlaceholder) for d in dep):
+    #        raise ValueError(f"{err_prefix}dep must be bound variables, got {dep}")
+    #    if not all(d.node.is_tabulate for d in dep):
+    #        raise ValueError(f"{err_prefix}dep must be tabulated bound variables, got {dep}")
+    #    dep_doms = []
+    #    for bv in dep:
+    #        wit = bv.penv[bv.node].get_wit(pf.DomsWit)
+    #        assert len(wit.doms) ==1
+    #        dep_dom = wit.doms[0]
+    #        dep_doms.append(ast.wrap(dep_dom, bv.penv))
+
+    #    #dep_dom_nodes = tuple(d.node.dom for d in dep)
+    #  
+    #    ## Do dependency analysis
+    #    #dep_sid_sets= tuple(set(v.sid for v in self.analyze([VarGetter()], d.node, Context(self._envs_obj)).get(VarSet).vars) for d in dep)
+    #    #sids_in_context = set()
+    #    #for i, dep_set in enumerate(dep_sid_sets):
+    #    #    for sid in dep_set:
+    #    #        for dep_sid in self._depends[sid]:
+    #    #            if dep_sid not in sids_in_context:
+    #    #                msg =f"{err_prefix}Variable Dependency Error!\n . bound_var in Dom:{dep[i]} is dependent on {self.sym.get_name(dep_sid)} which is not in context."
+    #    #                raise ValueError(msg)
+    #    #    sids_in_context |= dep_set
+    #    
+    #    public = True
+    #    if name is None:
+    #        name = self._new_var_name()
+    #        public = False
+    #    
+    #    new_sid = self.sym.new_var(name, role, public)
+
+    #    #self._depends[new_sid] = sids_in_context
+    #    doms = (*dep_doms, dom_expr)
+    #    doms_nodes = tuple(dom.node for dom in doms)
+    #    # update domain env
+    #    self.domenv.add(new_sid, doms_nodes)
+    #   
+    #    #Calculate expr of var
+    #    var_node = ir.VarRef(new_sid)
+    #    penv = ast._mix_envs(*doms)
+    #    def _T(doms):
+    #        if len(doms)==1:
+    #            return doms[0].T.carT
+    #        else:
+    #            return irT.FuncT(domT=doms[0].T, resT=_T(doms[1:]))
+    #    varT = _T(doms)
+    #    penv[var_node] = pf.ProofState(
+    #        pf.DomsWit(doms=doms_nodes, subject=var_node),
+    #        pf.TypeWit(T=varT, subject=var_node)
+    #    )
+    #    var = ast.wrap(var_node, penv)
+    #    for d in dep:
+    #        var = var.apply(d)
+    #    return var
 
     def param(self, sort: irT.Type_=None, dom: ast.DomainExpr=None, name: str=None, dep=()) -> ast.Expr:
         return self.var(sort=sort, dom=dom, name=name, dep=dep)
