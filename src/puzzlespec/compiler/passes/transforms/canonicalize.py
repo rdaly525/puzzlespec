@@ -3,7 +3,7 @@ from __future__ import annotations
 import typing as tp
 
 from ..pass_base import Transform, Context, handles
-from ...dsl import ir, ir_types as irT
+from ...dsl import ir
 
 class CanonicalizePass(Transform):
     """Canonicalize the IR tree.

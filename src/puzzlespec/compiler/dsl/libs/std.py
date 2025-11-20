@@ -1,7 +1,5 @@
-from .. import ast, ir, ir_types as irT
-from .. import proof_lib as pf
+from .. import ast, ir
 import typing as tp
-from enum import Enum as _Enum
 
 
 def Enum(*labels: str, name: str=None) -> tp.Tuple[ast.EnumDomainExpr, ast._EnumAttrs]:
@@ -15,28 +13,26 @@ def Range(lo: ast.IntOrExpr, hi: ast.IntOrExpr) -> ast.SeqDomainExpr:
     return Fin(hi-lo).map(lambda i: i+lo).image
 
 def sum(func: ast.FuncExpr) -> ast.IntExpr:
-    if not (isinstance(func, ast.FuncExpr) and func.elemT == irT.Int):
+    if not (isinstance(func, ast.FuncExpr) and isinstance(func.elemT, ir.IntT)):
         raise ValueError(f"Expected FuncExpr[IntExpr], got {func}")
     node = ir.SumReduce(func.node)
-    penv = pf.inference(node, func.penv)
-    return tp.cast(ast.IntExpr, ast.wrap(node, penv))
+    return ast.IntExpr(node)
 
 def distinct(func: ast.FuncExpr) -> ast.BoolExpr:
     if not isinstance(func, ast.FuncExpr):
         raise ValueError(f"Expected FuncExpr, got {func}")
     node = ir.AllDistinct(func.node)
-    penv = pf.inference(node, func.penv)
-    return tp.cast(ast.BoolExpr, ast.wrap(node, penv))
+    return ast.BoolExpr(node)
 
 def all_same(func) -> ast.BoolExpr:
     if not isinstance(func, ast.FuncExpr):
         raise ValueError(f"Expected FuncExpr, got {func}")
-    node = ir.AllSame(func.node)
-    penv = pf.inference(node, func.penv)
-    return tp.cast(ast.BoolExpr, ast.wrap(node, penv))
+    node = ir.AllSame(ir.BoolT(), func.node)
+    return ast.BoolExpr(node)
 
 def count(func: ast.FuncExpr, pred: tp.Callable) -> ast.IntExpr:
-    return sum(func.map(lambda v: pred(v).ite(1,0)))
+    assert isinstance(func, ast.FuncExpr)
+    return func.map(lambda v: pred(v).to_int()).sum()
 
 def combinations(dom: ast.DomainExpr, r: int) -> ast.DomainExpr:
     ...

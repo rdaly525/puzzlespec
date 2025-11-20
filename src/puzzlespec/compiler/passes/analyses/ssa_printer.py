@@ -3,8 +3,8 @@ from __future__ import annotations
 import typing as tp
 
 from ..pass_base import Analysis, AnalysisObject, Context, handles
-from ..envobj import EnvsObj, SymTable, DomEnv
-from ...dsl import ir, ir_types as irT
+from ..envobj import EnvsObj, SymTable
+from ...dsl import ir
 
 class UsesResult(AnalysisObject):
     def __init__(self, use_cnt):

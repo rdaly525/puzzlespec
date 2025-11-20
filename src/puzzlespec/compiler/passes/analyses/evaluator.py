@@ -3,7 +3,7 @@ from __future__ import annotations
 import typing as tp
 import numpy as np
 from ..pass_base import Analysis, AnalysisObject, Context, handles
-from ...dsl import ir, ir_types as irT
+from ...dsl import ir
 from functools import reduce
 import itertools as it
 
@@ -285,36 +285,16 @@ class EvalPass(Analysis):
         # pred is a Lambda function
         return [elem for elem in domain if pred(elem)]
 
-    @handles()
-    def _(self, node: ir.Quotient) -> tp.Any:
-        """Analyze quotient nodes."""
-        # TODO: Determine how to evaluate Quotient
-        domain, eqrel = self.visit_children(node)
-        raise NotImplementedError("Quotient evaluation not implemented")
-
     ## Funcs (i.e., containers)
     @handles()
-    def _(self, node: ir.Tabulate) -> tp.Any:
+    def _(self, node: ir.Map) -> tp.Any:
         """Analyze tabulate nodes."""
         dom, fun = self.visit_children(node)
         # fun is a Lambda function
         return [fun(elem) for elem in dom]
 
     @handles()
-    def _(self, node: ir.DomOf) -> tp.Any:
-        """Analyze domain of function nodes."""
-        func, = self.visit_children(node)
-        # TODO: Determine how to extract domain from function
-        # Functions are represented as dicts or lists, need to determine domain
-        if isinstance(func, dict):
-            return list(func.keys())
-        elif isinstance(func, list):
-            return list(range(len(func)))
-        else:
-            raise NotImplementedError(f"DomOf evaluation for {type(func)} not implemented")
-
-    @handles()
-    def _(self, node: ir.ImageOf) -> tp.Any:
+    def _(self, node: ir.Image) -> tp.Any:
         """Analyze image of function nodes."""
         func, = self.visit_children(node)
         # TODO: Determine how to extract image from function
@@ -345,24 +325,17 @@ class EvalPass(Analysis):
         return list(children)
 
     @handles()
-    def _(self, node: ir.Windows) -> tp.Any:
+    def _(self, node: ir.Index) -> tp.Any:
         """Analyze windows nodes."""
         lst, size, stride = self.visit_children(node)
         return [lst[i:i+size] for i in range(0, len(lst), stride)]
 
     @handles()
-    def _(self, node: ir.Tiles) -> tp.Any:
+    def _(self, node: ir.Slice) -> tp.Any:
         """Analyze tiles nodes."""
         # TODO: Determine how to evaluate Tiles - sizes and strides are tuples
         dom, sizes, strides = self.visit_children(node)
         raise NotImplementedError("Tiles evaluation not implemented")
-
-    @handles()
-    def _(self, node: ir.Slices) -> tp.Any:
-        """Analyze slices nodes."""
-        # TODO: Determine how to evaluate Slices
-        dom, = self.visit_children(node)
-        raise NotImplementedError("Slices evaluation not implemented")
 
     @handles(mark_invalid=True)
     def _(self, node: ir._LambdaPlaceholder) -> tp.Any:

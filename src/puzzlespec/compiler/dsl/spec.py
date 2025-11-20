@@ -3,18 +3,17 @@ from re import A
 import typing as tp
 
 from puzzlespec.compiler.passes.envobj import EnvsObj
-#from puzzlespec.compiler.passes.analyses.ssa_printer import SSAPrinter
 from puzzlespec.compiler.passes.transforms.substitution import SubMapping, SubstitutionPass
-from . import ast, ir, ir_types as irT, proof_lib as pf
+from . import ir
 
 from .envs import SymTable, TypeEnv
 from ..passes.pass_base import PassManager, Context
 from ..passes.transforms import CanonicalizePass, ConstFoldPass, AlgebraicSimplificationPass
-from ..passes.analyses.constraint_categorizer import ConstraintCategorizer, ConstraintCategorizerVals
+#from ..passes.analyses.constraint_categorizer import ConstraintCategorizer, ConstraintCategorizerVals
 from ..passes.analyses.getter import VarGetter, VarSet
+from ..passes.analyses.type_check import TypeCheckingPass
 #from ..passes.analyses.ast_printer import AstPrinterPass, PrintedAST
 from ..passes.analyses.evaluator import EvalPass, EvalResult, VarMap
-from ..passes.analyses.inference import InferencePass, ProofResults
 class PuzzleSpec:
 
     def __init__(self,
@@ -31,59 +30,28 @@ class PuzzleSpec:
             rules = ir.TupleLit()
         if num_rules is None:
             num_rules = rules.num_children
-        self.num_rules = num_rules
+        if num_rules > rules.num_children:
+            raise ValueError(f"Expected at most {rules.num_children} rules, got {num_rules}")
+        self._rules = rules
+        self._num_rules = num_rules
         self._type_check()
 
     @property
     def envs_obj(self) -> EnvsObj:
         return EnvsObj(sym=self.sym, tenv=self.tenv)
 
-    @property
-    def rules_node(self) -> ir.TupleLit:
-        return self._spec_node._children[0]
-
-    @property
-    def obls_node(self) -> ir.TupleLit:
-        return self._spec_node._children[1]
-
-    #@property
-    #def domains_node(self) -> ir.TupleLit:
-    #    doms = [self.domenv.get_doms(sid) for sid in self.domenv.entries.keys()]
-    #    return ir.TupleLit(*doms)
-
-    #def make_domenv(self, node: ir.Node) -> DomEnv:
-    #    terms = node._children
-    #    if len(terms) != len(self.domenv.entries):
-    #        raise ValueError(f"Expected {len(self.domenv.entries)} terms, got {len(terms)}")
-    #    domenv = DomEnv()
-    #    for sid, doms_nodes in zip(self.domenv.entries.keys(), terms):
-    #        domenv.add(sid, doms_nodes)
-    #    return domenv
-
     def analyze(self, passes: tp.List[Pass], node: ir.Node=None, ctx: Context = None) -> Context:
         if ctx is None:
             ctx = Context()
         if node is None:
-            node = self._spec_node
+            node = self._rules
         pm = PassManager(*passes)
         pm.run(node, ctx)
         return ctx
 
-    # Runs inference and returns new penv
-    def _inference(self, root: ir.Node=None) -> tp.Dict[ir.Node, pf.ProofState]:
+    def _type_check(self):
         ctx = Context(self.envs_obj)
-        ctx = self.analyze([InferencePass()], self._spec_node, ctx)
-        penv = ctx.get(ProofResults).penv
-        rn, on = self.rules_node, self.obls_node
-        rn_T, on_T = penv[rn].T, penv[on].T
-        # rn and on must be tuple of bool
-        for cn, cn_T in zip((rn, on), (rn_T, on_T)):
-            if not (cn_T is irT.UnitType or isinstance(cn_T, irT.TupleT)):
-                raise ValueError(f"{cn} must be a tuple, got {type(cn_T)}")
-            for cn_c in cn._children:
-                if penv[cn_c].T != irT.Bool:
-                    raise ValueError(f"{cn_c} must be a bool, got {type(penv[cn_c].T)}")
-        return penv
+        self.analyze([TypeCheckingPass()], ctx=ctx)
 
     # applies passes, copies the tenv and sym table, returns a new spec
     def transform(self, passes: tp.List[Pass], ctx: Context = None) -> 'PuzzleSpec':
@@ -109,87 +77,120 @@ class PuzzleSpec:
             obligations=on
         )
 
-
-    # TODO
-    def __repr__(self):
-        return f"PuzzleSpec(name={self.name}, desc={self.desc}, topo={self.topo})"
-    
-    # Returns a dict of param names to param node
-    @property
-    def params(self) -> tp.Dict[str, ast.Expr]:
-        return {self.sym.get_name(sid): ast.wrap(ir.VarRef(sid), self.tenv[sid]) for sid in self.sym.get_params()}
-
-    # Returns a dict of gen var names to gen var node
-    @property
-    def gen_vars(self) -> tp.Dict[str, ast.Expr]:
-        return {self.sym.get_name(sid): ast.wrap(ir.VarRef(sid), self.tenv[sid]) for sid in self.sym.get_gen_vars()}
-
-    # Returns a dict of decision var names to decision var node
-    @property
-    def decision_vars(self) -> tp.Dict[str, ast.Expr]:
-        return {self.sym.get_name(sid): ast.wrap(ir.VarRef(sid), self.tenv[sid]) for sid in self.sym.get_decision_vars()}
-
-    @property
-    def param_constraints(self) -> ast.BoolExpr:
-        return tp.cast(ast.BoolExpr, ast.wrap(self._param_rules, irT.ListT(irT.Bool)))
-
-    @property
-    def gen_constraints(self) -> ast.BoolExpr:
-        return tp.cast(ast.BoolExpr, ast.wrap(self._gen_rules, irT.ListT(irT.Bool)))
-
-    @property
-    def decision_constraints(self) -> ast.BoolExpr:
-        return tp.cast(ast.BoolExpr, ast.wrap(self._decision_rules, irT.ListT(irT.Bool)))
-
-    @property
-    def constant_constraints(self) -> ast.BoolExpr:
-        return tp.cast(ast.BoolExpr, ast.wrap(self._constant_rules, irT.ListT(irT.Bool)))
-
-    def _categorize_constraints(self):
-        pm = PassManager(ConstraintCategorizer())
+    def optimize(self) -> 'PuzzleSpec':
         ctx = Context()
         ctx.add(SymTableEnv_(self.sym))
-        pm.run(self._rules, ctx)
-        ccmapping = tp.cast(ConstraintCategorizerVals, ctx.get(ConstraintCategorizerVals)).mapping
-        param_rules = []
-        gen_rules = []
-        decision_rules = []
-        constant_rules = []
+        ctx.add(TypeEnv_(self.tenv))
+        return self.transform([[
+            CanonicalizePass(),
+            ConstFoldPass(),
+            AlgebraicSimplificationPass(),
+            #CollectionSimplificationPass(),
+        ]], ctx)
 
-        for rule in self._rules._children:
-            assert rule in ccmapping
-            match (ccmapping[rule]):
-                case "D":
-                    decision_rules.append(rule)
-                case "G":
-                    gen_rules.append(rule)
-                case "P":
-                    param_rules.append(rule)
-                case "C":
-                    constant_rules.append(rule)
-        self._param_rules = ir.List(*param_rules)
-        self._gen_rules = ir.List(*gen_rules)
-        self._decision_rules = ir.List(*decision_rules)
-        self._constant_rules = ir.List(*constant_rules)
 
-    #@classmethod
-    #def make(cls,
-    #    name: str,
-    #    desc: str,
-    #    vars: tp.List[tp.Tuple[int, str, irT.Type_, str, ir.Node]] , # (cid, name, T, Role, shape)
-    #    rules: tp.List[ir.Node]
-    #):
 
-    #    # Environments
-    #    sym = SymTable()
-    #    tenv = TypeEnv()
-    #    shape_env = ShapeEnv()
-    #    for (sid, name, T, role, shape) in vars:
-    #        sym.add_var(sid=sid, name=name, role=role)
-    #        tenv.add(sid=sid, sort=T)
-    #        shape_env.add(sid=sid, shape=shape)
+    #@property
+    #def rules_node(self) -> ir.TupleLit:
+    #    return self._spec_node._children[0]
 
-    #    return cls(name=name, desc=desc, topo=topo, sym=sym, tenv=tenv, shape_env=shape_env, rules=rules)
+    #@property
+    #def obls_node(self) -> ir.TupleLit:
+    #    return self._spec_node._children[1]
+
+    #@property
+    #def domains_node(self) -> ir.TupleLit:
+    #    doms = [self.domenv.get_doms(sid) for sid in self.domenv.entries.keys()]
+    #    return ir.TupleLit(*doms)
+
+    #def make_domenv(self, node: ir.Node) -> DomEnv:
+    #    terms = node._children
+    #    if len(terms) != len(self.domenv.entries):
+    #        raise ValueError(f"Expected {len(self.domenv.entries)} terms, got {len(terms)}")
+    #    domenv = DomEnv()
+    #    for sid, doms_nodes in zip(self.domenv.entries.keys(), terms):
+    #        domenv.add(sid, doms_nodes)
+    #    return domenv
+
+    # Runs inference and returns new penv
+    #def _inference(self, root: ir.Node=None) -> tp.Dict[ir.Node, pf.ProofState]:
+    #    ctx = Context(self.envs_obj)
+    #    ctx = self.analyze([InferencePass()], self._spec_node, ctx)
+    #    penv = ctx.get(ProofResults).penv
+    #    rn, on = self.rules_node, self.obls_node
+    #    rn_T, on_T = penv[rn].T, penv[on].T
+    #    # rn and on must be tuple of bool
+    #    for cn, cn_T in zip((rn, on), (rn_T, on_T)):
+    #        if not (cn_T is irT.UnitType or isinstance(cn_T, irT.TupleT)):
+    #            raise ValueError(f"{cn} must be a tuple, got {type(cn_T)}")
+    #        for cn_c in cn._children:
+    #            if penv[cn_c].T != irT.Bool:
+    #                raise ValueError(f"{cn_c} must be a bool, got {type(penv[cn_c].T)}")
+    #    return penv
+
+
+
+    # TODO
+    #def __repr__(self):
+    #    return f"PuzzleSpec(name={self.name}, desc={self.desc}, topo={self.topo})"
+    
+    ## Returns a dict of param names to param node
+    #@property
+    #def params(self) -> tp.Dict[str, ast.Expr]:
+    #    return {self.sym.get_name(sid): ast.wrap(ir.VarRef(sid), self.tenv[sid]) for sid in self.sym.get_params()}
+
+    ## Returns a dict of gen var names to gen var node
+    #@property
+    #def gen_vars(self) -> tp.Dict[str, ast.Expr]:
+    #    return {self.sym.get_name(sid): ast.wrap(ir.VarRef(sid), self.tenv[sid]) for sid in self.sym.get_gen_vars()}
+
+    ## Returns a dict of decision var names to decision var node
+    #@property
+    #def decision_vars(self) -> tp.Dict[str, ast.Expr]:
+    #    return {self.sym.get_name(sid): ast.wrap(ir.VarRef(sid), self.tenv[sid]) for sid in self.sym.get_decision_vars()}
+
+    #@property
+    #def param_constraints(self) -> ast.BoolExpr:
+    #    return tp.cast(ast.BoolExpr, ast.wrap(self._param_rules, irT.ListT(irT.Bool)))
+
+    #@property
+    #def gen_constraints(self) -> ast.BoolExpr:
+    #    return tp.cast(ast.BoolExpr, ast.wrap(self._gen_rules, irT.ListT(irT.Bool)))
+
+    #@property
+    #def decision_constraints(self) -> ast.BoolExpr:
+    #    return tp.cast(ast.BoolExpr, ast.wrap(self._decision_rules, irT.ListT(irT.Bool)))
+
+    #@property
+    #def constant_constraints(self) -> ast.BoolExpr:
+    #    return tp.cast(ast.BoolExpr, ast.wrap(self._constant_rules, irT.ListT(irT.Bool)))
+
+    #def _categorize_constraints(self):
+    #    pm = PassManager(ConstraintCategorizer())
+    #    ctx = Context()
+    #    ctx.add(SymTableEnv_(self.sym))
+    #    pm.run(self._rules, ctx)
+    #    ccmapping = tp.cast(ConstraintCategorizerVals, ctx.get(ConstraintCategorizerVals)).mapping
+    #    param_rules = []
+    #    gen_rules = []
+    #    decision_rules = []
+    #    constant_rules = []
+
+    #    for rule in self._rules._children:
+    #        assert rule in ccmapping
+    #        match (ccmapping[rule]):
+    #            case "D":
+    #                decision_rules.append(rule)
+    #            case "G":
+    #                gen_rules.append(rule)
+    #            case "P":
+    #                param_rules.append(rule)
+    #            case "C":
+    #                constant_rules.append(rule)
+    #    self._param_rules = ir.List(*param_rules)
+    #    self._gen_rules = ir.List(*gen_rules)
+    #    self._decision_rules = ir.List(*decision_rules)
+    #    self._constant_rules = ir.List(*constant_rules)
 
 
     # Returns a new spec with the params set
@@ -212,17 +213,6 @@ class PuzzleSpec:
             param_sub_mapping
         )
         return self.transform([SubstitutionPass()], ctx).optimize()
-
-    def optimize(self) -> 'PuzzleSpec':
-        ctx = Context()
-        ctx.add(SymTableEnv_(self.sym))
-        ctx.add(TypeEnv_(self.tenv))
-        return self.transform([[
-            CanonicalizePass(),
-            ConstFoldPass(),
-            AlgebraicSimplificationPass(),
-            #CollectionSimplificationPass(),
-        ]], ctx)
 
     #def concretize_types(self, cellIdxT):
     #    ctx = Context()
@@ -251,15 +241,15 @@ class PuzzleSpec:
     #        rules=new_rules
     #    ).optimize()
 
-    def clue_setter(self, cellIdxT: tp.Optional[irT.Type_]=None) -> 'Setter':
-        if cellIdxT:
-            spec = self.concretize_types(cellIdxT)
-            print("After concretization:")
-            print(spec.pretty(spec._spec_node))
-        else:
-            spec = self
-        from .setter import Setter
-        return Setter(spec)
+    #def clue_setter(self, cellIdxT: tp.Optional[ir.Type]=None) -> 'Setter':
+    #    if cellIdxT:
+    #        spec = self.concretize_types(cellIdxT)
+    #        print("After concretization:")
+    #        print(spec.pretty(spec._spec_node))
+    #    else:
+    #        spec = self
+    #    from .setter import Setter
+    #    return Setter(spec)
 
     def evaluate(self, node: ir.Node, varmap: tp.Dict[int, tp.Any]=None) -> tp.Any:
         if varmap is None:

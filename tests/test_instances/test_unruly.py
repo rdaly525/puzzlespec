@@ -1,10 +1,10 @@
 from puzzlespec import PuzzleSpec, get_puzzle
 #from puzzlespec import set_clues
-from puzzlespec.compiler.dsl import ir, ir_types as irT
+from puzzlespec.compiler.dsl import ir
 from puzzlespec.compiler.passes import Context, PassManager, analyses as A, transforms as T
 import numpy as np
 
-#Sudoku = get_puzzle("sudoku")
+#Sudoku = get_puzzle("sudoku)
 Unruly = get_puzzle("unruly")
 
 def t0():

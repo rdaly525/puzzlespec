@@ -1,4 +1,3 @@
-from ..compiler.dsl.ir_types import Bool, Int
 from ..compiler.dsl.spec_builder import PuzzleSpecBuilder
 from ..compiler.dsl.spec import PuzzleSpec
 from ..compiler.dsl.libs import std, optional as opt, topo

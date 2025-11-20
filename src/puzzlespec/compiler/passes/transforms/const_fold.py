@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..pass_base import Transform, Context, handles
-from ...dsl import ir, ir_types as irT
+from ...dsl import ir
 import math
 import typing as tp
 

@@ -3,7 +3,7 @@ from hmac import new
 import math
 
 from ..pass_base import Transform, Context, handles
-from ...dsl import ir, ir_types as irT
+from ...dsl import ir
 import typing as tp
 
 

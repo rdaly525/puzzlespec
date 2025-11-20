@@ -44,7 +44,6 @@ class SymTable:
             sids = self.entries.keys()
         return SymTable(
             entries={sid: self.entries[sid] for sid in sids},
-            name_to_sid={name: sid for name, sid in self._name_to_sid.items() if sid in sids},
             sid=self._sid
         )
 

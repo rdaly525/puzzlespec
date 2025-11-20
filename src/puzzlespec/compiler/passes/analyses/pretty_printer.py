@@ -4,7 +4,7 @@ import typing as tp
 
 
 from ..pass_base import Analysis, AnalysisObject, Context, handles
-from ...dsl import ir, ir_types as irT
+from ...dsl import ir
 from .sym_table import SymTableEnv_
 from ..envobj import EnvsObj
 
@@ -327,15 +327,10 @@ class PrettyPrinterPass(Analysis):
         domain_expr, pred_expr = self.visit_children(node)
         return f"{domain_expr}|{pred_expr}"
 
-    @handles()
-    def _(self, node: ir.Quotient) -> str:
-        # TODO: Determine how to pretty print Quotient domain
-        domain_expr, eqrel_expr = self.visit_children(node)
-        return f"{domain_expr}/~{eqrel_expr}"
 
     ## Funcs (i.e., containers)
     @handles()
-    def _(self, node: ir.Tabulate) -> str:
+    def _(self, node: ir.Map) -> str:
         dom_expr, fun_node = node._children
         dom_expr_str = self.visit(dom_expr)
         # Lambda returns (var_name, body_str) tuple
@@ -343,12 +338,7 @@ class PrettyPrinterPass(Analysis):
         return f"{{{body_str} | {var_name} ∈ {dom_expr_str}}}"
 
     @handles()
-    def _(self, node: ir.DomOf) -> str:
-        func_expr, = self.visit_children(node)
-        return f"dom({func_expr})"
-
-    @handles()
-    def _(self, node: ir.ImageOf) -> str:
+    def _(self, node: ir.Image) -> str:
         # TODO: Determine how to pretty print ImageOf
         func_expr, = self.visit_children(node)
         return f"img({func_expr})"
@@ -363,22 +353,29 @@ class PrettyPrinterPass(Analysis):
         children = self.visit_children(node)
         return f"[{', '.join(children)}]"
 
-    @handles()
-    def _(self, node: ir.Windows) -> str:
-        list_expr, size_expr, stride_expr = self.visit_children(node)
-        return f"{list_expr}.windows({size_expr}, {stride_expr})"
+    #@handles()
+    #def _(self, node: ir.Windows) -> str:
+    #    list_expr, size_expr, stride_expr = self.visit_children(node)
+    #    return f"{list_expr}.windows({size_expr}, {stride_expr})"
+
+    #@handles()
+    #def _(self, node: ir.Tiles) -> str:
+    #    # TODO: Determine how to pretty print Tiles - sizes and strides are tuples
+    #    dom_expr, sizes_expr, strides_expr = self.visit_children(node)
+    #    return f"tiles({dom_expr}, {sizes_expr}, {strides_expr})"
 
     @handles()
-    def _(self, node: ir.Tiles) -> str:
-        # TODO: Determine how to pretty print Tiles - sizes and strides are tuples
-        dom_expr, sizes_expr, strides_expr = self.visit_children(node)
-        return f"tiles({dom_expr}, {sizes_expr}, {strides_expr})"
-
+    def _(self, node: ir.Index) -> str:
+        # TODO: Determine how to pretty print Slices
+        dom_expr, = self.visit_children(node)
+        return f"Index({dom_expr}, {node.idx})"
+    
     @handles()
-    def _(self, node: ir.Slices) -> str:
+    def _(self, node: ir.Slice) -> str:
         # TODO: Determine how to pretty print Slices
         dom_expr, = self.visit_children(node)
         return f"slices({dom_expr}, {node.idx})"
+
 
     # Higher Order Operators
     @handles()

@@ -1,31 +1,23 @@
 import typing as tp
 
-from puzzlespec.compiler.passes.transforms.resolve_bound_vars import ResolveBoundVars
+from puzzlespec.compiler.passes.analyses.ast_printer import AstPrinterPass, PrintedAST
+from puzzlespec.compiler.passes.transforms.resolve_vars import ResolveBoundVars, ResolveFreeVars, VarMap
 from . import ast, ir
 from .envs import SymTable, TypeEnv
-from ..passes.pass_base import Context
+from ..passes.pass_base import Context, PassManager
 from ..passes.transforms.cse import CSE
-from ..passes.analyses.getter import VarGetter, VarSet
 from ..passes.envobj import EnvsObj
 from .spec import PuzzleSpec
 
-class PuzzleSpecBuilder(PuzzleSpec):
+class PuzzleSpecBuilder:
     def __init__(self):
-        super().__init__("", "", SymTable(), TypeEnv())
+        self.sym = SymTable()
         self._name_cnt = 0
-        # sid -> "sids which key depends on"
-
-    @property
-    def rules(self) -> ast.TupleExpr:
-        return tp.cast(ast.TupleExpr, ast.wrap(self.rules_node, irT.TupleT((irT.Bool,)*len(self._rules))))
-
-    @property
-    def obligations(self) -> ast.TupleExpr:
-        return tp.cast(ast.TupleExpr, ast.wrap(self.obligations_node, irT.TupleT((irT.Bool,)*len(self._obligations))))
+        self._rules = []
 
     @property
     def _envs_obj(self) -> EnvsObj:
-        return EnvsObj(sym=self.sym, tenv=self.tenv, domenv=self.domenv)
+        return EnvsObj(sym=self.sym, tenv=self.tenv)
 
     def _new_var_name(self):
         self._var_name_cnt += 1
@@ -36,14 +28,12 @@ class PuzzleSpecBuilder(PuzzleSpec):
         sort: ir.Type,
         dom: tp.Optional[ast.DomainExpr]=None, 
         name: tp.Optional[str]=None, 
-        #dep: tp.Optional[tp.Tuple[ast.Expr, ...]]=None
     ) -> ast.Expr:
         public = True
         if name is None:
             name = self._new_var_name()
             public = False
         sid = self.sym.new_var(name, role, public)
-        self.tenv.add(sid, sort)
         var = ir._VarPlaceholder(sort, sid)
         return ast.wrap(var)
 
@@ -129,27 +119,33 @@ class PuzzleSpecBuilder(PuzzleSpec):
     #        var = var.apply(d)
     #    return var
 
-    def param(self, sort: irT.Type_=None, dom: ast.DomainExpr=None, name: str=None, dep=()) -> ast.Expr:
-        return self.var(sort=sort, dom=dom, name=name, dep=dep)
+    def param(self, sort: ir.Type=None, name: str=None) -> ast.Expr:
+        return self.var(role='P', sort=sort, name=name)
     
-    def gen_var(self, sort: irT.Type_=None, dom: ast.DomainExpr=None, name: str=None, dep=()) -> ast.Expr:
-        return self.var(sort=sort, dom=dom, name=name, dep=dep)
+    def gen_var(self, sort: ir.Type=None, name: str=None) -> ast.Expr:
+        return self.var(role='G', sort=sort, name=name)
     
-    def decision_var(self, sort: irT.Type_=None, dom: ast.DomainExpr=None, name: str=None, dep=()) -> ast.Expr:
-        return self.var(sort=sort, dom=dom, name=name, dep=dep)
+    def decision_var(self, sort: ir.Type=None, name: str=None) -> ast.Expr:
+        return self.var(role='D', sort=sort, name=name)
 
-    def func_var(self, dom: ast.DomainExpr, role: str='G', sort: irT.Type_=None, codom: ast.DomainExpr=None, name: str=None) -> ast.Expr:
-        return dom.map(lambda i: self.var(role, sort, codom, name, dep=i))
 
-    def _replace_rules(self, new_rules: tp.Iterable[ir.Node]):
-        self._penv = None
-        self._rules = ir.TupleLit(*new_rules)
-        self._spec_node = ir.TupleLit(self._rules, self._obligations)
-        self._inference()
+    #def param(self, sort: ir.Type=None, dom: ast.DomainExpr=None, name: str=None, dep=()) -> ast.Expr:
+    #    return self.var(sort=sort, dom=dom, name=name, dep=dep)
+    
+    #def gen_var(self, sort: ir.Type=None, dom: ast.DomainExpr=None, name: str=None, dep=()) -> ast.Expr:
+    #    return self.var(sort=sort, dom=dom, name=name, dep=dep)
+    
+    #def decision_var(self, sort: ir.Type=None, dom: ast.DomainExpr=None, name: str=None, dep=()) -> ast.Expr:
+    #    return self.var(sort=sort, dom=dom, name=name, dep=dep)
+
+    #def func_var(self, dom: ast.DomainExpr, role: str='G', sort: irT.Type_=None, codom: ast.DomainExpr=None, name: str=None) -> ast.Expr:
+    #    return dom.map(lambda i: self.var(role, sort, codom, name, dep=i))
+
+    #def _replace_rules(self, new_rules: tp.Iterable[ir.Node]):
+    #    self._rules = ir.TupleLit(*new_rules)
  
     def _add_rules(self, *new_rules: ast.Expr):
-        nodes = [*self._rules, *[r.node for r in new_rules]]
-        self._replace_rules(nodes)
+        self._rules += [r.node for r in new_rules]
 
     def __iadd__(self, other: tp.Union[ast.BoolExpr, tp.Iterable[ast.BoolExpr]]) -> tp.Self:
         
@@ -166,9 +162,31 @@ class PuzzleSpecBuilder(PuzzleSpec):
 
     # Freezes the spec and makes it immutable 
     def build(self, name: str) -> PuzzleSpec:
+        #self.print()
         # 1: Resolve Placeholders (for bound bars/lambdas)
-        # 2: Run CSE
-        spec = self.transform([ResolveBoundVars(), CSE()])
+        pm = PassManager([ResolveBoundVars(), CSE()], verbose=True)
+        rules_node = ir.TupleLit(ir.TupleT(ir.BoolT()), *self._rules)
+        new_rules_node = pm.run(rules_node)
+        # Populate tenv
+        ctx = Context()
+        pm = PassManager([])
+        print("AFTER TRANSFORM")
+        pm = PassManager([ResolveFreeVars()], verbose=True)
+        pm.run(new_rules_node, ctx)
+        sid_to_T = ctx.get(VarMap).sid_to_T
+        tenv = TypeEnv()
+        for sid, T in sid_to_T.items():
+            tenv.add(sid, T)
+        spec = PuzzleSpec(name, self.sym.copy(), tenv, rules=new_rules_node)
         # 3: Optimize/canonicalize
         spec_opt = spec.optimize()
         return spec_opt
+
+    #def print(self, rules_node=None):
+    #    if rules_node is None:
+    #        rules_node = ir.TupleLit(ir.TupleT(ir.BoolT()), *self._rules)
+    #    ctx = Context(self._envs_obj)
+    #    pm = PassManager([AstPrinterPass()], verbose=True)
+    #    pm.run(rules_node, ctx)
+    #    a = ctx.get(PrintedAST)
+    #    print(a.text)

@@ -9,7 +9,7 @@ from __future__ import annotations
 import typing as tp
 
 from ..pass_base import Analysis, AnalysisObject, Context, handles
-from ...dsl import ir, ir_types as irT
+from ...dsl import ir
 from ..envobj import EnvsObj, SymTable
 
 class ConstraintCategorizerVals(AnalysisObject):
