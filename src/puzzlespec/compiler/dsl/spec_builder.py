@@ -15,10 +15,6 @@ class PuzzleSpecBuilder:
         self._name_cnt = 0
         self._rules = []
 
-    @property
-    def _envs_obj(self) -> EnvsObj:
-        return EnvsObj(sym=self.sym, tenv=self.tenv)
-
     def _new_var_name(self):
         self._var_name_cnt += 1
         return f"_X{self._var_name_cnt}"
@@ -164,29 +160,36 @@ class PuzzleSpecBuilder:
     def build(self, name: str) -> PuzzleSpec:
         #self.print()
         # 1: Resolve Placeholders (for bound bars/lambdas)
-        pm = PassManager([ResolveBoundVars(), CSE()], verbose=True)
-        rules_node = ir.TupleLit(ir.TupleT(ir.BoolT()), *self._rules)
+        pm = PassManager(ResolveBoundVars(), verbose=True)
+        rules_node = ir.TupleLit(ir.TupleT(*(ir.BoolT() for _ in self._rules)), *self._rules)
         new_rules_node = pm.run(rules_node)
         # Populate tenv
         ctx = Context()
         pm = PassManager([])
-        print("AFTER TRANSFORM")
-        pm = PassManager([ResolveFreeVars()], verbose=True)
-        pm.run(new_rules_node, ctx)
+        pm = PassManager(ResolveFreeVars(), CSE(), verbose=True)
+        new_rules_node = pm.run(new_rules_node, ctx)
         sid_to_T = ctx.get(VarMap).sid_to_T
+        assert len(sid_to_T) != 0
         tenv = TypeEnv()
         for sid, T in sid_to_T.items():
             tenv.add(sid, T)
-        spec = PuzzleSpec(name, self.sym.copy(), tenv, rules=new_rules_node)
+        spec = PuzzleSpec(
+            name=name,
+            sym=self.sym.copy(),
+            tenv=tenv,
+            rules=new_rules_node
+        )
         # 3: Optimize/canonicalize
         spec_opt = spec.optimize()
+        spec_opt.pretty()
+        assert 0
         return spec_opt
 
-    #def print(self, rules_node=None):
-    #    if rules_node is None:
-    #        rules_node = ir.TupleLit(ir.TupleT(ir.BoolT()), *self._rules)
-    #    ctx = Context(self._envs_obj)
-    #    pm = PassManager([AstPrinterPass()], verbose=True)
-    #    pm.run(rules_node, ctx)
-    #    a = ctx.get(PrintedAST)
-    #    print(a.text)
+    def print(self, rules_node=None):
+        if rules_node is None:
+            rules_node = ir.TupleLit(ir.TupleT(*(ir.BoolT() for _ in self._rules)), *self._rules)
+        ctx = Context()
+        pm = PassManager([AstPrinterPass()], verbose=True)
+        pm.run(rules_node, ctx)
+        a = ctx.get(PrintedAST)
+        print(a.text)

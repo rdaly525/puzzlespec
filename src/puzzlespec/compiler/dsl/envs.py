@@ -32,6 +32,7 @@ class SymEntry:
     role: str
     public: bool
     src: str = ""
+    invalid: bool = False
 
 class SymTable:
     def __init__(self, entries: tp.Dict[int, SymEntry] =None, sid: int = 0):
@@ -42,8 +43,14 @@ class SymTable:
     def copy(self, sids: tp.Set[int] = None) -> 'SymTable':
         if sids is None:
             sids = self.entries.keys()
+        entries = {}
+        for sid, e in self.entries.items():
+            if sid in sids:
+                entries[sid] = e
+            else:
+                entries[sid] = SymEntry(e.name, e.role, e.public, invalid=True)
         return SymTable(
-            entries={sid: self.entries[sid] for sid in sids},
+            entries=entries,
             sid=self._sid
         )
 

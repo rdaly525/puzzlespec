@@ -38,7 +38,6 @@ class VarMap(AnalysisObject):
 
 # This will replace _VarPlaceHolder
 class ResolveFreeVars(Transform):
-    #_debug=True
     requires = ()
     produces = (VarMap,)
     name = "resolve_free_vars"
@@ -46,8 +45,7 @@ class ResolveFreeVars(Transform):
     def run(self, root: ir.Node, ctx: Context):
         self.sid_to_T = {}
         new_root = self.visit(root)
-        ctx.add(VarMap(self.sid_to_T))
-        return new_root
+        return new_root, VarMap(self.sid_to_T)
 
     @handles(ir._VarPlaceholder)
     def _(self, v: ir._VarPlaceholder):

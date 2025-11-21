@@ -312,9 +312,9 @@ class SumExpr(Expr):
     def match(self, *branches) -> Expr:
         branch_exprs = [make_lambda(fn, sort=T) for fn, T in zip(branches, self.T.elemTs)]
         resT = branch_exprs[0].T.resT
-        if not all(e.T.resT == resT for e in branch_exprs):
+        if not all(e.T.resT.eq(resT) for e in branch_exprs):
             raise ValueError(f"Expected all branches to have result type {resT}, got {', '.join([repr(e.T) for e in branch_exprs])}")
-        T = branch_exprs[0].T
+        T = branch_exprs[0].T.resT
         match_node = ir.Match(T, self.node, TupleExpr.make([e.node for e in branch_exprs]).node)
         return wrap(match_node)
 
@@ -397,6 +397,7 @@ class DomainExpr(Expr):
             axes += tuple(offset + ax for ax in dom.T.axes)
             fins += dom.T.fins
             ords += dom.T.ords
+            offset += len(factors)
         T = ir.DomT(*factors, fins=fins, ords=ords, axes=axes)
         cartprod_node = ir.CartProd(T, *dom_nodes)
         return wrap(cartprod_node)
@@ -486,12 +487,9 @@ class EnumDomainExpr(DomainExpr):
         if name is None:
             name = "".join(labels)
         enumT = ir.EnumT(name, tuple(labels))
-        node = ir.Enum(ir.DomT.make(carT=enumT, fin=True, ord=False))
+        node = ir.Universe(ir.DomT.make(carT=enumT, fin=True, ord=False))
         return EnumDomainExpr(node)
 
-# TODO START HERE TOMORROW
-# I think I can get rid of SeqDomain and truly unify it to NDDomain. I should be able to generalize 'window'/tile
-# Think about if I need to do this
 class SeqDomainExpr(DomainExpr):
     def __post_init__(self):
         super().__post_init__()
@@ -666,7 +664,7 @@ class ArrayExpr(FuncExpr):
             vals = [Expr.make(v) for v in val]
         except:
             raise ValueError(f"Expected List of values, got {val}")
-        if not all(v.T == vals[0].T for v in vals):
+        if not all(v.T.eq(vals[0].T) for v in vals):
             raise ValueError(f"Expected List of values with the same type, got {vals}")
         node = ir.ListLit(vals[0].T, *[e.node for e in vals])
         return ArrayExpr(node)

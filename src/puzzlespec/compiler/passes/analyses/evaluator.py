@@ -204,12 +204,6 @@ class EvalPass(Analysis):
         return list(range(n))
 
     @handles()
-    def _(self, node: ir.Enum) -> tp.Any:
-        """Analyze enum domain nodes."""
-        # TODO: Determine how to evaluate Enum domain
-        return list(node.enumT.labels)
-
-    @handles()
     def _(self, node: ir.EnumLit) -> tp.Any:
         """Analyze enum literal nodes."""
         return node.label

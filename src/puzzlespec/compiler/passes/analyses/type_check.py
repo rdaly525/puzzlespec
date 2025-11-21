@@ -8,9 +8,12 @@ import typing as tp
 def _is_domain(node: ir.Value) -> bool:
     return isinstance(node, ir.Value) and isinstance(node.T, ir.DomT)
 
+class TypeCheckResult(AnalysisObject):
+    def __init__(self, Tmap: tp.Dict[ir.Node, ir.Type]):
+        self.Tmap = Tmap
+
 # This class Verifies that the IR is well-typed. This includes the Types themselves
 class TypeCheckingPass(Analysis):
-    #_debug=True
     requires = (EnvsObj,)
     produces = ()
     name = "type_checking"
@@ -22,7 +25,7 @@ class TypeCheckingPass(Analysis):
         self.tenv: TypeEnv = ctx.get(EnvsObj).tenv
         self.bctx: tp.List[ir.Type] = []
         self.visit(root)
-        return None
+        return TypeCheckResult(self._cache)
 
     ##############################
     ## Core-level IR Type nodes 
@@ -141,7 +144,7 @@ class TypeCheckingPass(Analysis):
         # Pop bound context
         self.bctx.pop()
         # Verify body type matches ArrowT result type
-        if bodyT != node.T.resT:
+        if not bodyT.eq(node.T.resT):
             raise TypeError(f"Lambda body type {bodyT} does not match ArrowT result type {node.T.resT}")
         return node.T
 
@@ -157,20 +160,20 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Eq)
     def _(self, node: ir.Eq):
-        # Visit children and get their types
-        aT, bT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, aT, bT = self.visit_children(node)
         # Verify type is BoolT
         if not isinstance(node.T, ir.BoolT):
             raise TypeError(f"Eq must have BoolT type, got {node.T}")
         # Verify operands have same type
-        if aT != bT:
+        if not aT.eq(bT):
             raise TypeError(f"Eq has operands of inconsistent types: {aT} != {bT}")
         return node.T
 
     @handles(ir.Lt)
     def _(self, node: ir.Lt):
-        # Visit children and get their types
-        aT, bT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, aT, bT = self.visit_children(node)
         # Verify type is BoolT
         if not isinstance(node.T, ir.BoolT):
             raise TypeError(f"Lt must have BoolT type, got {node.T}")
@@ -181,8 +184,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.LtEq)
     def _(self, node: ir.LtEq):
-        # Visit children and get their types
-        aT, bT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, aT, bT = self.visit_children(node)
         # Verify type is BoolT
         if not isinstance(node.T, ir.BoolT):
             raise TypeError(f"LtEq must have BoolT type, got {node.T}")
@@ -193,23 +196,23 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Ite)
     def _(self, node: ir.Ite):
-        # Visit children and get their types
-        predT, tT, fT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, predT, tT, fT = self.visit_children(node)
         # Verify predicate is Bool
         if not isinstance(predT, ir.BoolT):
             raise TypeError(f"Ite predicate must be Bool, got {predT}")
         # Verify branches have same type
-        if tT != fT:
+        if not tT.eq(fT):
             raise TypeError(f"Ite branches must have same type: {tT} != {fT}")
         # Verify result type matches branch type
-        if node.T != tT:
+        if not node.T.eq(tT):
             raise TypeError(f"Ite result type {node.T} does not match branch type {tT}")
         return node.T
 
     @handles(ir.Not)
     def _(self, node: ir.Not):
-        # Visit children and get their types
-        aT, = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, aT = self.visit_children(node)
         # Verify type is BoolT
         if not isinstance(node.T, ir.BoolT):
             raise TypeError(f"Not must have BoolT type, got {node.T}")
@@ -220,8 +223,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Neg)
     def _(self, node: ir.Neg):
-        # Visit children and get their types
-        aT, = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, aT = self.visit_children(node)
         # Verify type is IntT
         if not isinstance(node.T, ir.IntT):
             raise TypeError(f"Neg must have IntT type, got {node.T}")
@@ -232,8 +235,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Div)
     def _(self, node: ir.Div):
-        # Visit children and get their types
-        aT, bT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, aT, bT = self.visit_children(node)
         # Verify type is IntT
         if not isinstance(node.T, ir.IntT):
             raise TypeError(f"Div must have IntT type, got {node.T}")
@@ -244,8 +247,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Mod)
     def _(self, node: ir.Mod):
-        # Visit children and get their types
-        aT, bT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, aT, bT = self.visit_children(node)
         # Verify type is IntT
         if not isinstance(node.T, ir.IntT):
             raise TypeError(f"Mod must have IntT type, got {node.T}")
@@ -256,8 +259,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Conj)
     def _(self, node: ir.Conj):
-        # Visit children and get their types
-        childTs = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        childTs = self.visit_children(node)[1:]
         # Verify type is BoolT
         if not isinstance(node.T, ir.BoolT):
             raise TypeError(f"Conj must have BoolT type, got {node.T}")
@@ -269,8 +272,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Disj)
     def _(self, node: ir.Disj):
-        # Visit children and get their types
-        childTs = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        childTs = self.visit_children(node)[1:]
         # Verify type is BoolT
         if not isinstance(node.T, ir.BoolT):
             raise TypeError(f"Disj must have BoolT type, got {node.T}")
@@ -282,8 +285,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Sum)
     def _(self, node: ir.Sum):
-        # Visit children and get their types
-        childTs = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        childTs = self.visit_children(node)[1:]
         # Verify type is IntT
         if not isinstance(node.T, ir.IntT):
             raise TypeError(f"Sum must have IntT type, got {node.T}")
@@ -295,8 +298,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Prod)
     def _(self, node: ir.Prod):
-        # Visit children and get their types
-        childTs = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        childTs = self.visit_children(node)[1:]
         # Verify type is IntT
         if not isinstance(node.T, ir.IntT):
             raise TypeError(f"Prod must have IntT type, got {node.T}")
@@ -317,8 +320,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Fin)
     def _(self, node: ir.Fin):
-        # Visit children and get their types
-        NT, = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, NT = self.visit_children(node)
         # Verify type is DomT
         if not isinstance(node.T, ir.DomT):
             raise TypeError(f"Fin must have DomT type, got {node.T}")
@@ -331,25 +334,8 @@ class TypeCheckingPass(Analysis):
             raise TypeError(f"Fin domain must be finite, got {node.T.fins}")
         if not node.T.ord:
             raise TypeError(f"Fin domain must be ordered, got {node.T.ords}")
-        if NT != node.T.carT:
+        if not NT.eq(node.T.carT):
             raise TypeError(f"Fin argument {NT} does not match domain carrier type {node.T.carT}")
-        return node.T
-
-    @handles(ir.Enum)
-    def _(self, node: ir.Enum):
-        # Visit children (just the type)
-        self.visit_children(node)
-        # Verify type is DomT
-        if not isinstance(node.T, ir.DomT):
-            raise TypeError(f"Enum must have DomT type, got {node.T}")
-        if not isinstance(node.T.carT, ir.EnumT):
-            raise TypeError(f"Enum domain carrier type must be Enum, got {node.T.carT}")
-        if node.T.rank != 1 or node.T.axes[0] != 0:
-            raise TypeError(f"Enum domain must be rank 1, got {node.T.axes}")        
-        if not node.T.fin:
-            raise TypeError(f"Enum domain must be finite, got {node.T.fins}")
-        if node.T.ord != False:
-            raise TypeError(f"Enum domain must be unordered, got {node.T.ords}")
         return node.T
 
     @handles(ir.EnumLit)
@@ -366,8 +352,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Card)
     def _(self, node: ir.Card):
-        # Visit children and get their types
-        domainT, = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, domainT = self.visit_children(node)
         # Verify type is IntT
         if not isinstance(node.T, ir.IntT):
             raise TypeError(f"Card must have IntT type, got {node.T}")
@@ -380,8 +366,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.IsMember)
     def _(self, node: ir.IsMember):
-        # Visit children and get their types
-        domainT, valT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, domainT, valT = self.visit_children(node)
         # Verify type is BoolT
         if not isinstance(node.T, ir.BoolT):
             raise TypeError(f"IsMember must have BoolT type, got {node.T}")
@@ -389,14 +375,14 @@ class TypeCheckingPass(Analysis):
         if not isinstance(domainT, ir.DomT):
             raise TypeError(f"IsMember expects domain argument, got {domainT}")
         # Verify value argument type matches domain carrier type
-        if valT != domainT.carT:
+        if not valT.eq(domainT.carT):
             raise TypeError(f"IsMember value type {valT} does not match domain carrier type {domainT.carT}")
         return node.T
 
     @handles(ir.CartProd)
     def _(self, node: ir.CartProd):
-        # Visit children and get their types
-        domTs = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        domTs = self.visit_children(node)[1:]
         # Verify type is DomT
         if not isinstance(node.T, ir.DomT):
             raise TypeError(f"CartProd must have DomT type, got {node.T}")
@@ -404,14 +390,15 @@ class TypeCheckingPass(Analysis):
         for i, domT in enumerate(domTs):
             if not isinstance(domT, ir.DomT):
                 raise TypeError(f"CartProd argument {i} must be a domain, got {domT}")
-        if not all(domT == T for domT, T in zip(domTs, node.T.factors)):
-            raise TypeError(f"CartProd arguments do not match domain factors")
+        for i, (domT, T) in enumerate(zip(domTs, node.T.factors)):
+            if not domT.carT.eq(T):
+                raise TypeError(f"CartProd argument {i} type {domT.carT} does not match domain factor type {T}")
         return node.T
 
     @handles(ir.DomProj)
     def _(self, node: ir.DomProj):
-        # Visit children and get their types
-        domT, = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, domT = self.visit_children(node)
         # Verify type is DomT
         if not isinstance(node.T, ir.DomT):
             raise TypeError(f"DomProj must have DomT type, got {node.T}")
@@ -420,7 +407,7 @@ class TypeCheckingPass(Analysis):
             raise TypeError(f"DomProj expects domain argument, got {domT}")
         if node.idx >= len(domT.factors):
             raise TypeError(f"DomProj index {node.idx} out of bounds for tuple of length {len(domT.carT.elemTs)}")
-        if node.T != domT.factors[node.idx]:
+        if not node.T.carT.eq(domT.factors[node.idx]):
             raise TypeError(f"DomProj result type {node.T} does not match domain factor type {domT.factors[node.idx]}")
         if node.T.fin != domT.fins[node.idx]:
             raise TypeError(f"DomProj result domain must be finite, got {node.T.fin}")
@@ -430,37 +417,37 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.TupleLit)
     def _(self, node: ir.TupleLit):
-        # Visit children and get their types
-        valTs = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        valTs = self.visit_children(node)[1:]
         # Verify type is TupleT
         if not isinstance(node.T, ir.TupleT):
             raise TypeError(f"TupleLit must have TupleT type, got {node.T}")
         # Verify all value arguments match tuple element types
         if len(valTs) != len(node.T.elemTs):
-            raise TypeError(f"TupleLit has {len(valTs)} values but type has {len(node.T.elemTs)} elements")
+            raise TypeError(f"TupleLit has {len(valTs)} values ({valTs}) but type has {len(node.T.elemTs)} elements ({node.T.elemTs})")
         for i, (valT, elemT) in enumerate(zip(valTs, node.T.elemTs)):
-            if valT != elemT:
+            if not valT.eq(elemT):
                 raise TypeError(f"TupleLit value {i} type {valT} does not match tuple element type {elemT}")
         return node.T
 
     @handles(ir.Proj)
     def _(self, node: ir.Proj):
-        # Visit children and get their types
-        tupT, = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, tupT = self.visit_children(node)
         # Verify tuple argument is a Value with TupleT type
         if not isinstance(tupT, ir.TupleT):
             raise TypeError(f"Proj expects tuple argument, got {tupT}")
         if node.idx >= len(tupT.elemTs):
             raise TypeError(f"Proj index {node.idx} out of bounds for tuple of length {len(tupT.elemTs)}")
         # Verify result type matches projected element type
-        if node.T != tupT.elemTs[node.idx]:
+        if not node.T.eq(tupT.elemTs[node.idx]):
             raise TypeError(f"Proj result type {node.T} does not match tuple element type {tupT.elemTs[node.idx]}")
         return node.T
 
     @handles(ir.DisjUnion)
     def _(self, node: ir.DisjUnion):
-        # Visit children and get their types
-        domTs = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        domTs = self.visit_children(node)[1:]
         # Verify type is DomT
         if not isinstance(node.T, ir.DomT):
             raise TypeError(f"DisjUnion must have DomT type, got {node.T}")
@@ -474,8 +461,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.DomInj)
     def _(self, node: ir.DomInj):
-        # Visit children and get their types
-        domT, = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, domT = self.visit_children(node)
         # Verify type is DomT
         if not isinstance(node.T, ir.DomT):
             raise TypeError(f"DomInj must have DomT type, got {node.T}")
@@ -486,26 +473,26 @@ class TypeCheckingPass(Analysis):
             raise TypeError(f"DomInj expects sum carrier type, got {domT.carT}")
         if node.idx >= len(domT.carT.elemTs):
             raise TypeError(f"DomInj index {node.idx} out of bounds for sum of length {len(domT.carT.elemTs)}")
-        if node.T != domT.carT.elemTs[node.idx]:
+        if not node.T.eq(domT.carT.elemTs[node.idx]):
             raise TypeError(f"DomInj result type {node.T} does not match sum element type {domT.carT.elemTs[node.idx]}")
         return node.T
 
     @handles(ir.Inj)
     def _(self, node: ir.Inj):
-        # Visit children and get their types
-        valT, = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, valT = self.visit_children(node)
         if not isinstance(node.T, ir.SumT):
             raise TypeError(f"Inj must have SumT type, got {node.T}")
         if node.idx >= len(node.T.elemTs):
             raise TypeError(f"Inj index {node.idx} out of bounds for sum of length {len(node.T.elemTs)}")
-        if valT != node.T.elemTs[node.idx]:
+        if not valT.eq(node.T.elemTs[node.idx]):
             raise TypeError(f"Inj value type {valT} does not match sum element type {node.T.elemTs[node.idx]}")
         return node.T
 
     @handles(ir.Match)
     def _(self, node: ir.Match):
-        # Visit children and get their types
-        scrutT, branchesT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, scrutT, branchesT = self.visit_children(node)
         # Verify scrutinee is a Value with SumT type
         if not isinstance(scrutT, ir.SumT):
             raise TypeError(f"Match scrutinee must be SumT, got {scrutT}")
@@ -520,16 +507,16 @@ class TypeCheckingPass(Analysis):
         for i, (sum_elem_T, branch_T) in enumerate(zip(scrutT.elemTs, branchesT.elemTs)):
             if not isinstance(branch_T, ir.ArrowT):
                 raise TypeError(f"Match branch {i} must be ArrowT, got {branch_T}")
-            if branch_T.argT != sum_elem_T:
+            if not branch_T.argT.eq(sum_elem_T):
                 raise TypeError(f"Match branch {i} argument type {branch_T.argT} does not match sum component {sum_elem_T}")
-            if branch_T.resT != node.T:
+            if not branch_T.resT.eq(node.T):
                 raise TypeError(f"Match branch {i} result type {branch_T.resT} does not match match result type {node.T}")
         return node.T
 
     @handles(ir.Restrict)
     def _(self, node: ir.Restrict):
-        # Visit children and get their types
-        domainT, predT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, domainT, predT = self.visit_children(node)
         # Verify type is DomT
         if not isinstance(node.T, ir.DomT):
             raise TypeError(f"Restrict must have DomT type, got {node.T}")
@@ -539,18 +526,18 @@ class TypeCheckingPass(Analysis):
         # Verify predicate is a Value with ArrowT type
         if not isinstance(predT, ir.ArrowT):
             raise TypeError(f"Restrict expects ArrowT predicate, got {predT}")
-        if predT.argT != domainT.carT:
+        if not predT.argT.eq(domainT.carT):
             raise TypeError(f"Restrict predicate argument type {predT.argT} does not match domain carrier type {domainT.carT}")
         if not isinstance(predT.resT, ir.BoolT):
             raise TypeError(f"Restrict predicate must return Bool, got {predT.resT}")
-        if node.T != domainT:
-            raise TypeError(f"Restrict result type {node.T} does not match domain type {domainT}")
+        if not node.T.carT.eq(domainT.carT):
+            raise TypeError(f"Restrict result carrier type {node.T.carT} does not match domain carrier type {domainT.carT}")
         return node.T
 
     @handles(ir.Forall)
     def _(self, node: ir.Forall):
-        # Visit children and get their types
-        domainT, funT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, domainT, funT = self.visit_children(node)
         # Verify type is BoolT
         if not isinstance(node.T, ir.BoolT):
             raise TypeError(f"Forall must have BoolT type, got {node.T}")
@@ -560,7 +547,7 @@ class TypeCheckingPass(Analysis):
         # Verify function is a Value with ArrowT type
         if not isinstance(funT, ir.ArrowT):
             raise TypeError(f"Forall expects ArrowT function, got {funT}")
-        if funT.argT != domainT.carT:
+        if not funT.argT.eq(domainT.carT):
             raise TypeError(f"Forall function argument type {funT.argT} does not match domain carrier type {domainT.carT}")
         if not isinstance(funT.resT, ir.BoolT):
             raise TypeError(f"Forall function must return Bool, got {funT.resT}")
@@ -568,8 +555,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Exists)
     def _(self, node: ir.Exists):
-        # Visit children and get their types
-        domainT, funT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, domainT, funT = self.visit_children(node)
         # Verify type is BoolT
         if not isinstance(node.T, ir.BoolT):
             raise TypeError(f"Exists must have BoolT type, got {node.T}")
@@ -579,7 +566,7 @@ class TypeCheckingPass(Analysis):
         # Verify function is a Value with ArrowT type
         if not isinstance(funT, ir.ArrowT):
             raise TypeError(f"Exists expects ArrowT function, got {funT}")
-        if funT.argT != domainT.carT:
+        if not funT.argT.eq(domainT.carT):
             raise TypeError(f"Exists function argument type {funT.argT} does not match domain carrier type {domainT.carT}")
         if not isinstance(funT.resT, ir.BoolT):
             raise TypeError(f"Exists function must return Bool, got {funT.resT}")
@@ -587,8 +574,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Map)
     def _(self, node: ir.Map):
-        # Visit children and get their types
-        domT, funT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, domT, funT = self.visit_children(node)
         # Verify type is FuncT
         if not isinstance(node.T, ir.FuncT):
             raise TypeError(f"Map must have FuncT type, got {node.T}")
@@ -598,45 +585,45 @@ class TypeCheckingPass(Analysis):
         # Verify function is a Value with ArrowT type
         if not isinstance(funT, ir.ArrowT):
             raise TypeError(f"Map expects ArrowT function, got {funT}")
-        if funT.argT != domT.carT:
+        if not funT.argT.eq(domT.carT):
             raise TypeError(f"Map function argument type {funT.argT} does not match domain carrier type {domT.carT}")
-        if node.T.retT != funT.resT:
+        if not node.T.retT.eq(funT.resT):
             raise TypeError(f"Map result type {node.T.retT} does not match function result type {funT.resT}")
         return node.T
 
     @handles(ir.Image)
     def _(self, node: ir.Image):
-        # Visit children and get their types
-        funcT, = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, funcT = self.visit_children(node)
         # Verify type is DomT
         if not isinstance(node.T, ir.DomT):
             raise TypeError(f"Image must have DomT type, got {node.T}")
         # Verify function argument is a Value with FuncT type
         if not isinstance(funcT, ir.FuncT):
             raise TypeError(f"Image expects FuncT argument, got {funcT}")
-        if node.T != funcT.retT:
+        if not node.T.eq(funcT.retT):
             raise TypeError(f"Image result type {node.T} does not match function result type {funcT.retT}")
         return node.T
 
     @handles(ir.Apply)
     def _(self, node: ir.Apply):
-        # Visit children and get their types
-        funcT, argT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, funcT, argT = self.visit_children(node)
         # Verify function argument is a Value with FuncT type
         if not isinstance(funcT, ir.FuncT):
             raise TypeError(f"Apply expects FuncT function, got {funcT}")
         # Verify argument type matches function domain carrier type
-        if argT != funcT.dom.carT:
+        if not argT.eq(funcT.dom.T.carT):
             raise TypeError(f"Apply argument type {argT} does not match function domain carrier type {funcT.dom.carT}")
         # Verify result type matches function result type
-        if node.T != funcT.retT:
+        if not node.T.eq(funcT.retT):
             raise TypeError(f"Apply result type {node.T} does not match function result type {funcT.retT}")
         return node.T
 
     @handles(ir.ListLit)
     def _(self, node: ir.ListLit):
-        # Visit children and get their types
-        valTs = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        valTs = self.visit_children(node)[1:]
         # Verify type is FuncT
         if not isinstance(node.T, ir.FuncT):
             raise TypeError(f"ListLit must have FuncT type, got {node.T}")
@@ -645,21 +632,21 @@ class TypeCheckingPass(Analysis):
             raise NotImplementedError("Cannot type check empty list literal")
         elemT = valTs[0]
         for i, valT in enumerate(valTs[1:], 1):
-            if valT != elemT:
+            if not valT.eq(elemT):
                 raise TypeError(f"ListLit has heterogeneous elements: element 0 is {elemT}, element {i} is {valT}")
         # TODO: Verify list domain construction matches FuncT
         if not isinstance(node.T, ir.FuncT):
             raise TypeError(f"ListLit must have FuncT type, got {node.T}")
-        if node.T.retT != elemT:
+        if not node.T.retT.eq(elemT):
             raise TypeError(f"ListLit result type {node.T.retT} does not match element type {elemT}")
-        if node.T.dom.T != ir.DomT.make(ir.IntT(), True, True):
+        if not node.T.dom.T.eq(ir.DomT.make(ir.IntT(), True, True)):
             raise TypeError(f"ListLit domain type {node.T.dom.T} does not match expected type {ir.DomT.make(ir.IntT(), True, True)}")
         return node.T
 
     @handles(ir.Fold)
     def _(self, node: ir.Fold):
-        # Visit children and get their types
-        funcT, funT, initT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, funcT, funT, initT = self.visit_children(node)
         # Verify function argument is a Value with FuncT type
         if not isinstance(funcT, ir.FuncT):
             raise TypeError(f"Fold expects FuncT function, got {funcT}")
@@ -670,20 +657,20 @@ class TypeCheckingPass(Analysis):
         # So fun should be (elemT, resT) -> resT
         elemT = funcT.retT
         resT = funT.resT
-        if initT != resT:
+        if not initT.eq(resT):
             raise TypeError(f"Fold init type {initT} does not match function result type {resT}")
         expectedFunT = ir.ArrowT(ir.TupleT(elemT, resT), resT)
-        if funT != expectedFunT:
+        if not funT.eq(expectedFunT):
             raise TypeError(f"Fold function type {funT} does not match expected type {expectedFunT}")
         # Verify result type matches
-        if node.T != resT:
+        if not node.T.eq(resT):
             raise TypeError(f"Fold result type {node.T} does not match expected type {resT}")
         return node.T
 
     @handles(ir.Slice)
     def _(self, node: ir.Slice):
-        # Visit children and get their types
-        domT, loT, hiT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, domT, loT, hiT = self.visit_children(node)
         # Verify type is DomT
         if not isinstance(node.T, ir.DomT):
             raise TypeError(f"Slice must have DomT type, got {node.T}")
@@ -695,26 +682,26 @@ class TypeCheckingPass(Analysis):
             raise TypeError(f"Slice lo must be Int, got {loT}")
         if not isinstance(hiT, ir.IntT):
             raise TypeError(f"Slice hi must be Int, got {hiT}")
-        if node.T != domT:
+        if not node.T.eq(domT):
             raise TypeError(f"Slice result type {node.T} does not match domain carrier type {domT}")
         return node.T
 
     @handles(ir.Index)
     def _(self, node: ir.Index):
-        # Visit children and get their types
-        domT, idxT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, domT, idxT = self.visit_children(node)
         # Verify domain argument is a domain
         if not isinstance(domT, ir.DomT):
             raise TypeError(f"Index expects domain argument, got {domT}")
-        if idxT != domT.carT:
+        if not idxT.eq(domT.carT):
             raise TypeError(f"Index idx type {idxT} does not match domain carrier type {domT.carT}")
         # Index only works on rank 1 domains
         if domT.rank != 1:
             raise TypeError(f"Index only works on rank 1 domains, got {domT.rank}")
         if not isinstance(node.T, ir.DomT):
             raise TypeError(f"Index result type {node.T} must be a domain, got {node.T}")
-        if node.T.carT != domT.factors[domT.axes[0]]:
-            raise TypeError(f"Index result domain factor type {node.T.carT} does not match domain factor type {domT.factors[idxT]}")
+        if not node.T.carT.eq(domT.factors[domT.axes[0]]):
+            raise TypeError(f"Index result domain factor type {node.T.carT} does not match domain factor type {domT.factors[domT.axes[0]]}")
         if node.T.fin != domT.fins[domT.axes[0]]:
             raise TypeError(f"Slice result domain must be finite, got {node.T.fin}")
         if node.T.ord != domT.ords[domT.axes[0]]:
@@ -727,8 +714,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.And)
     def _(self, node: ir.And):
-        # Visit children and get their types
-        aT, bT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, aT, bT = self.visit_children(node)
         # Verify type is BoolT
         if not isinstance(node.T, ir.BoolT):
             raise TypeError(f"And must have BoolT type, got {node.T}")
@@ -741,8 +728,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Implies)
     def _(self, node: ir.Implies):
-        # Visit children and get their types
-        aT, bT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, aT, bT = self.visit_children(node)
         # Verify type is BoolT
         if not isinstance(node.T, ir.BoolT):
             raise TypeError(f"Implies must have BoolT type, got {node.T}")
@@ -755,8 +742,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Or)
     def _(self, node: ir.Or):
-        # Visit children and get their types
-        aT, bT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, aT, bT = self.visit_children(node)
         # Verify type is BoolT
         if not isinstance(node.T, ir.BoolT):
             raise TypeError(f"Or must have BoolT type, got {node.T}")
@@ -769,8 +756,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Add)
     def _(self, node: ir.Add):
-        # Visit children and get their types
-        aT, bT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, aT, bT = self.visit_children(node)
         # Verify type is IntT
         if not isinstance(node.T, ir.IntT):
             raise TypeError(f"Add must have IntT type, got {node.T}")
@@ -783,8 +770,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Sub)
     def _(self, node: ir.Sub):
-        # Visit children and get their types
-        aT, bT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, aT, bT = self.visit_children(node)
         # Verify type is IntT
         if not isinstance(node.T, ir.IntT):
             raise TypeError(f"Sub must have IntT type, got {node.T}")
@@ -797,8 +784,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Mul)
     def _(self, node: ir.Mul):
-        # Visit children and get their types
-        aT, bT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, aT, bT = self.visit_children(node)
         # Verify type is IntT
         if not isinstance(node.T, ir.IntT):
             raise TypeError(f"Mul must have IntT type, got {node.T}")
@@ -811,8 +798,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Gt)
     def _(self, node: ir.Gt):
-        # Visit children and get their types
-        aT, bT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, aT, bT = self.visit_children(node)
         # Verify type is BoolT
         if not isinstance(node.T, ir.BoolT):
             raise TypeError(f"Gt must have BoolT type, got {node.T}")
@@ -825,8 +812,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.GtEq)
     def _(self, node: ir.GtEq):
-        # Visit children and get their types
-        aT, bT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, aT, bT = self.visit_children(node)
         # Verify type is BoolT
         if not isinstance(node.T, ir.BoolT):
             raise TypeError(f"GtEq must have BoolT type, got {node.T}")
@@ -839,8 +826,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.SumReduce)
     def _(self, node: ir.SumReduce):
-        # Visit children and get their types
-        funcT, = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, funcT = self.visit_children(node)
         # Verify type is IntT
         if not isinstance(node.T, ir.IntT):
             raise TypeError(f"SumReduce must have IntT type, got {node.T}")
@@ -853,8 +840,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.ProdReduce)
     def _(self, node: ir.ProdReduce):
-        # Visit children and get their types
-        funcT, = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, funcT = self.visit_children(node)
         # Verify type is IntT
         if not isinstance(node.T, ir.IntT):
             raise TypeError(f"ProdReduce must have IntT type, got {node.T}")
@@ -867,8 +854,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.AllDistinct)
     def _(self, node: ir.AllDistinct):
-        # Visit children and get their types
-        funcT, = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, funcT = self.visit_children(node)
         # Verify type is BoolT
         if not isinstance(node.T, ir.BoolT):
             raise TypeError(f"AllDistinct must have BoolT type, got {node.T}")
@@ -879,8 +866,8 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.AllSame)
     def _(self, node: ir.AllSame):
-        # Visit children and get their types
-        funcT, = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, funcT = self.visit_children(node)
         # Verify type is BoolT
         if not isinstance(node.T, ir.BoolT):
             raise TypeError(f"AllSame must have BoolT type, got {node.T}")
@@ -901,14 +888,14 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir._LambdaPlaceholder)
     def _(self, node: ir._LambdaPlaceholder):
-        # Visit children and get their types
-        boundVarT, bodyT = self.visit_children(node)
+        # Visit children and get their types (skip first child which is the type)
+        _, boundVarT, bodyT = self.visit_children(node)
         # Verify type is ArrowT
         if not isinstance(node.T, ir.ArrowT):
             raise TypeError(f"_LambdaPlaceholder must have ArrowT type, got {node.T}")
-        if boundVarT != node.T.argT:
+        if not boundVarT.eq(node.T.argT):
             raise TypeError(f"_LambdaPlaceholder bound variable type {boundVarT} does not match ArrowT argument type {node.T.argT}")
-        if bodyT != node.T.resT:
+        if not bodyT.eq(node.T.resT):
             raise TypeError(f"_LambdaPlaceholder body type {bodyT} does not match ArrowT result type {node.T.resT}")
         return node.T
 

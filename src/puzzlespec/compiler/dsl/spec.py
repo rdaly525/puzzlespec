@@ -1,17 +1,18 @@
-from ast import Pass, Sub
-from re import A
 import typing as tp
 
+from puzzlespec.compiler.passes.analyses.ast_printer import AstPrinterPass
 from puzzlespec.compiler.passes.envobj import EnvsObj
 from puzzlespec.compiler.passes.transforms.substitution import SubMapping, SubstitutionPass
 from . import ir
-
+from ..passes.analyses.pretty_printer import PrettyPrinterPass, PrettyPrintedExpr
 from .envs import SymTable, TypeEnv
-from ..passes.pass_base import PassManager, Context
-from ..passes.transforms import CanonicalizePass, ConstFoldPass, AlgebraicSimplificationPass
+from ..passes.pass_base import PassManager, Context, Pass
+from puzzlespec.compiler.passes.transforms.beta_reduction import BetaReductionPass
+from ..passes.transforms import CanonicalizePass, ConstFoldPass, AlgebraicSimplificationPass, DomainSimplificationPass
+from ..passes.transforms.cse import CSE
 #from ..passes.analyses.constraint_categorizer import ConstraintCategorizer, ConstraintCategorizerVals
 from ..passes.analyses.getter import VarGetter, VarSet
-from ..passes.analyses.type_check import TypeCheckingPass
+from ..passes.analyses.type_check import TypeCheckingPass, TypeCheckResult
 #from ..passes.analyses.ast_printer import AstPrinterPass, PrintedAST
 from ..passes.analyses.evaluator import EvalPass, EvalResult, VarMap
 class PuzzleSpec:
@@ -34,7 +35,11 @@ class PuzzleSpec:
             raise ValueError(f"Expected at most {rules.num_children} rules, got {num_rules}")
         self._rules = rules
         self._num_rules = num_rules
-        self._type_check()
+        #self._type_check()
+
+    @property
+    def rules_T(self) -> ir.Type:
+        return ir.TupleT(*(ir.BoolT() for _ in self._rules._children[1:]))
 
     @property
     def envs_obj(self) -> EnvsObj:
@@ -52,41 +57,54 @@ class PuzzleSpec:
     def _type_check(self):
         ctx = Context(self.envs_obj)
         self.analyze([TypeCheckingPass()], ctx=ctx)
+        Tmap = ctx.get(TypeCheckResult).Tmap
+        T = Tmap[self._rules]
+        if not T.eq(self.rules_T):
+            raise TypeError(f"Expected rules to have type {ir.TupleT(*(ir.BoolT() for _ in self._rules))}, got {T}")
 
     # applies passes, copies the tenv and sym table, returns a new spec
-    def transform(self, passes: tp.List[Pass], ctx: Context = None) -> 'PuzzleSpec':
+    def transform(self, *passes: Pass, ctx: Context = None, verbose=True) -> 'PuzzleSpec':
         if ctx is None:
             ctx = Context()
-        pm = PassManager(*passes, verbose=True)
-        new_spec_node = pm.run(self._spec_node, ctx)
-        if new_spec_node == self._spec_node:
+        pm = PassManager(*passes, verbose=verbose, max_iter=10)
+        new_spec_node = pm.run(self._rules, ctx=ctx)
+        if new_spec_node == self._rules:
             return self
-        
-        # Recompute penv
-        penv = self._inference()
-
+        pm = PassManager(VarGetter())
+        pm.run(new_spec_node, ctx=ctx)
         new_sids = set(v.sid for v in ctx.get(VarSet).vars)
         new_sym = self.sym.copy(new_sids)
-        new_domenv = self.make_domenv(dn)
+        new_tenv = self.tenv.copy()
         return PuzzleSpec(
             name=self.name,
             sym=new_sym,
             tenv=new_tenv,
-            domenv=new_domenv,
-            rules=rn,
-            obligations=on
+            rules=new_spec_node
         )
 
     def optimize(self) -> 'PuzzleSpec':
         ctx = Context()
-        ctx.add(SymTableEnv_(self.sym))
-        ctx.add(TypeEnv_(self.tenv))
-        return self.transform([[
+        opt_passes = [
             CanonicalizePass(),
-            ConstFoldPass(),
             AlgebraicSimplificationPass(),
-            #CollectionSimplificationPass(),
-        ]], ctx)
+            ConstFoldPass(),
+            DomainSimplificationPass(),
+            BetaReductionPass(),
+            CSE(),
+        ]
+        return self.transform(opt_passes, ctx=ctx)
+    
+    def pretty(self, dag=False) -> str:
+        if dag:
+            raise NotImplementedError()
+        ctx = Context(self.envs_obj)
+        pm = PassManager(
+            #AstPrinterPass(),
+            TypeCheckingPass(),
+            PrettyPrinterPass()
+        )
+        pm.run(self._rules, ctx)
+        return ctx.get(PrettyPrintedExpr).text
 
 
 
@@ -251,40 +269,40 @@ class PuzzleSpec:
     #    from .setter import Setter
     #    return Setter(spec)
 
-    def evaluate(self, node: ir.Node, varmap: tp.Dict[int, tp.Any]=None) -> tp.Any:
-        if varmap is None:
-            varmap = {}
-        ctx = self.analyze([EvalPass()], node, Context(VarMap(varmap)))
-        return ctx.get(EvalResult).result
+    #def evaluate(self, node: ir.Node, varmap: tp.Dict[int, tp.Any]=None) -> tp.Any:
+    #    if varmap is None:
+    #        varmap = {}
+    #    ctx = self.analyze([EvalPass()], node, Context(VarMap(varmap)))
+    #    return ctx.get(EvalResult).result
 
-    def pretty(self, constraint: ir.Node=None, dag=False) -> str:
-        """Pretty print a constraint using the spec's type environment."""
-        from ..passes.analyses.pretty_printer import PrettyPrinterPass, PrettyPrintedExpr
-        from ..passes.analyses.type_inference import TypeInferencePass, TypeEnv_
-        from ..passes.analyses.ssa_printer import SSAPrinter, SSAResult
-        from ..passes.pass_base import Context, PassManager
-        
-        if constraint is None:
-            constraint = self._rules
+    #def pretty(self, constraint: ir.Node=None, dag=False) -> str:
+    #    """Pretty print a constraint using the spec's type environment."""
+    #    from ..passes.analyses.pretty_printer import PrettyPrinterPass, PrettyPrintedExpr
+    #    from ..passes.analyses.type_inference import TypeInferencePass, TypeEnv_
+    #    from ..passes.analyses.ssa_printer import SSAPrinter, SSAResult
+    #    from ..passes.pass_base import Context, PassManager
+    #    
+    #    if constraint is None:
+    #        constraint = self._rules
 
-        ctx = Context()
-        ctx.add(TypeEnv_(self.tenv))
-        ctx.add(SymTableEnv_(self.sym))
-        if dag:
-            p = SSAPrinter()
-        else:
-            p = PrettyPrinterPass()
-        pm = PassManager(
-            TypeInferencePass(),
-            p
-        )
-        # Run all passes and get the final result
-        pm.run(constraint, ctx)
-        
-        # Get the pretty printed result from context
-        if dag:
-            text = ctx.get(SSAResult).text
-        else:
-            text = ctx.get(PrettyPrintedExpr).text
+    #    ctx = Context()
+    #    ctx.add(TypeEnv_(self.tenv))
+    #    ctx.add(SymTableEnv_(self.sym))
+    #    if dag:
+    #        p = SSAPrinter()
+    #    else:
+    #        p = PrettyPrinterPass()
+    #    pm = PassManager(
+    #        TypeInferencePass(),
+    #        p
+    #    )
+    #    # Run all passes and get the final result
+    #    pm.run(constraint, ctx)
+    #    
+    #    # Get the pretty printed result from context
+    #    if dag:
+    #        text = ctx.get(SSAResult).text
+    #    else:
+    #        text = ctx.get(PrettyPrintedExpr).text
 
-        return text
+    #    return text

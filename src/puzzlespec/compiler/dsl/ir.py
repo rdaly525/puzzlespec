@@ -48,7 +48,8 @@ class Node:
 
     def replace(self, *new_children: 'Node', **kwargs: tp.Any) -> 'Node':
         new_fields = {**self.field_dict, **kwargs}
-        if new_children == self._children and new_fields == self.field_dict:
+        #if (c1._key==c2._key for c1, c2 in zip(new_children,self._children)) and new_fields == self.field_dict:
+        if (new_children == self._children) and new_fields == self.field_dict:
             return self
         return type(self)(*new_children, **new_fields)
 
@@ -75,6 +76,13 @@ class Node:
                 setattr(cls, name, make_getter(i))
         setattr(cls, "__match_args__", match_args)
 
+    @classmethod
+    def equals(cls, a: Node, b: Node):
+        return a._key == b._key
+    
+    def eq(self, other):
+        return isinstance(other, Node) and self._key==other._key
+
 
 
 
@@ -96,7 +104,7 @@ class UnitT(Type):
     def __repr__(self):
         return "𝟙"
 
-    def __eq__(self, other):
+    def eq(self, other):
         return isinstance(other, UnitT)
 
 class BoolT(Type):
@@ -108,7 +116,7 @@ class BoolT(Type):
     def cast_as(cls, val: tp.Any):
         return bool(val)
 
-    def __eq__(self, other):
+    def eq(self, other):
         return isinstance(other, BoolT)
 
 
@@ -121,7 +129,7 @@ class IntT(Type):
     def cast_as(cls, val: tp.Any):
         return int(val)
 
-    def __eq__(self, other):
+    def eq(self, other):
         return isinstance(other, IntT)
 
 
@@ -136,14 +144,15 @@ class EnumT(Type):
     def __repr__(self):
         return f"Enum<{self.name}>"
 
-    def __eq__(self, other):
+    def eq(self, other):
         return isinstance(other, EnumT) and self.name==other.name and self.labels ==other.labels
 
 
 class TupleT(Type):
     _numc = -1
     def __init__(self, *ts: Type):
-        assert all(isinstance(t, Type) for t in ts)
+        if not all(isinstance(t, Type) for t in ts):
+            raise ValueError(f"TupleT children must be Types, got {ts}")
         super().__init__(*ts)
 
     @property
@@ -161,8 +170,8 @@ class TupleT(Type):
     def __repr__(self):
         return "⨯".join(str(child) for child in self._children)
 
-    def __eq__(self, other):
-        return isinstance(other, TupleT) and len(self)==len(other) and all(self[i]==other[i] for i in range(len(self)))
+    def eq(self, other):
+        return isinstance(other, TupleT) and len(self)==len(other) and all(self[i].eq(other[i]) for i in range(len(self)))
 
 class SumT(Type):
     _numc = -1
@@ -184,8 +193,8 @@ class SumT(Type):
     def __repr__(self):
         return "⊎".join(str(child) for child in self._children)
 
-    def __eq__(self, other):
-        return isinstance(other, SumT) and len(self)==len(other) and all(self[i]==other[i] for i in range(len(self)))
+    def eq(self, other):
+        return isinstance(other, SumT) and len(self)==len(other) and all(self[i].eq(other[i]) for i in range(len(self)))
 
 
 class ArrowT(Type):
@@ -204,8 +213,8 @@ class ArrowT(Type):
     def __repr__(self):
         return f"{self.argT} -> {self.resT}"
     
-    def __eq__(self, other):
-        return isinstance(other, ArrowT) and self.argT ==other.argT and self.resT==other.argT
+    def eq(self, other):
+        return isinstance(other, ArrowT) and self.argT.eq(other.argT) and self.resT.eq(other.resT)
 
 class DomT(Type):
     _fields = ("fins", "ords", "axes")
@@ -257,8 +266,8 @@ class DomT(Type):
         #return f"Dom<{self.fins},{self.ords},{rank}>[{self.carT}]"
         return f"Dom[{self.carT}]"
 
-    def __eq__(self, other):
-        return False
+    def eq(self, other):
+        return isinstance(other, DomT) and self.carT.eq(other.carT) and self.fins==other.fins and self.ords==other.ords and self.axes==other.axes
 
 class FuncT(Type):
     _numc = 2
@@ -276,7 +285,7 @@ class FuncT(Type):
     def __repr__(self):
         return f"Func[{self.dom.T} -> {self.retT}]"
 
-    def __eq__(self, other):
+    def eq(self, other):
         return False
 
 
@@ -303,6 +312,8 @@ class Value(Node):
     def __init__(self, T: Type, *children: Node):
         if not isinstance(T, Type):
             raise ValueError(f"{T} must be a Type")
+        if any(isinstance(c, Type) for c in children):
+            raise ValueError(f"{children} must not have Type children, got {children}")
         super().__init__(T, *children)
     
     @property
@@ -353,6 +364,9 @@ class Ite(Value):
 class Not(Value):
     _numc = 2
     def __init__(self, T: Type, a: Value):
+        assert isinstance(T, BoolT)
+        if not isinstance(a.T, BoolT):
+            raise TypeError(f"Not expects Bool operand, got {a}")
         super().__init__(T, a)
 
 class Neg(Value):
@@ -405,12 +419,6 @@ class Fin(Value):
     _numc = 2
     def __init__(self, T: Type, N: Value):
         super().__init__(T, N)
-
-# Dom[EnumT]
-class Enum(Value):
-    _numc = 1
-    def __init__(self, T: Type):
-        super().__init__(T)
 
 # Dom[EnumT] -> EnumT
 class EnumLit(Value):
@@ -681,7 +689,6 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     Prod: 8,
     Universe: 9,
     Fin: 9,
-    Enum: 9,
     EnumLit: 9,
     Card: 9,
     IsMember: 9,

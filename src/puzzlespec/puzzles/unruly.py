@@ -7,8 +7,10 @@ from ..compiler.dsl import ir
 
 def build_unruly_spec() -> PuzzleSpec:
     p = PuzzleSpecBuilder()
+    
     # Structural parameters
     nR, nC = p.param(sort=Int, name='nR'), p.param(sort=Int, name='nC')
+
     # Structural constraints
     p += [nR % 2 == 0, nC % 2 == 0]
 

@@ -11,12 +11,11 @@ class VarSet(AnalysisObject):
         self.vars = vars
 
 class VarGetter(Analysis):
-    requires = (EnvsObj,)
+    requires = ()
     produces = (VarSet,)
     name = 'var_getter'
 
     def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
-        self.domenv: DomEnv = ctx.get(EnvsObj).domenv
         return VarSet(self.visit(root))
 
     def visit(self, node: ir.Node):
@@ -28,10 +27,7 @@ class VarGetter(Analysis):
 
     @handles(ir.VarRef)
     def _(self, node: ir.VarRef):
-        val = set([node])
-        assert node.sid in self.domenv
-        for dom in self.domenv.get_doms(node.sid):
-            val |= self.visit(dom)
+        return set([node])
 
 class VarPHGetter(Analysis):
     requires = (EnvsObj,)
