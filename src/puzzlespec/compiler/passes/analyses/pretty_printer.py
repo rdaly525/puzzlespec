@@ -101,10 +101,10 @@ class PrettyPrinterPass(Analysis):
         elem_strs = self.visit_children(node)
         return "⊎".join(elem_strs)
 
-    @handles(ir.ArrowT)
-    def _(self, node: ir.ArrowT) -> str:
-        arg_str, res_str = self.visit_children(node)
-        return f"{arg_str} -> {res_str}"
+    #@handles(ir.ArrowT)
+    #def _(self, node: ir.ArrowT) -> str:
+    #    arg_str, res_str = self.visit_children(node)
+    #    return f"{arg_str} -> {res_str}"
 
     @handles(ir.DomT)
     def _(self, node: ir.DomT) -> str:
@@ -115,10 +115,41 @@ class PrettyPrinterPass(Analysis):
             car_str = "⨯".join(factor_strs)
         return f"Dom[{car_str}]"
 
-    @handles(ir.FuncT)
-    def _(self, node: ir.FuncT) -> str:
-        dom_str, ret_str = self.visit_children(node)
-        return f"Func[{dom_str} -> {ret_str}]"
+    @handles(ir.LambdaT)
+    def _(self, node: ir.LambdaT) -> str:
+        argT, resT = node._children
+        is_col = isinstance(argT, (ir.PiT, ir.DomT))
+        if is_col:
+            bv_name = f"X{self.b_num_col}"
+            self.b_num_col += 1
+        else:
+            bv_name = f"x{self.b_num_elem}"
+            self.b_num_elem += 1
+        self.b_names.append(bv_name)
+        resT_str = self.visit(resT)
+        # pop the stack
+        self.b_names.pop()
+        if is_col:
+            self.b_num_col -= 1
+        else:
+            self.b_num_elem -= 1
+        return bv_name, resT_str
+
+    @handles(ir._LambdaTPlaceholder)
+    def _(self, node: ir._LambdaTPlaceholder) -> str:
+        assert 0
+        bv, resT = self.visit_children(node)
+        return (bv, resT)
+
+    @handles(ir.PiT)
+    def _(self, node: ir.PiT):
+        dom_str, (bv_name, resT_str) = self.visit_children(node)
+        return f"Pi[{dom_str} -> {bv_name}: {resT_str}]"
+    
+    @handles(ir.ApplyT)
+    def _(self, node: ir.ApplyT):
+        piT_str, arg_str = self.visit_children(node)
+        return f"{piT_str}({arg_str})"
 
     ##############################
     ## Core-level IR Value nodes (Used throughout entire compiler flow)
@@ -149,7 +180,7 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.Lambda)
     def _(self, node: ir.Lambda) -> str:
         paramT = node.T.argT
-        is_col = isinstance(paramT, (ir.FuncT, ir.DomT))
+        is_col = isinstance(paramT, (ir.PiT, ir.DomT))
         if is_col:
             bv_name = f"X{self.b_num_col}"
             self.b_num_col += 1
@@ -386,7 +417,7 @@ class PrettyPrinterPass(Analysis):
         _, scrut_node, branches = node._children
         scrut_expr = self.visit(scrut_node)
         assert isinstance(branches, ir.TupleLit)
-        assert all(isinstance(branch, ir.Lambda) for branch in branches._children[1:])
+        assert all(isinstance(branch, (ir.Lambda, ir._LambdaPlaceholder)) for branch in branches._children[1:])
         branch_exprs = [self.visit(branch) for branch in branches._children[1:]]
         branch_argTs = []
         for branch_lam in branches._children[1:]:
@@ -420,13 +451,12 @@ class PrettyPrinterPass(Analysis):
     ## Funcs (i.e., containers)
     @handles(ir.Map)
     def _(self, node: ir.Map) -> str:
-        _, dom_expr, (var_name, body_str) = self.visit_children(node)  # Skip type at index 0
+        piT_str, dom_expr, (var_name, body_str) = self.visit_children(node)  # Skip type at index 0
         # Lambda returns (var_name, body_str) tuple
         return f"[{body_str} | {var_name} ∈ {dom_expr}]"
 
     @handles(ir.Image)
     def _(self, node: ir.Image) -> str:
-        # TODO: Determine how to pretty print Image
         _, func_expr = self.visit_children(node)  # Skip type at index 0
         return f"{func_expr}[𝕏]"
 
@@ -526,18 +556,20 @@ class PrettyPrinterPass(Analysis):
     ## Constructor-level IR nodes (Used for construction but immediately gets transformed for spec)
     ##############################
 
-    @handles(ir._BoundVarPlaceholder, mark_invalid=True)
+    @handles(ir._BoundVarPlaceholder)
     def _(self, node: ir._BoundVarPlaceholder) -> str:
-        raise ValueError("Should not be here - _BoundVarPlaceholder should be transformed before pretty printing")
+        T, = self.visit_children(node)
+        return f"b{id(node)}"
 
     @handles(ir._LambdaPlaceholder)
     def _(self, node: ir._LambdaPlaceholder) -> str:
-        raise ValueError("Should not be here - _LambdaPlaceholder should be transformed before pretty printing")
+        T, bv, body = self.visit_children(node)
+        return bv, body
 
     @handles(ir._VarPlaceholder)
     def _(self, node: ir._VarPlaceholder) -> str:
-        raise ValueError("Should not be here - _VarPlaceholder should be transformed before pretty printing")
-
+        T, = self.visit_children(node)
+        return f"v{node.sid}"
 
 #"⊎" disjoint union
 #"×"cartesian product

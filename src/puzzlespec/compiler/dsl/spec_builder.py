@@ -1,6 +1,8 @@
 import typing as tp
 
 from puzzlespec.compiler.passes.analyses.ast_printer import AstPrinterPass, PrintedAST
+from puzzlespec.compiler.passes.analyses.kind_check import KindCheckingPass
+from puzzlespec.compiler.passes.analyses.pretty_printer import PrettyPrinterPass
 from puzzlespec.compiler.passes.transforms.resolve_vars import ResolveBoundVars, ResolveFreeVars, VarMap
 from . import ast, ir
 from .envs import SymTable, TypeEnv
@@ -160,14 +162,17 @@ class PuzzleSpecBuilder:
     def build(self, name: str) -> PuzzleSpec:
         #self.print()
         # 1: Resolve Placeholders (for bound bars/lambdas)
-        pm = PassManager(ResolveBoundVars(), verbose=True)
+        ctx = Context(EnvsObj(None, None))
+        pm = PassManager(AstPrinterPass(), KindCheckingPass(), ResolveBoundVars(), verbose=True)
         rules_node = ir.TupleLit(ir.TupleT(*(ir.BoolT() for _ in self._rules)), *self._rules)
-        new_rules_node = pm.run(rules_node)
+        new_rules_node = pm.run(rules_node, ctx=ctx)
         # Populate tenv
-        ctx = Context()
-        pm = PassManager([])
-        pm = PassManager(ResolveFreeVars(), CSE(), verbose=True)
-        new_rules_node = pm.run(new_rules_node, ctx)
+        ctx = Context(EnvsObj(None, None))
+        pm = PassManager(KindCheckingPass(), ResolveFreeVars(), verbose=True)
+        new_rules_node = pm.run(new_rules_node, ctx=ctx)
+        #ctx = Context(EnvsObj(None, None))
+        #pm = PassManager(KindCheckingPass(), CSE(), verbose=True)
+        #new_rules_node = pm.run(new_rules_node, ctx=ctx)
         sid_to_T = ctx.get(VarMap).sid_to_T
         assert len(sid_to_T) != 0
         tenv = TypeEnv()

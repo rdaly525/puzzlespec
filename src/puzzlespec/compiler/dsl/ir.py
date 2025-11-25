@@ -1,7 +1,5 @@
 from __future__ import annotations
-from dataclasses import dataclass
 import typing as tp
-from abc import abstractmethod
 # Unified Types and IR
 
 # Base class for IR
@@ -197,24 +195,24 @@ class SumT(Type):
         return isinstance(other, SumT) and len(self)==len(other) and all(self[i].eq(other[i]) for i in range(len(self)))
 
 
-class ArrowT(Type):
-    _numc=2
-    def __init__(self, argT: Type, resT: Type):
-        super().__init__(argT, resT)
-
-    @property
-    def argT(self):
-        return self._children[0]
-    
-    @property
-    def resT(self):
-        return self._children[1]
-
-    def __repr__(self):
-        return f"{self.argT} -> {self.resT}"
-    
-    def eq(self, other):
-        return isinstance(other, ArrowT) and self.argT.eq(other.argT) and self.resT.eq(other.resT)
+#class ArrowT(Type):
+#    _numc=2
+#    def __init__(self, argT: Type, resT: Type):
+#        super().__init__(argT, resT)
+#
+#    @property
+#    def argT(self):
+#        return self._children[0]
+#    
+#    @property
+#    def resT(self):
+#        return self._children[1]
+#
+#    def __repr__(self):
+#        return f"{self.argT} -> {self.resT}"
+#    
+#    def eq(self, other):
+#        return isinstance(other, ArrowT) and self.argT.eq(other.argT) and self.resT.eq(other.resT)
 
 class DomT(Type):
     _fields = ("fins", "ords", "axes")
@@ -269,24 +267,74 @@ class DomT(Type):
     def eq(self, other):
         return isinstance(other, DomT) and self.carT.eq(other.carT) and self.fins==other.fins and self.ords==other.ords and self.axes==other.axes
 
-class FuncT(Type):
+class _LambdaTPlaceholder(Type):
     _numc = 2
-    def __init__(self, dom: Value, retT: Type):
-        super().__init__(dom, retT)
+    def __init__(self, bound_var: Value, body: Type):
+        super().__init__(bound_var, body)
 
     @property
-    def dom(self):
+    def retT(self) -> Type:
+        return self._children[1]
+
+    @property
+    def argT(self) -> Type:
+        return self._children[0].T
+
+    def __repr__(self):
+        return f"(\{self._children[0]}. {self.retT})"
+
+class LambdaT(Type):
+    _numc = 2
+    def __init__(self, argT: Type, retT: Type):
+        super().__init__(argT, retT)
+
+    @property
+    def retT(self) -> Type:
+        return self._children[1]
+
+    @property
+    def argT(self) -> Type:
+        return self._children[0]
+
+
+class PiT(Type):
+    _numc = 2
+    def __init__(self, dom: Value, lam: Type):
+        super().__init__(dom, lam)
+
+    @property
+    def dom(self) -> Value:
         return self._children[0]
     
     @property
-    def retT(self):
+    def lam(self) -> LambdaT:
         return self._children[1]
 
     def __repr__(self):
-        return f"Func[{self.dom.T} -> {self.retT}]"
+        return f"Func[{self.dom.T}, {self.lam}]"
 
     def eq(self, other):
-        return False
+        return isinstance(other, PiT) and self.dom.eq(other.dom) and self.lam.eq(other.lam)
+
+def _is_value(v: Node) -> bool:
+    return isinstance(v, (Value, BoundVar, VarRef))
+
+class ApplyT(Type):
+    _numc = 2
+    def __init__(self, piT: PiT, arg: Value):
+        assert _is_value(arg)
+        super().__init__(piT, arg)
+
+    def __repr__(self):
+        return f"AppT({self.piT}, {self.arg})"
+
+    @property
+    def piT(self) -> PiT:
+        return self._children[0]
+
+    @property
+    def arg(self) -> Value:
+        return self._children[1]
 
 
 ##############################
@@ -637,6 +685,9 @@ class _BoundVarPlaceholder(Value):
     def __init__(self, T: Type):
         super().__init__(T)
 
+    def __str__(self):
+        return f"BV[{str(id(self))[-5:]}]"
+
 class _LambdaPlaceholder(Value):
     _numc = 3
     def __init__(self, T: Type, bound_var: Value, body: Value):
@@ -658,9 +709,11 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     EnumT: -2,
     TupleT: -2,
     SumT: -2,
-    ArrowT: -2,
     DomT: -2,
-    FuncT: -2,
+    ApplyT: -2,
+    PiT: -2,
+    _LambdaTPlaceholder: -2,
+    LambdaT: -2,
     Unit: -1,
     Lit: 0,
     VarRef: 1,

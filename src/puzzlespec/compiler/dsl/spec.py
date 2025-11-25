@@ -12,9 +12,10 @@ from ..passes.transforms import CanonicalizePass, ConstFoldPass, AlgebraicSimpli
 from ..passes.transforms.cse import CSE
 #from ..passes.analyses.constraint_categorizer import ConstraintCategorizer, ConstraintCategorizerVals
 from ..passes.analyses.getter import VarGetter, VarSet
-from ..passes.analyses.type_check import TypeCheckingPass, TypeCheckResult
+from ..passes.analyses.kind_check import KindCheckingPass
 #from ..passes.analyses.ast_printer import AstPrinterPass, PrintedAST
 from ..passes.analyses.evaluator import EvalPass, EvalResult, VarMap
+from .utils import _is_kind
 class PuzzleSpec:
 
     def __init__(self,
@@ -35,7 +36,16 @@ class PuzzleSpec:
             raise ValueError(f"Expected at most {rules.num_children} rules, got {num_rules}")
         self._rules = rules
         self._num_rules = num_rules
-        #self._type_check()
+        self._ph_check()
+        self._kind_check()
+
+    def _ph_check(self):
+        def check(node: ir.Node):
+            if isinstance(node, (ir._BoundVarPlaceholder, ir._LambdaPlaceholder, ir._LambdaTPlaceholder, ir._VarPlaceholder)):
+                raise ValueError(f"Found placeholder node {node} in rules")
+            for c in node._children:
+                check(c)
+        check(self._rules)
 
     @property
     def rules_T(self) -> ir.Type:
@@ -54,13 +64,15 @@ class PuzzleSpec:
         pm.run(node, ctx)
         return ctx
 
-    def _type_check(self):
+    def _kind_check(self):
         ctx = Context(self.envs_obj)
-        self.analyze([TypeCheckingPass()], ctx=ctx)
-        Tmap = ctx.get(TypeCheckResult).Tmap
-        T = Tmap[self._rules]
-        if not T.eq(self.rules_T):
-            raise TypeError(f"Expected rules to have type {ir.TupleT(*(ir.BoolT() for _ in self._rules))}, got {T}")
+        self.analyze([KindCheckingPass()], ctx=ctx)
+        # Check that the rules are a TupleT of BoolT
+        if not _is_kind(self._rules.T, ir.TupleT):
+            raise TypeError(f"Expected rules to have type {ir.TupleT(*(ir.BoolT() for _ in self._rules))}, got {self._rules.T}")
+        for rule in self._rules._children[1:]:
+            if not _is_kind(rule.T, ir.BoolT):
+                raise TypeError(f"Expected rule to have type BoolT, got {rule.T}")
 
     # applies passes, copies the tenv and sym table, returns a new spec
     def transform(self, *passes: Pass, ctx: Context = None, verbose=True) -> 'PuzzleSpec':
@@ -90,8 +102,13 @@ class PuzzleSpec:
             ConstFoldPass(),
             DomainSimplificationPass(),
             BetaReductionPass(),
-            CSE(),
+            #CSE(),
         ]
+        #spec = self
+        #for op in opt_passes:
+        #    spec.pretty()
+        #    spec.transform(op, ctx=ctx)
+
         return self.transform(opt_passes, ctx=ctx)
     
     def pretty(self, dag=False) -> str:
@@ -100,8 +117,9 @@ class PuzzleSpec:
         ctx = Context(self.envs_obj)
         pm = PassManager(
             #AstPrinterPass(),
-            TypeCheckingPass(),
-            PrettyPrinterPass()
+            KindCheckingPass(),
+            PrettyPrinterPass(),
+            verbose=True
         )
         pm.run(self._rules, ctx)
         return ctx.get(PrettyPrintedExpr).text

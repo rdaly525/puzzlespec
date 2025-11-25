@@ -37,6 +37,14 @@ class CSE(Transform):
         self.bctx.pop()
         return new_node
 
+    @handles(ir.LambdaT)
+    def _(self, node: ir.LambdaT):
+        lamT_key = node._key
+        self.bctx.append(lamT_key)
+        new_node = self.visit_(node)
+        self.bctx.pop()
+        return new_node
+
     @handles(ir.BoundVar)
     def _(self, node: ir.BoundVar):
         key = (self.bctx[-(node.idx+1)], node._key)

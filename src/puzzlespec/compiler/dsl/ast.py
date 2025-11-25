@@ -1,8 +1,9 @@
 from __future__ import annotations
 import typing as tp
 from . import ir
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from enum import Enum as _Enum
+from .utils import _get_T, _is_kind, _is_same_kind
 class ExprMakeError(Exception):
     def __init__(self, message: str):
         self.message = message
@@ -19,6 +20,11 @@ class Expr:
     @property
     def _T(self) -> ir.Type:
         return self.node.T
+    
+    @property
+    def raw_T(self) -> ir.Type:
+        return _get_T(self.T)
+
 
     @classmethod
     def make(cls, val: tp.Any) -> Expr:
@@ -288,10 +294,10 @@ class TupleExpr(Expr):
         if idx < 0 or idx >= len(self):
             raise IndexError(f"Tuple index out of range: {idx}")
         node = ir.Proj(self.T[idx], self.node, idx)
-        return Expr(node)
+        return wrap(node)
 
     def __len__(self) -> int:
-        return len(self.node._children)
+        return len(self.T)
 
     # Nice unpacking
     def __iter__(self) -> None:
@@ -306,16 +312,17 @@ class SumExpr(Expr):
 
     @property
     def T(self) -> ir.SumT:
-        assert isinstance(self._T, ir.SumT)
+        assert _is_kind(self._T, ir.SumT)
         return tp.cast(ir.SumT, self._T)
  
     def match(self, *branches) -> Expr:
-        branch_exprs = [make_lambda(fn, sort=T) for fn, T in zip(branches, self.T.elemTs)]
-        resT = branch_exprs[0].T.resT
-        if not all(e.T.resT.eq(resT) for e in branch_exprs):
-            raise ValueError(f"Expected all branches to have result type {resT}, got {', '.join([repr(e.T) for e in branch_exprs])}")
-        T = branch_exprs[0].T.resT
-        match_node = ir.Match(T, self.node, TupleExpr.make([e.node for e in branch_exprs]).node)
+        branch_exprs = [make_lambda(fn, sort=T) for fn, T in zip(branches, self.raw_T.elemTs)]
+        retT0 = branch_exprs[0].raw_T.retT
+        if isinstance(retT0, ir.ApplyT):
+            raise ValueError(f"Cannot have a dependent return type in a match")
+        if not all(type(retT0) == type(e.T.retT) for e in branch_exprs):
+            raise ValueError(f"Expected all branches to have result type {retT0}, got {', '.join([repr(e.T) for e in branch_exprs])}")
+        match_node = ir.Match(retT0, self.node, TupleExpr.make([e.node for e in branch_exprs]).node)
         return wrap(match_node)
 
 
@@ -326,9 +333,9 @@ class LambdaExpr(Expr):
             raise ValueError(f"Expected LambdaExpr, got {self}")
 
     @property
-    def T(self) -> ir.ArrowT:
-        assert isinstance(self._T, ir.ArrowT)
-        return tp.cast(ir.ArrowT, self._T)
+    def T(self) -> ir._LambdaTPlaceholder:
+        assert isinstance(self._T, ir._LambdaTPlaceholder)
+        return tp.cast(ir._LambdaTPlaceholder, self._T)
  
     @property
     def argT(self) -> ir.Type:
@@ -336,19 +343,20 @@ class LambdaExpr(Expr):
 
     @property
     def resT(self) -> ir.Type:
-        return self.T.resT
+        return self.T.retT
 
     def __repr__(self):
         return f"{self.argT} -> {self.resT}"
 
-
-# Domain expresion is only passed in during tabulate (due to free var creation)
 def make_lambda(fn: tp.Callable, sort: ir.Type) -> LambdaExpr:
     bv_node = ir._BoundVarPlaceholder(sort)
     bv_expr = wrap(bv_node)
     ret_expr = fn(bv_expr)
     ret_expr = Expr.make(ret_expr)
-    lambda_node = ir._LambdaPlaceholder(ir.ArrowT(sort, ret_expr.T), bv_expr.node, ret_expr.node)
+    lamT = ir._LambdaTPlaceholder(bv_node, ret_expr.T)
+    lambda_node = ir._LambdaPlaceholder(lamT, bv_expr.node, ret_expr.node)
+    #print('LAM ', str(id(lambda_node))[-5:], f" with LMT {id(lamT)}")
+    #print(' BV ', str(id(bv_node))[-5:])
     return LambdaExpr(lambda_node)
 
 class DomainExpr(Expr):
@@ -367,17 +375,37 @@ class DomainExpr(Expr):
     
     @property
     def carT(self) -> ir.Type:
-        return self.T.carT
+        def _carT(T: ir.Type):
+            if isinstance(T, ir.DomT):
+                return T.carT
+            assert isinstance(T, ir.ApplyT)
+            piT, arg = T.piT, T.arg
+            dom, lam = piT._children
+            bv, retT = lam._children
+            appT = ir.ApplyT(
+                ir.PiT(
+                    dom,
+                    ir._LambdaTPlaceholder(bv, _carT(retT))
+                ),
+                arg
+            )
+            return appT
+        return _carT(self.T)
 
     def restrict(self, pred_fun: tp.Callable) -> DomainExpr:
         lambda_expr = make_lambda(pred_fun, sort=self.carT)
+        if not _is_same_kind(lambda_expr.T.retT, ir.BoolT()):
+            raise ValueError(f"Restrict predicate must return Bool, got {lambda_expr.T.retT}")
         T = ir.DomT.make(carT=self.carT, fin=self.T.fin, ord=self.T.ord)
         node = ir.Restrict(T, self.node, lambda_expr.node)
         return DomainExpr(node)
 
     def map(self, fn: tp.Callable) -> FuncExpr:
         lambda_expr = make_lambda(fn, sort=self.carT)
-        T = ir.FuncT(self.node, lambda_expr.T.resT)
+        lamT = lambda_expr.T
+        T = ir.PiT(self.node, lamT)
+        #print("LMT", str(id(lamT))[-5:], str(T))
+        #print(" BV", str(id(bv_node))[-5:])
         node = ir.Map(T, self.node, lambda_expr.node)
         return wrap(node)
 
@@ -416,11 +444,15 @@ class DomainExpr(Expr):
 
     def forall(self, pred_fun: tp.Callable) -> BoolExpr:
         lambda_expr = make_lambda(pred_fun, sort=self.carT)
+        if not _is_same_kind(lambda_expr.T.retT, ir.BoolT()):
+            raise ValueError(f"Forall predicate must return Bool, got {lambda_expr.T.retT}")
         node = ir.Forall(ir.BoolT(), self.node, lambda_expr.node)
         return BoolExpr(node)
 
     def exists(self, pred_fun: tp.Callable) -> BoolExpr:
         lambda_expr = make_lambda(pred_fun, sort=self.carT)
+        if not _is_same_kind(lambda_expr.T.retT, ir.BoolT()):
+            raise ValueError(f"Exists predicate must return Bool, got {lambda_expr.T.retT}")
         node = ir.Exists(ir.BoolT(), self.node, lambda_expr.node)
         return BoolExpr(node)
 
@@ -546,10 +578,10 @@ class NDSeqDomainExpr(DomainExpr):
         sizes = [IntExpr.make(s) for s in size]
         if len(sizes) != rank or len(strides) != rank:
             raise ValueError(f"Expected size and stride for all dimensions ({rank}), got {size} and {stride}")
-        fins = [((self.doms[i].size-(sizes[i]-strides[i]))/strides[i]).fin() for i in range(rank)]
+        fins = [((self.doms[i].size-(sizes[i]-strides[i]))//strides[i]).fin() for i in range(rank)]
         dom = DomainExpr.cartprod(*fins)
         def tile_lam(idx):
-            slices = [slice(start=idx[i]*stride[i], stop=idx[i]*stride[i]+size[i]) for i in range(rank)]
+            slices = [slice(idx[i]*strides[i], (idx[i]*strides[i])+sizes[i]) for i in range(rank)]
             return self[*slices]
         return dom.map(tile_lam)
 
@@ -582,8 +614,8 @@ class FuncExpr(Expr):
             raise ValueError(f"Expected FuncExpr, got {self.T}")
 
     @property
-    def T(self) -> ir.FuncT:
-        return tp.cast(ir.FuncT, self._T)
+    def T(self) -> ir.PiT:
+        return tp.cast(ir.PiT, self._T)
 
     @property
     def domT(self) -> ir.DomT:
@@ -593,23 +625,20 @@ class FuncExpr(Expr):
     def domain(self) -> DomainExpr:
         return wrap(self.T.dom)
 
-    @property
-    def image(self) -> DomainExpr:
-        # TODO this type is wrong
-        T = ir.DomT(self.elemT)
-        node = ir.Image(T, self.node)
-        return wrap(node)
+    #@property
+    #def image(self) -> DomainExpr:
+    #    T = ir.DomT.make(carT=self.elemT, fin=True, ord=True)
+    #    node = ir.Image(T, self.node)
+    #    return wrap(node)
 
-    @property 
-    def elemT(self) -> ir.Type:
-        return self.T.retT
+    def elemT(self, arg: ir.Node) -> ir.Type:
+        return ir.ApplyT(self.T, arg)
 
-    @property
     def carT(self) -> ir.Type:
         return self.domain.carT
 
     def apply(self, arg: Expr) -> Expr:
-        node = ir.Apply(self.elemT, self.node, arg.node)
+        node = ir.Apply(self.elemT(arg.node), self.node, arg.node)
         return wrap(node)
 
     # Func[Dom(A) -> B] -> (B -> C) -> Func[Dom(A) -> C]
@@ -634,8 +663,6 @@ class FuncExpr(Expr):
         return self.domain.size
 
     def sum(self) -> IntExpr:
-        if not isinstance(self.elemT, ir.IntT):
-            raise ValueError(f"Can only sum over ints: {self}")
         return IntExpr(ir.SumReduce(ir.IntT(), self.node))
     
     def __contains__(self, elem: Expr) -> BoolExpr:
@@ -708,50 +735,59 @@ class NDArrayExpr(FuncExpr):
             lambda tile_dom: tile_dom.map(lambda indices: self.apply(indices))
         )
 
+def to_T(T: ir.Type):
+    def _T(T: ir.Type):
+        if isinstance(T, ir.ApplyT):
+            return _T(T.piT.lam.retT)
+        return T
+    return _T(T)
+
 def is_UnitExpr(node: ir.Node) -> bool:
-    return isinstance(node, ir.Value) and isinstance(node.T, ir.UnitT)
+    return isinstance(node, ir.Value) and isinstance(to_T(node.T), ir.UnitT)
 
 def is_BoolExpr(node: ir.Node) -> bool:
-    return isinstance(node, ir.Value) and isinstance(node.T, ir.BoolT)
+    return isinstance(node, ir.Value) and isinstance(to_T(node.T), ir.BoolT)
 
 def is_IntExpr(node: ir.Node) -> bool:
-    return isinstance(node, ir.Value) and isinstance(node.T, ir.IntT)
+    return isinstance(node, ir.Value) and isinstance(to_T(node.T), ir.IntT)
 
 def is_EnumExpr(node: ir.Node) -> bool:
-    return isinstance(node, ir.Value) and isinstance(node.T, ir.EnumT)
+    return isinstance(node, ir.Value) and isinstance(to_T(node.T), ir.EnumT)
 
 def is_TupleExpr(node: ir.Node) -> bool:
-    return isinstance(node, ir.Value) and isinstance(node.T, ir.TupleT)
+    return isinstance(node, ir.Value) and isinstance(to_T(node.T), ir.TupleT)
 
 def is_SumExpr(node: ir.Node) -> bool:
-    return isinstance(node, ir.Value) and isinstance(node.T, ir.SumT)
+    return isinstance(node, ir.Value) and isinstance(to_T(node.T), ir.SumT)
 
 def is_LambdaExpr(node: ir.Node) -> bool:
-    return isinstance(node, ir.Value) and isinstance(node.T, ir.ArrowT)
+    return isinstance(node, ir.Value) and isinstance(to_T(node.T), ir._LambdaTPlaceholder)
 
 def is_DomainExpr(node: ir.Node) -> bool:
-    return isinstance(node, ir.Value) and isinstance(node.T, ir.DomT)
+    return isinstance(node, ir.Value) and isinstance(to_T(node.T), ir.DomT)
 
 def is_EnumDomainExpr(node: ir.Node) -> bool:
-    return is_DomainExpr(node) and isinstance(node.T.carT, ir.EnumT)
+    return is_DomainExpr(node) and isinstance(to_T(node.T).carT, ir.EnumT)
 
 def is_SeqDomainExpr(node: ir.Node) -> bool:
-    return is_DomainExpr(node) and node.T.ord and node.T.fin and node.T.rank==1
+    T = to_T(node.T)
+    return is_DomainExpr(node) and T.ord and T.fin and T.rank==1
 
 def is_2DSeqDomainExpr(node: ir.Node) -> bool:
-    return is_NDSeqDomainExpr(node) and node.T.rank==2
+    return is_NDSeqDomainExpr(node) and to_T(node.T).rank==2
 
 def is_NDSeqDomainExpr(node: ir.Node) -> bool:
-    return is_DomainExpr(node) and node.T.ord and node.T.fin and node.T.rank > 1
+    T = to_T(node.T)
+    return is_DomainExpr(node) and T.ord and T.fin and T.rank > 1
 
 def is_FuncExpr(node: ir.Node) -> bool:
-    return isinstance(node, ir.Value) and isinstance(node.T, ir.FuncT)
+    return isinstance(node, ir.Value) and isinstance(to_T(node.T), ir.PiT)
 
 def is_ArrayExpr(node: ir.Node) -> bool:
-    return is_FuncExpr(node) and is_SeqDomainExpr(node.T.dom)
+    return is_FuncExpr(node) and is_SeqDomainExpr(to_T(node.T).dom)
 
 def is_NDArrayExpr(node: ir.Node) -> bool:
-    return is_ArrayExpr(node) and is_NDSeqDomainExpr(node.T.dom)
+    return is_FuncExpr(node) and is_NDSeqDomainExpr(to_T(node.T).dom)
 
 def wrap(node: ir.Node) -> Expr:
     # Base theory types
@@ -787,4 +823,6 @@ def wrap(node: ir.Node) -> Expr:
         return ArrayExpr(node)
     if is_FuncExpr(node):
         return FuncExpr(node)
+    #print("NODE", node)
+    #print("T", node.T)
     raise NotImplementedError(f"Cannot cast node {node} with T={node.T} to Expr")

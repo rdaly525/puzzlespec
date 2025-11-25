@@ -1,5 +1,6 @@
 from .. import ir, ast
 import typing as tp
+from .. import utils
 
 def OptT(T: ir.Type) -> ir.Type:
     return ir.SumT(ir.UnitT(), T)
@@ -14,9 +15,10 @@ def Optional(dom: ast.DomainExpr):
     return tp.cast(ast.SumExpr, ast.wrap(node))
 
 def _check_optT(T: ir.Type):
-    if not isinstance(T, ir.SumT):
+    T = utils._get_T(T)
+    if not utils._is_kind(T, ir.SumT):
         raise ValueError(f"Expected SumT, got {type(T)}")
-    if not isinstance(T[0], ir.UnitT) or len(T) != 2:
+    if not utils._is_kind(T[0], ir.UnitT) or len(T) != 2:
         raise ValueError(f"Expected SumT of Unit and T, got {T}")
     return T[1]
 
@@ -26,6 +28,9 @@ def fold(val: ast.SumExpr, on_none: ast.Expr, on_some: tp.Callable[[ast.Expr], a
 def count_some(func: ast.FuncExpr) -> ast.IntExpr:
     if not isinstance(func, ast.FuncExpr):
         raise ValueError(f"Expected FuncExpr, got {type(func)}")
-    _check_optT(func.T.retT)
+    piT = utils._get_T(func.T)
+    if not utils._is_kind(piT, ir.PiT):
+        raise ValueError(f"Expected PiT, got {type(piT)}")
+    _check_optT(utils._get_T(piT.lam).retT)
     some_dom = func.domain.restrict(lambda i: func(i).match(lambda _: False, lambda _: True))
     return some_dom.size

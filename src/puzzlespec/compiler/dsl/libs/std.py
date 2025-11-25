@@ -7,21 +7,25 @@ def Enum(*labels: str, name: str=None) -> tp.Tuple[ast.EnumDomainExpr, ast._Enum
     return expr, expr.members
 
 def Fin(n:ast.IntOrExpr)-> ast.SeqDomainExpr:
-    return ast.SeqDomainExpr.make(n)
+    n = ast.IntExpr.make(n)
+    return n.fin()
 
 def Range(lo: ast.IntOrExpr, hi: ast.IntOrExpr) -> ast.SeqDomainExpr:
-    return Fin(hi-lo).map(lambda i: i+lo).image
+    lo = ast.IntExpr.make(lo)
+    hi = ast.IntExpr.make(hi)
+    #return Fin(hi-lo).map(lambda i: i+lo).image
+    return Fin(hi-lo)
 
 def sum(func: ast.FuncExpr) -> ast.IntExpr:
     if not (isinstance(func, ast.FuncExpr) and isinstance(func.elemT, ir.IntT)):
         raise ValueError(f"Expected FuncExpr[IntExpr], got {func}")
-    node = ir.SumReduce(func.node)
+    node = ir.SumReduce(ir.BoolT(), func.node)
     return ast.IntExpr(node)
 
 def distinct(func: ast.FuncExpr) -> ast.BoolExpr:
     if not isinstance(func, ast.FuncExpr):
         raise ValueError(f"Expected FuncExpr, got {func}")
-    node = ir.AllDistinct(func.node)
+    node = ir.AllDistinct(ir.BoolT(), func.node)
     return ast.BoolExpr(node)
 
 def all_same(func) -> ast.BoolExpr:
