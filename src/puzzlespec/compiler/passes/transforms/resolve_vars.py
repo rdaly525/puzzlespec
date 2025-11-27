@@ -25,6 +25,7 @@ class ResolveBoundVars(Transform):
         for bv, i in self.bctx.items():
             print("  BV", str(id(bv))[-5:], i)
         print()
+
     @handles(ir._BoundVarPlaceholder)
     def _(self, bv: ir._BoundVarPlaceholder):
         new_T, = self.visit_children(bv)
@@ -69,6 +70,7 @@ class ResolveFreeVars(Transform):
     requires = ()
     produces = (VarMap,)
     name = "resolve_free_vars"
+    #_debug=True
     
     def run(self, root: ir.Node, ctx: Context):
         self.sid_to_T = {}

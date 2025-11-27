@@ -171,7 +171,7 @@ class PrettyPrinterPass(Analysis):
 
     @handles(ir.BoundVar)
     def _(self, node: ir.BoundVar) -> str:
-        return self.b_names[-(node.idx+1)]
+        return f"{self.b_names[-(node.idx+1)]}_#{node.idx}"
 
     @handles(ir.Unit)
     def _(self, node: ir.Unit) -> str:
@@ -459,6 +459,11 @@ class PrettyPrinterPass(Analysis):
     def _(self, node: ir.Image) -> str:
         _, func_expr = self.visit_children(node)  # Skip type at index 0
         return f"{func_expr}[𝕏]"
+
+    @handles(ir.Domain)
+    def _(self, node: ir.Domain) -> str:
+        _, func_expr = self.visit_children(node)  # Skip type at index 0
+        return f"Dom[{func_expr}]"
 
     @handles(ir.Apply)
     def _(self, node: ir.Apply) -> str:

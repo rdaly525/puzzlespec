@@ -182,6 +182,7 @@ class KindCheckingPass(Analysis):
             raise TypeError(f"Eq must have BoolT type, got {T}")
         # Verify operands have same type
         if not _is_same_kind(aT, bT):
+            print(_get_T(aT), _get_T(bT))
             raise TypeError(f"Eq has operands of inconsistent types: {aT} != {bT}")
         return T
 
@@ -316,7 +317,7 @@ class KindCheckingPass(Analysis):
     @handles(ir.Universe)
     def _(self, node: ir.Universe):
         # Visit children (just the type)
-        T = self.visit_children(node)
+        T, = self.visit_children(node)
         # Verify type is DomT
         if not _is_kind(T, ir.DomT):
             raise TypeError(f"Universe must have DomT type, got {node.T}")
@@ -345,7 +346,7 @@ class KindCheckingPass(Analysis):
     @handles(ir.EnumLit)
     def _(self, node: ir.EnumLit):
         # Visit children (just the type)
-        T = self.visit_children(node)
+        T, = self.visit_children(node)
         # Verify type is EnumT
         if not _is_kind(T, ir.EnumT):
             raise TypeError(f"EnumLit must have EnumT type, got {node.T}")
@@ -453,7 +454,7 @@ class KindCheckingPass(Analysis):
 
     @handles(ir.DisjUnion)
     def _(self, node: ir.DisjUnion):
-        T, domTs = self.visit_children(node)
+        T, *domTs = self.visit_children(node)
         # Verify type is DomT
         if not _is_kind(T, ir.DomT):
             raise TypeError(f"DisjUnion must have DomT type, got {node.T}")
@@ -621,6 +622,16 @@ class KindCheckingPass(Analysis):
         if not node.T.eq(funcT.retT):
             raise TypeError(f"Image result type {node.T} does not match function result type {funcT.retT}")
         return node.T
+
+    @handles(ir.Domain)
+    def _(self, node: ir.Domain):
+        T, piT = self.visit_children(node)
+        # Verify type is DomT
+        if not _is_kind(T, ir.DomT):
+            raise TypeError(f"Domain must have DomT type, got {T}")
+        if not _is_kind(piT, ir.PiT):
+            raise TypeError(f"Domain expects PiT argument, got {piT}")
+        return T
 
     @handles(ir.Apply)
     def _(self, node: ir.Apply):
@@ -847,7 +858,7 @@ class KindCheckingPass(Analysis):
         if not _is_kind(piT, ir.PiT):
             raise TypeError(f"SumReduce expects PiT argument, got {piT}")
         piT_lamT = _get_T(_get_T(piT).lam)
-        if not _is_same_kind(piT_lamT.retT, ir.IntT):
+        if not _is_kind(piT_lamT.retT, ir.IntT):
             raise TypeError(f"SumReduce expects PiT with Int result type, got {piT_lamT.retT}")
         return T
 

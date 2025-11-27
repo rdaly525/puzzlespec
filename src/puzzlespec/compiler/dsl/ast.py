@@ -3,7 +3,7 @@ import typing as tp
 from . import ir
 from dataclasses import dataclass
 from enum import Enum as _Enum
-from .utils import _get_T, _is_kind, _is_same_kind
+from .utils import _get_T, _is_kind, _is_same_kind, _simplify_T
 class ExprMakeError(Exception):
     def __init__(self, message: str):
         self.message = message
@@ -48,6 +48,14 @@ class Expr:
 
     def __repr__(self):
         return f"<{type(self).__name__} {self.node}>"
+
+    # "Hack" to construct variables within a map
+    def _set_map_dom(self, dom: DomainExpr):
+        if dom is not None:
+            assert isinstance(self.node, ir._BoundVarPlaceholder)
+            assert isinstance(dom, DomainExpr)
+            self._map_dom = dom
+        
 
 class UnitExpr(Expr):
     def __post_init__(self):
@@ -270,7 +278,8 @@ class TupleExpr(Expr):
 
     @property
     def T(self) -> ir.TupleT:
-        assert isinstance(self._T, ir.TupleT)
+        if not isinstance(self._T, ir.TupleT):
+            raise ValueError()
         return tp.cast(ir.TupleT, self._T)
    
     @classmethod
@@ -348,15 +357,22 @@ class LambdaExpr(Expr):
     def __repr__(self):
         return f"{self.argT} -> {self.resT}"
 
-def make_lambda(fn: tp.Callable, sort: ir.Type) -> LambdaExpr:
+def make_lambda(fn: tp.Callable, sort: ir.Type, map_dom: DomainExpr=None) -> LambdaExpr:
+    #if map_dom is not None:
+    #    assert _is_kind(map_dom.T, ir.DomT)
+    #    map_dom = map_dom.node
+    #    is_map = True
+    #else:
+    #    map_dom = ir.Universe(ir.DomT.make(sort, False, False))
+    #    is_map = False
+    #bv_node = ir._BoundVarPlaceholder(sort, _map_dom=map_dom, _is_map=is_map)
     bv_node = ir._BoundVarPlaceholder(sort)
     bv_expr = wrap(bv_node)
+    bv_expr._set_map_dom(map_dom)
     ret_expr = fn(bv_expr)
     ret_expr = Expr.make(ret_expr)
     lamT = ir._LambdaTPlaceholder(bv_node, ret_expr.T)
     lambda_node = ir._LambdaPlaceholder(lamT, bv_expr.node, ret_expr.node)
-    #print('LAM ', str(id(lambda_node))[-5:], f" with LMT {id(lamT)}")
-    #print(' BV ', str(id(bv_node))[-5:])
     return LambdaExpr(lambda_node)
 
 class DomainExpr(Expr):
@@ -390,7 +406,10 @@ class DomainExpr(Expr):
                 arg
             )
             return appT
-        return _carT(self.T)
+        carT = _carT(self.T)
+        #return carT
+        simple_carT = _simplify_T(carT)
+        return simple_carT
 
     def restrict(self, pred_fun: tp.Callable) -> DomainExpr:
         lambda_expr = make_lambda(pred_fun, sort=self.carT)
@@ -401,11 +420,10 @@ class DomainExpr(Expr):
         return DomainExpr(node)
 
     def map(self, fn: tp.Callable) -> FuncExpr:
-        lambda_expr = make_lambda(fn, sort=self.carT)
+        lambda_expr = make_lambda(fn, sort=self.carT, map_dom=self)
+        #lambda_expr = make_lambda(fn, sort=self.carT)
         lamT = lambda_expr.T
         T = ir.PiT(self.node, lamT)
-        #print("LMT", str(id(lamT))[-5:], str(T))
-        #print(" BV", str(id(bv_node))[-5:])
         node = ir.Map(T, self.node, lambda_expr.node)
         return wrap(node)
 
@@ -474,8 +492,11 @@ class DomainExpr(Expr):
         return tuple(self.dom_proj(ax).size for ax in self.T.axes)
 
     def __contains__(self, elem: Expr) -> BoolExpr:
+        raise ValueError("Cannot use 'in'. Use dom.contains(val). Blame python for not being able to do this")
+
+    def contains(self, elem: Expr):
         elem = Expr.make(elem)
-        node = ir.IsMember(self.node, elem.node)
+        node = ir.IsMember(ir.BoolT(), self.node, elem.node)
         return BoolExpr(node)
 
     def __add__(self, other: 'DomainExpr') -> 'DomainExpr':
@@ -530,7 +551,7 @@ class SeqDomainExpr(DomainExpr):
 
     def slice(self, lo: IntExpr, hi: IntExpr):
         lo, hi = IntExpr.make(lo), IntExpr.make(hi)
-        assert self.T.rank==1
+        assert self.raw_T.rank==1
         return wrap(ir.Slice(self.T, self.node, lo.node, hi.node))
 
     def index(self, idx: Expr):
@@ -619,11 +640,32 @@ class FuncExpr(Expr):
 
     @property
     def domT(self) -> ir.DomT:
-        return self.T.dom.T
+        return self.domain.T
+
 
     @property
     def domain(self) -> DomainExpr:
-        return wrap(self.T.dom)
+        if isinstance(self.T, ir.PiT):
+            return wrap(self.T.dom)
+        def _domainT(T: ir.Type):
+            if isinstance(T, ir.PiT):
+                return T.dom.T
+            assert isinstance(T, ir.ApplyT)
+            piT, arg = T.piT, T.arg
+            dom, lam = piT._children
+            bv, retT = lam._children
+            domT = ir.ApplyT(
+                ir.PiT(
+                    dom,
+                    ir._LambdaTPlaceholder(bv, _domainT(retT))
+                ),
+                arg
+            )
+            return domT
+        domT = _domainT(self.T)
+        domT_simple = _simplify_T(domT)
+        domain = ir.Domain(domT_simple, self.node)
+        return wrap(domain)
 
     #@property
     #def image(self) -> DomainExpr:
@@ -632,12 +674,13 @@ class FuncExpr(Expr):
     #    return wrap(node)
 
     def elemT(self, arg: ir.Node) -> ir.Type:
-        return ir.ApplyT(self.T, arg)
+        return _simplify_T(ir.ApplyT(self.T, arg))
 
     def carT(self) -> ir.Type:
         return self.domain.carT
 
     def apply(self, arg: Expr) -> Expr:
+        arg = Expr.make(arg)
         node = ir.Apply(self.elemT(arg.node), self.node, arg.node)
         return wrap(node)
 
@@ -707,7 +750,7 @@ class ArrayExpr(FuncExpr):
 
     def windows(self, size: IntOrExpr, stride: IntOrExpr=1) -> ArrayExpr:
         wins = self.domain.windows(size, stride) # Func[Fin(n) -> SeqDom(A)]
-        wins.map(lambda win: win.map(lambda i: self(i)))
+        return wins.map(lambda win: win.map(lambda i: self(i)))
 
     def __iter__(self) -> None:
         raise ValueError("ArrayExpr is not iterable at python runtime")
@@ -735,59 +778,52 @@ class NDArrayExpr(FuncExpr):
             lambda tile_dom: tile_dom.map(lambda indices: self.apply(indices))
         )
 
-def to_T(T: ir.Type):
-    def _T(T: ir.Type):
-        if isinstance(T, ir.ApplyT):
-            return _T(T.piT.lam.retT)
-        return T
-    return _T(T)
-
 def is_UnitExpr(node: ir.Node) -> bool:
-    return isinstance(node, ir.Value) and isinstance(to_T(node.T), ir.UnitT)
+    return isinstance(node, ir.Value) and _is_kind(node.T, ir.UnitT)
 
 def is_BoolExpr(node: ir.Node) -> bool:
-    return isinstance(node, ir.Value) and isinstance(to_T(node.T), ir.BoolT)
+    return isinstance(node, ir.Value) and _is_kind(node.T, ir.BoolT)
 
 def is_IntExpr(node: ir.Node) -> bool:
-    return isinstance(node, ir.Value) and isinstance(to_T(node.T), ir.IntT)
+    return isinstance(node, ir.Value) and _is_kind(node.T, ir.IntT)
 
 def is_EnumExpr(node: ir.Node) -> bool:
-    return isinstance(node, ir.Value) and isinstance(to_T(node.T), ir.EnumT)
+    return isinstance(node, ir.Value) and _is_kind(node.T, ir.EnumT)
 
 def is_TupleExpr(node: ir.Node) -> bool:
-    return isinstance(node, ir.Value) and isinstance(to_T(node.T), ir.TupleT)
+    return isinstance(node, ir.Value) and _is_kind(node.T, ir.TupleT)
 
 def is_SumExpr(node: ir.Node) -> bool:
-    return isinstance(node, ir.Value) and isinstance(to_T(node.T), ir.SumT)
+    return isinstance(node, ir.Value) and _is_kind(node.T, ir.SumT)
 
 def is_LambdaExpr(node: ir.Node) -> bool:
-    return isinstance(node, ir.Value) and isinstance(to_T(node.T), ir._LambdaTPlaceholder)
+    return isinstance(node, ir.Value) and _is_kind(node.T, ir._LambdaTPlaceholder)
 
 def is_DomainExpr(node: ir.Node) -> bool:
-    return isinstance(node, ir.Value) and isinstance(to_T(node.T), ir.DomT)
+    return isinstance(node, ir.Value) and _is_kind(node.T, ir.DomT)
 
 def is_EnumDomainExpr(node: ir.Node) -> bool:
-    return is_DomainExpr(node) and isinstance(to_T(node.T).carT, ir.EnumT)
+    return is_DomainExpr(node) and _is_kind(_get_T(node.T).carT, ir.EnumT)
 
 def is_SeqDomainExpr(node: ir.Node) -> bool:
-    T = to_T(node.T)
+    T = _get_T(node.T)
     return is_DomainExpr(node) and T.ord and T.fin and T.rank==1
 
 def is_2DSeqDomainExpr(node: ir.Node) -> bool:
-    return is_NDSeqDomainExpr(node) and to_T(node.T).rank==2
+    return is_NDSeqDomainExpr(node) and _get_T(node.T).rank==2
 
 def is_NDSeqDomainExpr(node: ir.Node) -> bool:
-    T = to_T(node.T)
+    T = _get_T(node.T)
     return is_DomainExpr(node) and T.ord and T.fin and T.rank > 1
 
 def is_FuncExpr(node: ir.Node) -> bool:
-    return isinstance(node, ir.Value) and isinstance(to_T(node.T), ir.PiT)
+    return isinstance(node, ir.Value) and _is_kind(node.T, ir.PiT)
 
 def is_ArrayExpr(node: ir.Node) -> bool:
-    return is_FuncExpr(node) and is_SeqDomainExpr(to_T(node.T).dom)
+    return is_FuncExpr(node) and is_SeqDomainExpr(_get_T(node.T).dom)
 
 def is_NDArrayExpr(node: ir.Node) -> bool:
-    return is_FuncExpr(node) and is_NDSeqDomainExpr(to_T(node.T).dom)
+    return is_FuncExpr(node) and is_NDSeqDomainExpr(_get_T(node.T).dom)
 
 def wrap(node: ir.Node) -> Expr:
     # Base theory types
@@ -823,6 +859,4 @@ def wrap(node: ir.Node) -> Expr:
         return ArrayExpr(node)
     if is_FuncExpr(node):
         return FuncExpr(node)
-    #print("NODE", node)
-    #print("T", node.T)
     raise NotImplementedError(f"Cannot cast node {node} with T={node.T} to Expr")

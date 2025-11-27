@@ -16,6 +16,10 @@ class DomainSimplificationPass(Transform):
     produces: tp.Tuple[type, ...] = ()
     name = "dom_simplification"
 
+    def run(self, root: ir.Node, ctx: Context):
+        new_root = self.visit(root)
+        return new_root
+
     @handles(ir.DomProj)
     def _(self, node: ir.DomProj):
         T, dom = self.visit_children(node)
@@ -52,3 +56,11 @@ class DomainSimplificationPass(Transform):
             cartdoms = dom._children[1:]
             return ir.Prod(ir.IntT(), *(ir.Card(ir.IntT(), cd) for cd in cartdoms))
         return node.replace(T, dom)
+
+    @handles(ir.Domain)
+    def _(self, node: ir.Domain):
+        #TODO throw in the type map 
+        T, func = self.visit_children(node)
+        if isinstance(func, ir.Value) and isinstance(func.T, ir.PiT):
+            return func.T.dom
+        return node.replace(T, func)

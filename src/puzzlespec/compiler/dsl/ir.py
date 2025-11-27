@@ -573,6 +573,12 @@ class Map(Value):
     def __init__(self, T: Type, dom: Value, fun: Value):
         super().__init__(T, dom, fun)
 
+# Func -> Domain
+class Domain(Value):
+    _numc=2
+    def __init__(self, T: Type, func: Value):
+        super().__init__(T, func)
+
 class Image(Value):
     _numc = 2
     def __init__(self, T: Type, func: Value):
@@ -681,8 +687,11 @@ class AllSame(Value):
 
 # gets tranformed to a de-bruijn BoundVar
 class _BoundVarPlaceholder(Value):
+    #_fields = ('_map_dom', '_is_map')
     _numc = 1
-    def __init__(self, T: Type):
+    def __init__(self, T: Type):#, _map_dom: Value, _is_map: bool=False):
+        #self._map_dom = _map_dom
+        #self._is_map = _is_map
         super().__init__(T)
 
     def __str__(self):
@@ -754,13 +763,11 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     Inj: 9,
     Match: 9,
     Restrict: 9,
-    #Quotient: 9,
     Map: 10,
     Image: 10,
+    Domain: 10,
     Apply: 10,
     ListLit: 10,
-    #Windows: 10,
-    #Tiles: 10,
     Index: 10,
     Slice: 10,
     Lambda: 12,

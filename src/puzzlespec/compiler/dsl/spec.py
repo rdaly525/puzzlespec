@@ -109,7 +109,13 @@ class PuzzleSpec:
         #    spec.pretty()
         #    spec.transform(op, ctx=ctx)
 
-        return self.transform(opt_passes, ctx=ctx)
+        opt = self.transform(opt_passes, ctx=ctx)
+        #print("NOBETA")
+        opt.pretty()
+        #opt = opt.transform(BetaReductionPass(), ctx=ctx)
+        #print("BETA")
+        #opt.pretty()
+        assert 0
     
     def pretty(self, dag=False) -> str:
         if dag:

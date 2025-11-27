@@ -24,20 +24,20 @@ class AstPrinterPass(Analysis):
     The result is stored in the context as a `PrintedAST` object and the IR is
     returned unchanged.
     """
-    requires = (EnvsObj,)
+    requires = () #(EnvsObj,)
     produces = (PrintedAST,)
     name = "ast_printer"
     enable_memoization=False
 
     def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
-        self.tenv = ctx.get(EnvsObj).tenv
+        #self.tenv = ctx.get(EnvsObj).tenv
         self.bctx = []
         self.depth = 0
         rendered = self.visit(root)
-        #print("AST")
-        #print("*"*80)
-        #print(rendered)
-        #print("*"*80)
+        print("AST")
+        print("*"*80)
+        print(rendered)
+        print("*"*80)
         return PrintedAST(rendered)
 
     def visit(self, node: ir.Node):
@@ -48,7 +48,7 @@ class AstPrinterPass(Analysis):
             fstr = f"[{fstr}]"
         indent = "|  "*self.depth
         node_prefix = indent + f"{node.__class__.__name__}{fstr}: {str(id(node))[-5:]}"
-        if node.num_children > 1:
+        if node.num_children > 0:
             s = node_prefix + "(\n" + "\n".join(cs for cs in children_strs) + f"\n{indent})"
         else:
             s = node_prefix + "()"

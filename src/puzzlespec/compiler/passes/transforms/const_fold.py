@@ -67,6 +67,20 @@ class ConstFoldPass(Transform):
             return ir.Lit(T, self._variadic_ops[type(node)](*vals))
         return node.replace(T, *new_children)
     
+
+    @handles(ir.Apply)
+    def _(self, node: ir.Apply):
+        T, func, arg = self.visit_children(node)
+        # Index into a ListLit
+        if isinstance(func, ir.ListLit):
+            T, vals = func._children
+            match (arg):
+                case ir.Lit(val=idx):
+                    assert isinstance(idx, int) and 0 <= idx < len(vals)
+                    return vals[idx]
+        return node.replace(*self.visit_children(node))
+
+
     # Higher order ops
     #@handles(ir.SumReduce)
     #def _(self, node: ir.SumReduce) -> ir.Node:

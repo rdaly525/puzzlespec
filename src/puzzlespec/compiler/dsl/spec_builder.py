@@ -21,101 +21,132 @@ class PuzzleSpecBuilder:
         self._var_name_cnt += 1
         return f"_X{self._var_name_cnt}"
 
+    def func_var(self, 
+        role: str, 
+        dom: tp.Optional[ast.DomainExpr],
+        sort: ir.Type=None,
+        codom: tp.Optional[ast.DomainExpr]=None,
+        name: tp.Optional[str]=None, 
+    ):
+        #if sort is not None:
+        #    assert codom is None
+        #if codom is not None:
+        #    assert sort is None
+        #    sort = codom.carT
+        #new_bv = ir._BoundVarPlaceholder(dom.carT)
+        #T = ir.PiT(
+        #    dom.node,
+        #    ir._LambdaTPlaceholder(
+        #        new_bv,
+        #        sort
+        #    )
+        #)
+        #var = self.var(role, T, None, name, None)
+        #self += var.forall(lambda v: codom.contains(v))
+        #return var
+        return dom.map(lambda i: self.var(
+            role=role,
+            sort=sort,
+            dom=codom,
+            name=name,
+            dep=(i,)
+        ))
+
     def var(self, 
         role: str, 
-        sort: ir.Type,
-        dom: tp.Optional[ast.DomainExpr]=None, 
+        sort: ir.Type=None,
+        dom: tp.Optional[ast.DomainExpr]=None,
         name: tp.Optional[str]=None, 
+        dep: tp.Optional[tp.Tuple[ast.Expr, ...]]=None
     ) -> ast.Expr:
         public = True
         if name is None:
             name = self._new_var_name()
             public = False
+        err_prefix=f"ERROR In var {name}: "
+        if sort is not None and not isinstance(sort, ir.Type):
+            raise ValueError(f"{err_prefix}sort must be a Type_, got {type(sort)}")
+        if role not in "GDP":
+            raise ValueError(f"{err_prefix}role must be G, P, or D, got {role}")
+        if sum((sort is None, dom is None)) != 1:
+            raise ValueError(f"{err_prefix}Either codom or sort must be provided")
+        if dep is None:
+            bv_exprs = ()
+        elif not isinstance(dep, tp.Tuple):
+            bv_exprs = (dep,)
+        else:
+            bv_exprs = dep
+        bvs = [e.node for e in bv_exprs]
+        if not all(isinstance(bv, ir._BoundVarPlaceholder) for bv in bvs):
+            raise ValueError(f"{err_prefix}dep must be bound variables, got {dep}")
+        if not all(hasattr(e, '_map_dom') for e in bv_exprs):
+            raise ValueError(f"{err_prefix}dep must be 'mapped' bound variables, got {dep}")
+        if sort is None:
+            sort = dom.carT
+
+        ## Do dependency analysis
+        #dep_sid_sets= tuple(set(v.sid for v in self.analyze([VarGetter()], d.node, Context(self._envs_obj)).get(VarSet).vars) for d in dep)
+        #sids_in_context = set()
+        #for i, dep_set in enumerate(dep_sid_sets):
+        #    for sid in dep_set:
+        #        for dep_sid in self._depends[sid]:
+        #            if dep_sid not in sids_in_context:
+        #                msg =f"{err_prefix}Variable Dependency Error!\n . bound_var in Dom:{dep[i]} is dependent on {self.sym.get_name(dep_sid)} which is not in context."
+        #                raise ValueError(msg)
+        #    sids_in_context |= dep_set
+        
+        public = True
+        if name is None:
+            name = self._new_var_name()
+            public = False
         sid = self.sym.new_var(name, role, public)
-        var = ir._VarPlaceholder(sort, sid)
-        return ast.wrap(var)
 
- 
-    # Core idea: Only allow vars with deps constructed via tabulate. In a tabulate, I can throw the domain/domT inside the bound var placeholder.
-    # This now gives me the tabulated domains asociated with the bound var and therefore I can eagerly construct the nested Func var
-    #def var(self, 
-    #    role: str='D', 
-    #    sort: tp.Optional[irT.Type_]=None, 
-    #    dom: tp.Optional[ast.DomainExpr]=None, 
-    #    name: tp.Optional[str]=None, 
-    #    dep: tp.Optional[tp.Tuple[ast.Expr, ...]]=None
-    #) -> ast.Expr:
-    #    err_prefix=f"ERROR In var {name}: "
-    #    if dom is not None and not isinstance(dom, ast.DomainExpr):
-    #        raise ValueError(f"{err_prefix}dom must be a DomainExpr, got {type(dom)}")
-    #    if sort is not None and not isinstance(sort, irT.Type_):
-    #        raise ValueError(f"{err_prefix}sort must be a Type_, got {type(sort)}")
-    #    if role not in "GDP":
-    #        raise ValueError(f"{err_prefix}role must be G, P, or D, got {role}")
-    #    if sort is None and dom is None:
-    #        raise ValueError(f"{err_prefix}Either dom or sort must be provided")
-    #    if dom is not None and sort is not None and dom.carT:
-    #        raise ValueError(f"{err_prefix}dom.carT must be equal to sort, got {dom.carT} and {sort}")
-    #    if dom is None:
-    #        dom_expr = ast.wrap(ir.Universe(sort))
-    #    else:
-    #        dom_expr = dom
-    #    if not isinstance(dep, tp.Tuple):
-    #        dep = (dep,)
-    #    if not all(isinstance(d.node, ir._BoundVarPlaceholder) for d in dep):
-    #        raise ValueError(f"{err_prefix}dep must be bound variables, got {dep}")
-    #    if not all(d.node.is_tabulate for d in dep):
-    #        raise ValueError(f"{err_prefix}dep must be tabulated bound variables, got {dep}")
-    #    dep_doms = []
-    #    for bv in dep:
-    #        wit = bv.penv[bv.node].get_wit(pf.DomsWit)
-    #        assert len(wit.doms) ==1
-    #        dep_dom = wit.doms[0]
-    #        dep_doms.append(ast.wrap(dep_dom, bv.penv))
-
-    #    #dep_dom_nodes = tuple(d.node.dom for d in dep)
-    #  
-    #    ## Do dependency analysis
-    #    #dep_sid_sets= tuple(set(v.sid for v in self.analyze([VarGetter()], d.node, Context(self._envs_obj)).get(VarSet).vars) for d in dep)
-    #    #sids_in_context = set()
-    #    #for i, dep_set in enumerate(dep_sid_sets):
-    #    #    for sid in dep_set:
-    #    #        for dep_sid in self._depends[sid]:
-    #    #            if dep_sid not in sids_in_context:
-    #    #                msg =f"{err_prefix}Variable Dependency Error!\n . bound_var in Dom:{dep[i]} is dependent on {self.sym.get_name(dep_sid)} which is not in context."
-    #    #                raise ValueError(msg)
-    #    #    sids_in_context |= dep_set
-    #    
-    #    public = True
-    #    if name is None:
-    #        name = self._new_var_name()
-    #        public = False
-    #    
-    #    new_sid = self.sym.new_var(name, role, public)
-
-    #    #self._depends[new_sid] = sids_in_context
-    #    doms = (*dep_doms, dom_expr)
-    #    doms_nodes = tuple(dom.node for dom in doms)
-    #    # update domain env
-    #    self.domenv.add(new_sid, doms_nodes)
-    #   
-    #    #Calculate expr of var
-    #    var_node = ir.VarRef(new_sid)
-    #    penv = ast._mix_envs(*doms)
-    #    def _T(doms):
-    #        if len(doms)==1:
-    #            return doms[0].T.carT
-    #        else:
-    #            return irT.FuncT(domT=doms[0].T, resT=_T(doms[1:]))
-    #    varT = _T(doms)
-    #    penv[var_node] = pf.ProofState(
-    #        pf.DomsWit(doms=doms_nodes, subject=var_node),
-    #        pf.TypeWit(T=varT, subject=var_node)
-    #    )
-    #    var = ast.wrap(var_node, penv)
-    #    for d in dep:
-    #        var = var.apply(d)
-    #    return var
+        #T = ir.PiT(
+        #    grid.cells().node,
+        #    ir._LambdaTPlaceholder(
+        #        ir._BoundVarPlaceholder(ir.TupleT(ir.IntT(), ir.IntT())), 
+        #        opt.Optional(digits).carT
+        #    )
+        #)
+        def make_sort(bves: tp.Tuple[ast.Expr]):
+            #if len(bves)>1:
+            #    # TODO Almust surely need to modify bv.T to account for dependent bvs
+            #    raise NotImplementedError()
+            if len(bves)==0:
+                return sort
+            bv_node = bves[0].node
+            bv_dom: ast.DomainExpr = bves[0]._map_dom
+            old_T = bves[0].T
+            # check if old_T has bvs
+            def _has_bv(n: ir.Node):
+                if isinstance(n, ir._BoundVarPlaceholder):
+                    return True
+                return any(_has_bv(c) for c in n._children)
+            if _has_bv(old_T):
+                raise NotImplementedError("TODO need to handle depenedent types")
+            new_bv = ir._BoundVarPlaceholder(old_T)
+            T = ir.PiT(
+                bv_dom.node,
+                ir._LambdaTPlaceholder(
+                    new_bv,
+                    make_sort(bves[1:])
+                )
+            )
+            return T
+        full_sort = make_sort(bv_exprs)
+        var = ir._VarPlaceholder(full_sort, sid)
+        var = ast.wrap(var)
+        # add codom constraint
+        if dom is not None:
+            def _con(n: int, val):
+                if n==0:
+                    return dom.contains(val)
+                else:
+                    return val.forall(lambda v: _con(n-1, v))
+            self += _con(len(bvs), var)
+        for e in bv_exprs:
+            var = var(e)
+        return var
 
     def param(self, sort: ir.Type=None, name: str=None) -> ast.Expr:
         return self.var(role='P', sort=sort, name=name)
@@ -163,16 +194,15 @@ class PuzzleSpecBuilder:
         #self.print()
         # 1: Resolve Placeholders (for bound bars/lambdas)
         ctx = Context(EnvsObj(None, None))
-        pm = PassManager(AstPrinterPass(), KindCheckingPass(), ResolveBoundVars(), verbose=True)
+        #pm = PassManager(AstPrinterPass(), KindCheckingPass(), ResolveBoundVars(), verbose=True)
+        pm = PassManager(KindCheckingPass(), ResolveBoundVars(), verbose=True)
         rules_node = ir.TupleLit(ir.TupleT(*(ir.BoolT() for _ in self._rules)), *self._rules)
         new_rules_node = pm.run(rules_node, ctx=ctx)
         # Populate tenv
         ctx = Context(EnvsObj(None, None))
+        #pm = PassManager(KindCheckingPass(), AstPrinterPass(), ResolveFreeVars(), AstPrinterPass(), verbose=True)
         pm = PassManager(KindCheckingPass(), ResolveFreeVars(), verbose=True)
         new_rules_node = pm.run(new_rules_node, ctx=ctx)
-        #ctx = Context(EnvsObj(None, None))
-        #pm = PassManager(KindCheckingPass(), CSE(), verbose=True)
-        #new_rules_node = pm.run(new_rules_node, ctx=ctx)
         sid_to_T = ctx.get(VarMap).sid_to_T
         assert len(sid_to_T) != 0
         tenv = TypeEnv()
@@ -184,10 +214,12 @@ class PuzzleSpecBuilder:
             tenv=tenv,
             rules=new_rules_node
         )
+        spec.pretty()
+        print("PREOPT")
         # 3: Optimize/canonicalize
         spec_opt = spec.optimize()
+        print("POSTOPT")
         spec_opt.pretty()
-        assert 0
         return spec_opt
 
     def print(self, rules_node=None):
