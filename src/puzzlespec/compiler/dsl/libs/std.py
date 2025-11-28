@@ -16,8 +16,8 @@ def Fin(n:ast.IntOrExpr)-> ast.SeqDomainExpr:
 def Range(lo: ast.IntOrExpr, hi: ast.IntOrExpr) -> ast.SeqDomainExpr:
     lo = ast.IntExpr.make(lo)
     hi = ast.IntExpr.make(hi)
-    #return Fin(hi-lo).map(lambda i: i+lo).image
-    return Fin(hi-lo)
+    T = ir.DomT.make(ir.IntT(), fin=True, ord=True)
+    return ast.wrap(ir.Range(T, lo.node, hi.node))
 
 def sum(func: ast.FuncExpr) -> ast.IntExpr:
     if not (isinstance(func, ast.FuncExpr) and isinstance(func.elemT, ir.IntT)):

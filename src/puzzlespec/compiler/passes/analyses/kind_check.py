@@ -26,6 +26,9 @@ class KindCheckingPass(Analysis):
     ## Core-level IR Type nodes 
     ##############################
 
+    def visit(self, node: ir.Node):
+        raise NotImplementedError(node)
+
     @handles(ir.UnitT)
     def _(self, node: ir.UnitT):
         # UnitT has no children, nothing to check
@@ -341,6 +344,25 @@ class KindCheckingPass(Analysis):
             raise TypeError(f"Fin domain must be ordered, got {T.ords}")
         return T
 
+    @handles(ir.Range)
+    def _(self, node: ir.Range):
+        T, loT, hiT = self.visit_children(node)
+        # Verify type is DomT
+        if not _is_kind(T, ir.DomT):
+            raise TypeError(f"Range must have DomT type, got {node.T}")
+        # Verify N argument is Int
+        if not _is_kind(loT, ir.IntT) or not _is_kind(hiT, ir.IntT):
+            raise TypeError(f"Range expects Int arguments, got {loT} and {hiT}")
+        if not _is_kind(T.carT, ir.IntT):
+            raise TypeError(f"Range domain carrier type must be Int, got {T.carT}")
+        if T.rank != 1 or T.axes[0] != 0:
+            raise TypeError(f"Fin domain must be rank 1, got {T.axes}")        
+        if not T.fin:
+            raise TypeError(f"Fin domain must be finite, got {T.fins}")
+        if not T.ord:
+            raise TypeError(f"Fin domain must be ordered, got {T.ords}")
+        return T
+
     @handles(ir.EnumLit)
     def _(self, node: ir.EnumLit):
         # Visit children (just the type)
@@ -366,6 +388,18 @@ class KindCheckingPass(Analysis):
             raise TypeError(f"Card expects domain argument, got {domainT}")
         if not domainT.fin:
             raise TypeError(f"Card expects finite domain, got {domainT}")
+        return T
+
+    @handles(ir.ElemAt)
+    def _(self, node: ir.ElemAt):
+        T, domainT, idxT = self.visit_children(node)
+        # Verify domain argument is a domain
+        if not _is_kind(domainT, ir.DomT):
+            raise TypeError(f"ElemAt expects domain argument, got {domainT}")
+        if not _is_kind(idxT, ir.IntT):
+            raise TypeError(f"ElemAt expects Int index, got {idxT}")
+        if not _is_same_kind(T, domainT.carT):
+            raise TypeError(f"ElemAt result type {T} does not match domain carrier type {domainT.carT}")
         return T
 
     @handles(ir.IsMember)
@@ -576,7 +610,7 @@ class KindCheckingPass(Analysis):
             raise TypeError(f"Map expects LambdaT function, got {funT}")
         if not _is_same_kind(funT.argT, domT.carT):
             raise TypeError(f"Map function argument type {funT.argT} does not match domain carrier type {domT.carT}")
-        if not _is_same_kind(T.lam.resT, funT.resT):
+        if not _is_same_kind(T.lamT.resT, funT.resT):
             raise TypeError(f"Map result type {T.lam.resT} does not match function result type {funT.resT}")
         return T
 
@@ -614,8 +648,8 @@ class KindCheckingPass(Analysis):
         if not _is_same_kind(argT, piT.dom.T.carT):
             raise TypeError(f"Apply argument type {argT} does not match function domain carrier type {piT.dom.T.carT}")
         # Verify result type matches function result type
-        if not _is_same_kind(T, piT.lam.resT):
-            raise TypeError(f"Apply result type {T} does not match function result type {piT.lam.resT}")
+        if not _is_same_kind(T, piT.lamT.resT):
+            raise TypeError(f"Apply result type {T} does not match function result type {piT.lamT.resT}")
         return T
 
     @handles(ir.ListLit)
@@ -680,8 +714,8 @@ class KindCheckingPass(Analysis):
             raise TypeError(f"Slice result type {T.carT} does not match domain carrier type {domT.carT}")
         return node.T
 
-    @handles(ir.Index)
-    def _(self, node: ir.Index):
+    @handles(ir.RestrictEq)
+    def _(self, node: ir.RestrictEq):
         T, domT, idxT = self.visit_children(node)
         # Verify domain argument is a domain
         if not _is_kind(domT, ir.DomT):
@@ -783,6 +817,17 @@ class KindCheckingPass(Analysis):
             raise TypeError(f"Mul operand b must be Int, got {bT}")
         return T
 
+    @handles(ir.Abs)
+    def _(self, node: ir.Abs):
+        T, aT = self.visit_children(node)
+        # Verify type is IntT
+        if not _is_kind(T, ir.IntT):
+            raise TypeError(f"Abs must have IntT type, got {T}")
+        # Verify operand is Int
+        if not _is_kind(aT, ir.IntT):
+            raise TypeError(f"Abs operand must be Int, got {aT}")
+        return T
+
     @handles(ir.Gt)
     def _(self, node: ir.Gt):
         T, aT, bT = self.visit_children(node)
@@ -818,8 +863,8 @@ class KindCheckingPass(Analysis):
         # Verify function argument is a PiT
         if not _is_kind(piT, ir.PiT):
             raise TypeError(f"SumReduce expects PiT argument, got {piT}")
-        if not _is_kind(piT.lam.resT, ir.IntT):
-            raise TypeError(f"SumReduce expects PiT with Int result type, got {piT.lam.resT}")
+        if not _is_kind(piT.lamT.resT, ir.IntT):
+            raise TypeError(f"SumReduce expects PiT with Int result type, got {piT.lamT.resT}")
         return T
 
     @handles(ir.ProdReduce)
@@ -831,8 +876,8 @@ class KindCheckingPass(Analysis):
         # Verify function argument is a Value with PiT   type
         if not _is_kind(piT, ir.PiT):
             raise TypeError(f"ProdReduce expects PiT argument, got {piT}")
-        if not _is_same_kind(piT.lam.resT, ir.IntT):
-            raise TypeError(f"ProdReduce expects PiT with Int result type, got {piT.lam.resT}")
+        if not _is_same_kind(piT.lamT.resT, ir.IntT):
+            raise TypeError(f"ProdReduce expects PiT with Int result type, got {piT.lamT.resT}")
         return T
 
     @handles(ir.AllDistinct)

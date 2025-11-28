@@ -51,7 +51,8 @@ class AlgebraicSimplificationPass(Transform):
         const_val = sum([c.val for c in const_children])
         if const_val != 0:
             children = non_const_children + [ir.Lit(T, val=const_val)]
-        
+        else:
+            children = non_const_children
         # Remove all (..., x, -x, ...)
         neg_children, non_neg_children = partition(children, lambda c: isinstance(c, ir.Neg))
         children = non_neg_children

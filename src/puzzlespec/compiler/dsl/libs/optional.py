@@ -6,14 +6,16 @@ def OptT(T: ast.TExpr) -> ast.TExpr:
     sumT = ir.SumT(ir.UnitT(), T.node)
     return ast.SumType(sumT)
 
-def Optional(dom: ast.DomainExpr):
+def Optional(dom: ast.DomainExpr) -> ast.DomainExpr:
     if not isinstance(dom, ast.DomainExpr):
         raise ValueError(f"Expected DomainExpr, got {type(dom)}")
     # domT = Universe(Unit) | dom
     T = ir.DomT.make(carT=OptT(dom.T.carT).node, fin=dom.T.fin, ord=dom.T.ord)
     unitDom = ir.Universe(ir.DomT.make(carT=ir.UnitT(), fin=True, ord=True))
     node = ir.DisjUnion(T, unitDom, dom.node)
-    return tp.cast(ast.SumExpr, ast.wrap(node))
+    expr = ast.wrap(node)
+    assert isinstance(expr, ast.DomainExpr)
+    return expr
 
 def _check_optT(T: ir.Type):
     if not utils._is_kind(T, ir.SumT):

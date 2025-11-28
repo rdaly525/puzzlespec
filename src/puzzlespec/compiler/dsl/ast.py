@@ -146,7 +146,7 @@ class PiType(TExpr):
 
     @property
     def lamT(self) -> LambdaType:
-        return wrapT(self.node.lam)
+        return wrapT(self.node.lamT)
 
 
 def wrapT(T: ir.Type):
@@ -219,7 +219,15 @@ class Expr:
             assert isinstance(self.node, ir._BoundVarPlaceholder)
             assert isinstance(dom, DomainExpr)
             self._map_dom = dom
+
+    def __eq__(self, other):
+        other = Expr.make(other)
+        if not _is_same_kind(self.T, other.T):
+            raise ValueError(f"Cannot compare {self.T} and {other.T}")
+        return wrap(ir.Eq(ir.BoolT(), self.node, other.node))
         
+    def __ne__(self, other):
+        return ~(self == other)
 
 class UnitExpr(Expr):
     def __post_init__(self):
@@ -281,16 +289,6 @@ class BoolExpr(Expr):
         return BoolExpr(node)
 
     __ror__ = __or__
-
-    def __eq__(self, other: BoolExpr) -> BoolExpr:
-        other = BoolExpr.make(other)
-        node = ir.Eq(ir.BoolT(), self.node, other.node)
-        return BoolExpr(node)
-    
-    def __ne__(self, other: BoolExpr) -> BoolExpr:
-        other = BoolExpr.make(other)
-        node = ir.Not(ir.Eq(ir.BoolT(), self.node, other.node))
-        return BoolExpr(node)
 
     def ite(self, t: Expr, f: Expr) -> Expr:
         t, f = Expr.make(t), Expr.make(f)
@@ -356,7 +354,8 @@ class IntExpr(Expr):
         return IntExpr(node)
 
     def __abs__(self) -> IntExpr:
-        return (self >= 0).ite(self, -self)
+        node = ir.Abs(ir.IntT(), self.node)
+        return IntExpr(node)
 
     def __mul__(self, other: IntOrExpr) -> IntExpr:
         other = IntExpr.make(other)
@@ -393,15 +392,6 @@ class IntExpr(Expr):
         node = ir.LtEq(ir.BoolT(), self.node, other.node)
         return BoolExpr(node)
 
-    def __eq__(self, other: IntOrExpr) -> BoolExpr:
-        other = IntExpr.make(other)
-        node = ir.Eq(ir.BoolT(), self.node, other.node)
-        return BoolExpr(node)
-
-    def __ne__(self, other: IntOrExpr) -> BoolExpr:
-        other = IntExpr.make(other)
-        return ~ir.Eq(ir.BoolT(), self.node, other.node)\
-
     def __bool__(self) -> bool:
         raise TypeError("IntExpr cannot be used as a python boolean")
 
@@ -427,15 +417,6 @@ class EnumExpr(Expr):
         if isinstance(val, EnumExpr):
             return val
         raise NotImplementedError(f"cannot cast {val} to EnumExpr")
-
-    def __eq__(self, other: Expr) -> BoolExpr:
-        other = EnumExpr.make(other)
-        node = ir.Eq(ir.BoolT(), self.node, other.node)
-        return BoolExpr(node)
-
-    def __ne__(self, other: Expr) -> BoolExpr:
-        other = EnumExpr.make(other)
-        return ~ir.Eq(ir.BoolT(), self.node, other.node)
 
 IntOrExpr = tp.Union[int, IntExpr, Expr]
 BoolOrExpr = tp.Union[bool, BoolExpr, Expr]
@@ -534,7 +515,6 @@ class LambdaExpr(Expr):
 
 def make_lambda(fn: tp.Callable, sort: TExpr, map_dom: DomainExpr=None) -> LambdaExpr:
     bv_node = ir._BoundVarPlaceholder(sort.node)
-    print("Lambda BV", str(id(bv_node))[-5:], bv_node.T)
     bv_expr = wrap(bv_node)
     # 'Hack' to get fancy var constructors working
     bv_expr._set_map_dom(map_dom)
@@ -630,6 +610,15 @@ class DomainExpr(Expr):
         T = ir.DomT.make(carT=facT.node, fin=self.T.fins[idx], ord=self.T.ords[idx])
         node = ir.DomProj(T, self.node, idx)
         return wrap(node)
+    
+    def restrictEq(self, val: Expr):
+        val = Expr.make(val)
+        if type(val.T) != type(self.T.carT):
+            raise ValueError(f"{val} is wrong type for {self.T}")
+        assert self.T.rank==1
+        #factors = tuple(self.T.factorT(i).node for i in range(self.T.num_factors))
+        T = ir.DomT(val.T.node, fins=(True,), ords=(True,), axes=())
+        return wrap(ir.RestrictEq(T, self.node, val.node))
 
     @property
     def size(self) -> IntExpr:
@@ -706,22 +695,19 @@ class SeqDomainExpr(DomainExpr):
         assert self.T.rank==1
         return wrap(ir.Slice(self.T.node, self.node, lo.node, hi.node))
 
-    def index(self, idx: Expr):
-        idx = Expr.make(idx)
-        if type(idx.T) != type(self.T.carT):
-            raise ValueError(f"Cannot index into a {self.T} with {idx}")
-        assert self.T.rank==1
-        factors = tuple(self.T.factorT(i).node for i in range(self.T.num_factors))
-        T = ir.DomT(*factors, fins=self.T.fins, ords=self.T.ords, axes=())
-        return wrap(ir.Index(T, self.node, idx.node))
+    def elemAt(self, idx: IntOrExpr):
+        idx = IntExpr.make(idx)
+        node = ir.ElemAt(self.T.carT.node, self.node, idx.node)
+        return wrap(node)
 
     def windows(self, size: IntOrExpr, stride: IntOrExpr=1) -> ArrayExpr:
         size = IntExpr.make(size)
         stride = IntExpr.make(stride)
         dom: DomainExpr = ((self.size-(size-stride))//stride).fin()
-        return dom.map(
+        wins = dom.map(
             lambda i: self[i*stride:i*stride+size] 
         )
+        return wins
     
     def __getitem__(self, idx: tp.Any):
         if isinstance(idx, slice):
@@ -734,7 +720,7 @@ class SeqDomainExpr(DomainExpr):
                 stop = self.size
             return self.slice(start, stop)
         else:
-            return self.index(idx)
+            return self.elemAt(idx)
             
  
 class NDSeqDomainExpr(DomainExpr):
@@ -777,7 +763,14 @@ class NDSeqDomainExpr(DomainExpr):
         rank = self.T.rank
         if not isinstance(val, tuple) and len(val) != rank:
             raise ValueError(f"Getitem must have length {rank}")
-        doms = [dom[v] for dom, v in zip(self.doms, val)]
+        doms = []
+        for dom, v in zip(self.doms, val):
+            if isinstance(v, slice):
+                new_dom = dom[v]
+            else:
+                v = IntExpr.make(v)
+                new_dom = dom.restrictEq(dom.elemAt(v))
+            doms.append(new_dom)
         return DomainExpr.cartprod(*doms)
 
 
@@ -799,11 +792,11 @@ class FuncExpr(Expr):
         domain = ir.Domain(domT.node, self.node)
         return DomainExpr(domain)
 
-    #@property
-    #def image(self) -> DomainExpr:
-    #    T = ir.DomT.make(carT=self.elemT, fin=True, ord=True)
-    #    node = ir.Image(T, self.node)
-    #    return wrap(node)
+    @property
+    def image(self) -> DomainExpr:
+        T = ir.DomT.make(carT=self.elemT, fin=True, ord=True)
+        node = ir.Image(T, self.node)
+        return wrap(node)
 
     def apply(self, arg: Expr) -> Expr:
         arg = Expr.make(arg)
@@ -878,6 +871,15 @@ class ArrayExpr(FuncExpr):
         wins = self.domain.windows(size, stride) # Func[Fin(n) -> SeqDom(A)]
         return wins.map(lambda win: win.map(lambda i: self(i)))
 
+    def __getitem__(self, k: tp.Any):
+        if isinstance(k, (int, IntExpr)):
+            k = Expr.make(k)
+            v = self.apply(self.domain.elemAt(k))
+            return v
+        elif isinstance(k, DomainExpr):
+            return super().__getitem__(k)
+        raise NotImplementedError(f"Cannot handle {type(k)} in __getitem__")
+
     def __iter__(self) -> None:
         raise ValueError("ArrayExpr is not iterable at python runtime")
 
@@ -903,6 +905,11 @@ class NDArrayExpr(FuncExpr):
         return self.domain.tiles(size, stride).map(
             lambda tile_dom: tile_dom.map(lambda indices: self.apply(indices))
         )
+
+    def __getitem__(self, v: tp.Any):
+        if isinstance(v, DomainExpr):
+            return super().__getitem__(v)
+        raise NotImplementedError(f"Cannot handle {type(v)} in __getitem__")
 
 def is_UnitExpr(node: ir.Node) -> bool:
     return isinstance(node, ir.Value) and _is_kind(node.T, ir.UnitT)

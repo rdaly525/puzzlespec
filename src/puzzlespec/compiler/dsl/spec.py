@@ -111,11 +111,11 @@ class PuzzleSpec:
 
         opt = self.transform(opt_passes, ctx=ctx)
         #print("NOBETA")
-        opt.pretty()
+        #opt.pretty()
         #opt = opt.transform(BetaReductionPass(), ctx=ctx)
         #print("BETA")
         #opt.pretty()
-        assert 0
+        return opt
     
     def pretty(self, dag=False) -> str:
         if dag:

@@ -319,7 +319,7 @@ class EvalPass(Analysis):
         return list(children)
 
     @handles()
-    def _(self, node: ir.Index) -> tp.Any:
+    def _(self, node: ir.RestrictEq) -> tp.Any:
         """Analyze windows nodes."""
         lst, size, stride = self.visit_children(node)
         return [lst[i:i+size] for i in range(0, len(lst), stride)]

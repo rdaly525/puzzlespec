@@ -47,7 +47,7 @@ class DomainSimplificationPass(Transform):
         if isinstance(dom, ir.Fin):
             _, N = dom._children
             return N
-        if isinstance(dom, ir.Index):
+        if isinstance(dom, ir.RestrictEq):
             return ir.Lit(ir.IntT(), val=1)
         if isinstance(dom, ir.Slice):
             _, dom, lo, hi = dom._children
@@ -64,3 +64,20 @@ class DomainSimplificationPass(Transform):
         if isinstance(func, ir.Value) and isinstance(func.T, ir.PiT):
             return func.T.dom
         return node.replace(T, func)
+
+    @handles(ir.ElemAt)
+    def _(self, node: ir.ElemAt):
+        T, dom, idx = self.visit_children(node)
+        if isinstance(dom, ir.Fin):
+            return idx
+        if isinstance(dom, ir.Range):
+            _, lo, hi = dom._children
+            return ir.Add(ir.IntT(), lo, idx)
+        if isinstance(dom, ir.Slice):
+            _, dom, lo, hi = dom._children
+            return ir.ElemAt(
+                T,
+                dom,
+                ir.Add(ir.IntT(), lo, idx)
+            )
+        return node.replace(T, dom, idx)

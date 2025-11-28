@@ -35,10 +35,11 @@ class PrettyPrinterPass(Analysis):
     
     The result is stored in the context as a `PrettyPrintedExpr` object.
     """
-
+    enable_memoization=False
     requires = (EnvsObj,)
     produces = (PrettyPrintedExpr,)
     name = "pretty_printer"
+    #_debug=True
 
     def visit(self, node):
         raise NotImplementedError(f"{node.__class__.__name__} not implemented in PrettyPrinterPass")
@@ -49,12 +50,11 @@ class PrettyPrinterPass(Analysis):
         envs = ctx.get(EnvsObj)
         self.tenv: TypeEnv = envs.tenv
         self.sym: SymTable = envs.sym
+        self.cnt=0
         self.p_to_T = {}
         self.g_to_T = {}
         self.d_to_T = {}
         self.b_names = []
-        self.b_num_col = 0
-        self.b_num_elem = 0
 
         constraint_text = self.visit(root)
         s = "Params:\n"        
@@ -114,25 +114,40 @@ class PrettyPrinterPass(Analysis):
         else:
             car_str = "⨯".join(factor_strs)
         return f"Dom[{car_str}]"
+    
+    def _new_elem_name(self, t: bool=False) -> str:
+        
+        # count existing element binders in the env
+        if t:
+            p = 't'
+        else:
+            p = 'x'
+        name = f"{p}{self.cnt}"
+        self.cnt+=1
+        return name
+        #k = sum(1 for n in self.b_names if n.startswith(p))
+        #name = f"{p}{k}"
+        #assert name not in self.b_names
+        #return name
 
+    def _new_col_name(self, t: bool=False) -> str:
+        return self._new_elem_name()
+        k = sum(1 for n in self.b_names if n.startswith("X"))
+        return f"X{k}"
+    
     @handles(ir.LambdaT)
     def _(self, node: ir.LambdaT) -> str:
         argT, resT = node._children
         is_col = isinstance(argT, (ir.PiT, ir.DomT))
         if is_col:
-            bv_name = f"X{self.b_num_col}"
-            self.b_num_col += 1
+            bv_name = self._new_col_name(True)
         else:
-            bv_name = f"x{self.b_num_elem}"
-            self.b_num_elem += 1
+            bv_name = self._new_elem_name(True)
         self.b_names.append(bv_name)
         resT_str = self.visit(resT)
         # pop the stack
-        self.b_names.pop()
-        if is_col:
-            self.b_num_col -= 1
-        else:
-            self.b_num_elem -= 1
+        name = self.b_names.pop()
+        assert name == bv_name
         return bv_name, resT_str
 
     @handles(ir._LambdaTPlaceholder)
@@ -146,11 +161,6 @@ class PrettyPrinterPass(Analysis):
         dom_str, (bv_name, resT_str) = self.visit_children(node)
         return f"Pi[{dom_str} -> {bv_name}: {resT_str}]"
     
-    #@handles(ir.ApplyT)
-    #def _(self, node: ir.ApplyT):
-    #    piT_str, arg_str = self.visit_children(node)
-    #    return f"{piT_str}({arg_str})"
-
     ##############################
     ## Core-level IR Value nodes (Used throughout entire compiler flow)
     ##############################
@@ -182,19 +192,14 @@ class PrettyPrinterPass(Analysis):
         paramT = node.T.argT
         is_col = isinstance(paramT, (ir.PiT, ir.DomT))
         if is_col:
-            bv_name = f"X{self.b_num_col}"
-            self.b_num_col += 1
+            bv_name = self._new_col_name()
         else:
-            bv_name = f"x{self.b_num_elem}"
-            self.b_num_elem += 1
+            bv_name = self._new_elem_name()
         self.b_names.append(bv_name)
         _, body_txt = self.visit_children(node)  # Skip type at index 0
         # pop the stack
-        self.b_names.pop()
-        if is_col:
-            self.b_num_col -= 1
-        else:
-            self.b_num_elem -= 1
+        name = self.b_names.pop()
+        assert name == bv_name
         return bv_name, body_txt
 
     @handles(ir.Lit)
@@ -354,6 +359,11 @@ class PrettyPrinterPass(Analysis):
         _, n_expr = self.visit_children(node)  # Skip type at index 0
         return f"Fin({n_expr})"
 
+    @handles(ir.Range)
+    def _(self, node: ir.Range) -> str:
+        _, lo_expr, hi_expr = self.visit_children(node)  # Skip type at index 0
+        return f"{{{lo_expr}:{hi_expr}}}"
+
     @handles(ir.EnumLit)
     def _(self, node: ir.EnumLit) -> str:
         return f"{node.T.name}.{node.label}"
@@ -367,6 +377,11 @@ class PrettyPrinterPass(Analysis):
     def _(self, node: ir.IsMember) -> str:
         _, domain_expr, val_expr = self.visit_children(node)  # Skip type at index 0
         return f"({val_expr} ∈ {domain_expr})"
+
+    @handles(ir.ElemAt)
+    def _(self, node: ir.ElemAt) -> str:
+        _, domain_expr, idx_expr = self.visit_children(node)  # Skip type at index 0
+        return f"{domain_expr}[{idx_expr}]"
 
     ## Cartesian Products
     @handles(ir.CartProd)
@@ -451,9 +466,17 @@ class PrettyPrinterPass(Analysis):
     ## Funcs (i.e., containers)
     @handles(ir.Map)
     def _(self, node: ir.Map) -> str:
-        piT_str, dom_expr, (var_name, body_str) = self.visit_children(node)  # Skip type at index 0
+        # TODO MAke this look more like forall
+        piT, dom, lam = node._children
+        dom_expr = self.visit(dom)
+        (var_name, body_str) = self.visit(lam)
+
+        #piT_str, dom_expr, (var_name, body_str) = self.visit_children(node)  # Skip type at index 0
         # Lambda returns (var_name, body_str) tuple
-        return f"[{body_str} | {var_name} ∈ {dom_expr}]"
+        body_formatted = self._indent_expr(body_str)
+        return f"Map {var_name} ∈ {dom_expr}: [\n{body_formatted}\n]"
+
+        #return f"[{body_str} | {var_name} ∈ {dom_expr}]"
 
     @handles(ir.Image)
     def _(self, node: ir.Image) -> str:
@@ -468,6 +491,9 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.Apply)
     def _(self, node: ir.Apply) -> str:
         _, func_expr, arg_expr = self.visit_children(node)  # Skip type at index 0
+        #func_expr = self._indent_expr(func_expr)
+        #arg_expr = self._indent_expr(arg_expr)
+        #return f"App(\n{func_expr},\n{arg_expr}\n)"
         return f"{func_expr}({arg_expr})"
 
     @handles(ir.ListLit)
@@ -488,8 +514,8 @@ class PrettyPrinterPass(Analysis):
         _, dom_expr, lo_expr, hi_expr = self.visit_children(node)  # Skip type at index 0
         return f"{dom_expr}[{lo_expr}:{hi_expr}]"
 
-    @handles(ir.Index)
-    def _(self, node: ir.Index) -> str:
+    @handles(ir.RestrictEq)
+    def _(self, node: ir.RestrictEq) -> str:
         _, dom_expr, idx_expr = self.visit_children(node)  # Skip type at index 0
         return f"{{{idx_expr}}}"
 
@@ -527,6 +553,11 @@ class PrettyPrinterPass(Analysis):
         _, left, right = self.visit_children(node)  # Skip type at index 0
         return f"({left} * {right})"
 
+    @handles(ir.Abs)
+    def _(self, node: ir.Abs) -> str:
+        _, child = self.visit_children(node)  # Skip type at index 0
+        return f"|{child}|"
+
     @handles(ir.Gt)
     def _(self, node: ir.Gt) -> str:
         _, left, right = self.visit_children(node)  # Skip type at index 0
@@ -540,7 +571,7 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.SumReduce)
     def _(self, node: ir.SumReduce) -> str:
         _, vals_expr = self.visit_children(node)  # Skip type at index 0
-        return f"Σ{vals_expr}"
+        return f"Σ({vals_expr})"
 
     @handles(ir.ProdReduce)
     def _(self, node: ir.ProdReduce) -> str:

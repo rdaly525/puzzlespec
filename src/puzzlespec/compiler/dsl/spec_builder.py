@@ -10,12 +10,14 @@ from ..passes.pass_base import Context, PassManager
 from ..passes.transforms.cse import CSE
 from ..passes.envobj import EnvsObj
 from .spec import PuzzleSpec
+from .utils import _substitute, _has_bv
 
 class PuzzleSpecBuilder:
     def __init__(self):
         self.sym = SymTable()
         self._name_cnt = 0
         self._rules = []
+        self.dom_cons = []
 
     def _new_var_name(self):
         self._var_name_cnt += 1
@@ -59,7 +61,6 @@ class PuzzleSpecBuilder:
         name: tp.Optional[str]=None, 
         indices: tp.Optional[tp.Tuple[ast.Expr, ...]]=None
     ) -> ast.Expr:
-        print(f"VAR {name}(")
         public = True
         if name is None:
             name = self._new_var_name()
@@ -86,42 +87,47 @@ class PuzzleSpecBuilder:
             sort = dom.T.carT
 
         ## Do dependency analysis
-        #dep_sid_sets= tuple(set(v.sid for v in self.analyze([VarGetter()], d.node, Context(self._envs_obj)).get(VarSet).vars) for d in dep)
-        #sids_in_context = set()
-        #for i, dep_set in enumerate(dep_sid_sets):
-        #    for sid in dep_set:
-        #        for dep_sid in self._depends[sid]:
-        #            if dep_sid not in sids_in_context:
-        #                msg =f"{err_prefix}Variable Dependency Error!\n . bound_var in Dom:{dep[i]} is dependent on {self.sym.get_name(dep_sid)} which is not in context."
-        #                raise ValueError(msg)
-        #    sids_in_context |= dep_set
-        
+        # indices = (i,j,k)
+        # dom(i) and i must not depend on (i,j,k)
+        # dom(j) and j must not depend on (j,k)
+        # ...
+        for i, cur_bv in enumerate(bv_exprs):
+            for j, bv in enumerate(bv_exprs[i:]):
+                if _has_bv(bv.node, cur_bv.T.node):
+                    raise ValueError(f"indices[{i}].T depends on indices[{i+j}]")
+                if _has_bv(bv.node, cur_bv._map_dom.node):
+                    raise ValueError(f"Dom[indices[{i}]] depends on indices[{i+j}]")
+       
         public = True
         if name is None:
             name = self._new_var_name()
             public = False
         sid = self.sym.new_var(name, role, public)
-
+        def _any_bv(n: ir.Node):
+            if isinstance(n, ir._BoundVarPlaceholder):
+                return True
+            return any(_any_bv(c) for c in n._children)
+        if dom is not None and _any_bv(dom.node):
+            raise NotImplementedError("cannot handle dependent doms")
+        
+        # This is very brittle code
+        # High level: for indices=(i,j) dom(j) might depend on i. so I need to substitute the new boundvar of i into dom(j)
+        bv_map = {}
         def make_sort(bves: tp.Tuple[ast.Expr]) -> ir.Type:
-            #if len(bves)>1:
-            #    # TODO Almust surely need to modify bv.T to account for dependent bvs
-            #    raise NotImplementedError()
             if len(bves)==0:
                 return sort.node
-            bv_node = bves[0].node
-            bv_dom: ast.DomainExpr = bves[0]._map_dom
-            old_T = bves[0]._T
-            # check if old_T has bvs
-            def _has_bv(n: ir.Node):
-                if isinstance(n, ir._BoundVarPlaceholder):
-                    return True
-                return any(_has_bv(c) for c in n._children)
-            if _has_bv(old_T.node):
-                raise NotImplementedError("TODO need to handle depenedent types")
-            new_bv = ir._BoundVarPlaceholder(old_T.node)
-            print("NEW BV", str(id(new_bv))[-5:], new_bv.T)
+            old_bv = bves[0].node
+            bv_T = bves[0]._T.node
+            bv_dom: ast.DomainExpr = bves[0]._map_dom.node
+            for o, n in bv_map.items():
+                bv_dom = _substitute(bv_dom, o, n)
+                bv_T = _substitute(bv_T, o, n)
+            new_bv = ir._BoundVarPlaceholder(bv_T)
+            for o, n in bv_map.items():
+                bv_dom = _substitute(bv_dom, o, n)
+            bv_map[old_bv] = new_bv
             T = ir.PiT(
-                bv_dom.node,
+                bv_dom,
                 ir._LambdaTPlaceholder(
                     new_bv,
                     make_sort(bves[1:])
@@ -132,16 +138,15 @@ class PuzzleSpecBuilder:
         var = ir._VarPlaceholder(full_sort, sid)
         var = ast.wrap(var)
         # add dom constraint
-        #if dom is not None:
-        #    def _con(n: int, val):
-        #        if n==0:
-        #            return dom.contains(val)
-        #        else:
-        #            return val.forall(lambda v: _con(n-1, v))
-        #    self += _con(len(bvs), var)
+
+        if dom is not None:
+            def _con(val):
+                if isinstance(val.T, ast.PiType):
+                    return val.forall(lambda v: _con(v))
+                return dom.contains(val)
+            self += _con(var)
         for e in bv_exprs:
             var = var(e)
-        print(f"VAR {name})")
         return var
 
     def param(self, sort: ir.Type=None, name: str=None) -> ast.Expr:
@@ -187,10 +192,8 @@ class PuzzleSpecBuilder:
 
     # Freezes the spec and makes it immutable 
     def build(self, name: str) -> PuzzleSpec:
-        #self.print()
         # 1: Resolve Placeholders (for bound bars/lambdas)
         ctx = Context(EnvsObj(None, None))
-        #pm = PassManager(AstPrinterPass(), KindCheckingPass(), ResolveBoundVars(), verbose=True)
         pm = PassManager(KindCheckingPass(), ResolveBoundVars(), verbose=True)
         rules_node = ir.TupleLit(ir.TupleT(*(ir.BoolT() for _ in self._rules)), *self._rules)
         new_rules_node = pm.run(rules_node, ctx=ctx)
@@ -204,18 +207,17 @@ class PuzzleSpecBuilder:
         tenv = TypeEnv()
         for sid, T in sid_to_T.items():
             tenv.add(sid, T)
+           
+
         spec = PuzzleSpec(
             name=name,
             sym=self.sym.copy(),
             tenv=tenv,
             rules=new_rules_node
         )
-        spec.pretty()
-        print("PREOPT")
+        #spec_obls = spec.extract_obligations()
         # 3: Optimize/canonicalize
         spec_opt = spec.optimize()
-        print("POSTOPT")
-        spec_opt.pretty()
         return spec_opt
 
     def print(self, rules_node=None):

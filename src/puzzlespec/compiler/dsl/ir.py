@@ -299,22 +299,23 @@ class LambdaT(Type):
 
 class PiT(Type):
     _numc = 2
-    def __init__(self, dom: Value, lam: Type):
-        super().__init__(dom, lam)
+    def __init__(self, dom: Value, lamT: Type):
+        assert isinstance(lamT, (LambdaT, _LambdaTPlaceholder))
+        super().__init__(dom, lamT)
 
     @property
     def dom(self) -> Value:
         return self._children[0]
     
     @property
-    def lam(self) -> LambdaT:
+    def lamT(self) -> LambdaT:
         return self._children[1]
 
     def __repr__(self):
-        return f"Func[{self.dom.T}, {self.lam}]"
+        return f"Func[{self.dom.T}, {self.lamT}]"
 
     def eq(self, other):
-        return isinstance(other, PiT) and self.dom.eq(other.dom) and self.lam.eq(other.lam)
+        return isinstance(other, PiT) and self.dom.eq(other.dom) and self.lamT.eq(other.lamT)
 
 def _is_value(v: Node) -> bool:
     return isinstance(v, (Value, BoundVar, VarRef))
@@ -611,7 +612,13 @@ class Slice(Value):
     def __init__(self, T: Type, dom: Value, lo: Value, hi: Value):
         super().__init__(T, dom, lo, hi)
 
-class Index(Value):
+# Single Element of the domain
+class RestrictEq(Value):
+    _numc = 3
+    def __init__(self, T: Type, dom: Value, v: Value):
+        super().__init__(T, dom, v)
+
+class ElemAt(Value):
     _numc = 3
     def __init__(self, T: Type, dom: Value, idx: Value):
         super().__init__(T, dom, idx)
@@ -651,6 +658,11 @@ class Mul(Value):
     def __init__(self, T: Type, a: Value, b: Value):
         super().__init__(T, a, b)
 
+class Abs(Value):
+    _numc = 2
+    def __init__(self, T: Type, a: Value):
+        super().__init__(T, a)
+
 class Gt(Value):
     _numc = 3
     def __init__(self, T: Type, a: Value, b: Value):
@@ -660,6 +672,12 @@ class GtEq(Value):
     _numc = 3
     def __init__(self, T: Type, a: Value, b: Value):
         super().__init__(T, a, b)
+
+# Represents (lo..hi)
+class Range(Value):
+    _numc = 3
+    def __init__(self, T: Type, lo: Value, hi: Value):
+        super().__init__(T, lo, hi)
 
 # Common Fold Values
 class SumReduce(Value):
@@ -741,6 +759,7 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     Mul: 5,
     Div: 5,
     Mod: 5,
+    Abs: 5,
     Eq: 6,
     Gt: 7,
     GtEq: 7,
@@ -753,6 +772,7 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     Prod: 8,
     Universe: 9,
     Fin: 9,
+    Range: 9,
     EnumLit: 9,
     Card: 9,
     IsMember: 9,
@@ -760,6 +780,7 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     DomProj: 9,
     TupleLit: 9,
     Proj: 9,
+    ElemAt: 9,
     DisjUnion: 9,
     DomInj: 9,
     Inj: 9,
@@ -767,10 +788,9 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     Restrict: 9,
     Map: 10,
     Image: 10,
-    #Domain: 10,
     Apply: 10,
     ListLit: 10,
-    Index: 10,
+    RestrictEq: 10,
     Slice: 10,
     Lambda: 12,
     _LambdaPlaceholder: 12,

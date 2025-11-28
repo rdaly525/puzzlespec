@@ -17,7 +17,7 @@ def build_sudoku_spec(gw=False) -> PuzzleSpec:
     num_clues = p.gen_var(sort=Int, name='num_clues')
     givens = p.func_var(role='G', dom=grid.cells(), codom=opt.Optional(digits), name="givens")
     # clue constraints
-    p += opt.count_some(givens)==num_clues
+    #p += opt.count_some(givens)==num_clues
     
     # Decision variables
     cell_vals = p.func_var(role='D', dom=grid.cells(), codom=digits, name="cell_vals")
@@ -25,24 +25,17 @@ def build_sudoku_spec(gw=False) -> PuzzleSpec:
     ## Puzzle Rules
     
     # Given vals must be consistent with cell_vals
-    p += grid.cells().forall(
-        lambda c: opt.fold(givens(c), on_none=True, on_some=lambda v: cell_vals(c)==v)
-    )
+    #p += grid.cells().forall(
+    #    lambda c: opt.fold(givens(c), on_none=True, on_some=lambda v: cell_vals(c)==v)
+    #)
     
     ## All values in each row, column, and tile are distinct
-    for rct in (
-        cell_vals.rows(),
-        cell_vals.cols(),
-        cell_vals.tiles(size=[3,3], stride=[3,3]),
-    ):
-        p += rct.forall(lambda region: std.distinct(region))
-
-    for rct in (
-        grid.cells().rows(),
-        grid.cells().cols(),
-        grid.cells().tiles(size=[3,3], stride=[3,3]),
-    ):
-        p += rct.forall(lambda region: std.distinct(cell_vals[region]))
+    #for rct in (
+    #    cell_vals.rows(),
+    #    cell_vals.cols(),
+    #    cell_vals.tiles(size=[3,3], stride=[3,3]),
+    #):
+    #    p += rct.forall(lambda region: std.distinct(region))
 
     gw = True
     # german whispers
@@ -53,10 +46,13 @@ def build_sudoku_spec(gw=False) -> PuzzleSpec:
                 lambda j: p.var(role='G', dom=grid.cells(), indices=(i, j), name='whispers_locs')
             )
         )
+        #whisper = std.Fin(8).map(lambda i: p.var(role='G', dom=grid.cells(), name='whisper', indices=(i,)))
+        #p += whisper.windows(2).forall(lambda cells2: cells2[0]==(3,4))
+        #p += whisper.windows(2).forall(lambda cells2: cells2[1]==(3,4))
         # structural constraint: German whisper cells must be neighbors
         p += whispers.forall(
-            lambda whisper: whisper.windows(size=2,stride=1).forall(
-                lambda cells: grid.cell_adjacent(8, cells(0), cells(1))
+            lambda whisper: whisper.windows(2).forall(
+                lambda cells: grid.cell_adjacent(8, cells[0], cells[1])
             )
         )
 

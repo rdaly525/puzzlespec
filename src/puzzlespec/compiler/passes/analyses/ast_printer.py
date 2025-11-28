@@ -39,7 +39,16 @@ class AstPrinterPass(Analysis):
         print(rendered)
         print("*"*80)
         return PrintedAST(rendered)
+    
+    def _new_elem_name(self) -> str:
+        # count existing element binders in the env
+        k = sum(1 for n in self.b_names if n.startswith("x"))
+        return f"x{k}"
 
+    def _new_col_name(self) -> str:
+        k = sum(1 for n in self.b_names if n.startswith("X"))
+        return f"X{k}"
+    
     def visit(self, node: ir.Node):
         self.depth += 1
         children_strs = self.visit_children(node)
