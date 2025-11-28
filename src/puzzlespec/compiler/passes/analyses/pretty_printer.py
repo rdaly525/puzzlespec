@@ -146,10 +146,10 @@ class PrettyPrinterPass(Analysis):
         dom_str, (bv_name, resT_str) = self.visit_children(node)
         return f"Pi[{dom_str} -> {bv_name}: {resT_str}]"
     
-    @handles(ir.ApplyT)
-    def _(self, node: ir.ApplyT):
-        piT_str, arg_str = self.visit_children(node)
-        return f"{piT_str}({arg_str})"
+    #@handles(ir.ApplyT)
+    #def _(self, node: ir.ApplyT):
+    #    piT_str, arg_str = self.visit_children(node)
+    #    return f"{piT_str}({arg_str})"
 
     ##############################
     ## Core-level IR Value nodes (Used throughout entire compiler flow)

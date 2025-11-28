@@ -32,29 +32,31 @@ class Grid2D(Topology):
         return self.edgesV() + self.edgesH()
 
     @property
-    def CellIdxT(self) -> ir.Type:
-        return self.cells().carT
+    def CellIdxT(self) -> ast.TExpr:
+        return self.cells().T.carT
 
     @property
-    def VertexIdxT(self) -> ir.Type:
-        return self.vertices().carT
+    def VertexIdxT(self) -> ast.TExpr:
+        return self.vertices().T.carT
 
     @property
-    def EdgeVIdxT(self) -> ir.Type:
-        return self.edgesV().carT
+    def EdgeVIdxT(self) -> ast.TExpr:
+        return self.edgesV().T.carT
 
     @property
-    def EdgeHIdxT(self) -> ir.Type:
-        return self.edgesH().carT
+    def EdgeHIdxT(self) -> ast.TExpr:
+        return self.edgesH().T.carT
 
     @property
-    def EdgeIdxT(self) -> ir.Type:
-        return self.edges().carT
+    def EdgeIdxT(self) -> ast.TExpr:
+        return self.edges().T.carT
 
     ## relations among cells, vertices, edges
 
     #relation for 2 cells adjacent (4 means orthogonal, 8 means diagonal)
     def cell_adjacent(self, n: ast.IntOrExpr, c1: 'CellIdxT', c2:'CellIdxT') -> ast.BoolExpr:
+        if type(c1.T) != type(self.CellIdxT) or type(c2.T) != type(self.CellIdxT):
+            raise ValueError(f"c1 and c2 must be of type {self.CellIdxT}, got {c1.T} and {c2.T}")
         if n==4:
             delta = (abs(c1[0]-c2[0]), abs(c1[1]-c2[1]))
             return ((delta[0]==0) & (delta[1]==1)) | ((delta[0]==1) & (delta[1]==0))

@@ -94,7 +94,7 @@ class Node:
 ##############################
 
 class Type(Node):
-    ...
+    ...   
 
 ## Base types
 class UnitT(Type):
@@ -269,11 +269,11 @@ class DomT(Type):
 
 class _LambdaTPlaceholder(Type):
     _numc = 2
-    def __init__(self, bound_var: Value, body: Type):
-        super().__init__(bound_var, body)
+    def __init__(self, bound_var: Value, resT: Type):
+        super().__init__(bound_var, resT)
 
     @property
-    def retT(self) -> Type:
+    def resT(self) -> Type:
         return self._children[1]
 
     @property
@@ -281,15 +281,15 @@ class _LambdaTPlaceholder(Type):
         return self._children[0].T
 
     def __repr__(self):
-        return f"(\{self._children[0]}. {self.retT})"
+        return f"(\{self._children[0]}. {self.resT})"
 
 class LambdaT(Type):
     _numc = 2
-    def __init__(self, argT: Type, retT: Type):
-        super().__init__(argT, retT)
+    def __init__(self, argT: Type, resT: Type):
+        super().__init__(argT, resT)
 
     @property
-    def retT(self) -> Type:
+    def resT(self) -> Type:
         return self._children[1]
 
     @property
@@ -319,22 +319,24 @@ class PiT(Type):
 def _is_value(v: Node) -> bool:
     return isinstance(v, (Value, BoundVar, VarRef))
 
-class ApplyT(Type):
-    _numc = 2
-    def __init__(self, piT: PiT, arg: Value):
-        assert _is_value(arg)
-        super().__init__(piT, arg)
-
-    def __repr__(self):
-        return f"AppT({self.piT}, {self.arg})"
-
-    @property
-    def piT(self) -> PiT:
-        return self._children[0]
-
-    @property
-    def arg(self) -> Value:
-        return self._children[1]
+#class ApplyT(Type):
+#    _numc = 2
+#    def __init__(self, piT: PiT, arg: Value):
+#        assert _is_value(arg)
+#        if not isinstance(piT._raw_T, PiT):
+#            raise ValueError(f"ApplyT piT must be a PiT, got {piT._raw_T}")
+#        super().__init__(piT, arg)
+#
+#    def __repr__(self):
+#        return f"AppT({self.piT}, {self.arg})"
+#
+#    @property
+#    def piT(self) -> PiT:
+#        return self._children[0]
+#
+#    @property
+#    def arg(self) -> Value:
+#        return self._children[1]
 
 
 ##############################
@@ -719,7 +721,7 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     TupleT: -2,
     SumT: -2,
     DomT: -2,
-    ApplyT: -2,
+    #ApplyT: -2,
     PiT: -2,
     _LambdaTPlaceholder: -2,
     LambdaT: -2,
@@ -765,7 +767,7 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     Restrict: 9,
     Map: 10,
     Image: 10,
-    Domain: 10,
+    #Domain: 10,
     Apply: 10,
     ListLit: 10,
     Index: 10,

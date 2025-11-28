@@ -49,40 +49,41 @@ class PuzzleSpecBuilder:
             sort=sort,
             dom=codom,
             name=name,
-            dep=(i,)
+            indices=(i,)
         ))
 
     def var(self, 
         role: str, 
-        sort: ir.Type=None,
+        sort: ast.TExpr=None,
         dom: tp.Optional[ast.DomainExpr]=None,
         name: tp.Optional[str]=None, 
-        dep: tp.Optional[tp.Tuple[ast.Expr, ...]]=None
+        indices: tp.Optional[tp.Tuple[ast.Expr, ...]]=None
     ) -> ast.Expr:
+        print(f"VAR {name}(")
         public = True
         if name is None:
             name = self._new_var_name()
             public = False
         err_prefix=f"ERROR In var {name}: "
-        if sort is not None and not isinstance(sort, ir.Type):
-            raise ValueError(f"{err_prefix}sort must be a Type_, got {type(sort)}")
+        if sort is not None and not isinstance(sort, ast.TExpr):
+            raise ValueError(f"{err_prefix}sort must be a TExpr, got {type(sort)}")
         if role not in "GDP":
             raise ValueError(f"{err_prefix}role must be G, P, or D, got {role}")
         if sum((sort is None, dom is None)) != 1:
             raise ValueError(f"{err_prefix}Either codom or sort must be provided")
-        if dep is None:
+        if indices is None:
             bv_exprs = ()
-        elif not isinstance(dep, tp.Tuple):
-            bv_exprs = (dep,)
+        elif not isinstance(indices, tp.Tuple):
+            bv_exprs = (indices,)
         else:
-            bv_exprs = dep
+            bv_exprs = indices
         bvs = [e.node for e in bv_exprs]
         if not all(isinstance(bv, ir._BoundVarPlaceholder) for bv in bvs):
-            raise ValueError(f"{err_prefix}dep must be bound variables, got {dep}")
+            raise ValueError(f"{err_prefix}indices must be bound variables, got {indices}")
         if not all(hasattr(e, '_map_dom') for e in bv_exprs):
-            raise ValueError(f"{err_prefix}dep must be 'mapped' bound variables, got {dep}")
+            raise ValueError(f"{err_prefix}indices must be 'mapped' bound variables, got {indices}")
         if sort is None:
-            sort = dom.carT
+            sort = dom.T.carT
 
         ## Do dependency analysis
         #dep_sid_sets= tuple(set(v.sid for v in self.analyze([VarGetter()], d.node, Context(self._envs_obj)).get(VarSet).vars) for d in dep)
@@ -101,30 +102,24 @@ class PuzzleSpecBuilder:
             public = False
         sid = self.sym.new_var(name, role, public)
 
-        #T = ir.PiT(
-        #    grid.cells().node,
-        #    ir._LambdaTPlaceholder(
-        #        ir._BoundVarPlaceholder(ir.TupleT(ir.IntT(), ir.IntT())), 
-        #        opt.Optional(digits).carT
-        #    )
-        #)
-        def make_sort(bves: tp.Tuple[ast.Expr]):
+        def make_sort(bves: tp.Tuple[ast.Expr]) -> ir.Type:
             #if len(bves)>1:
             #    # TODO Almust surely need to modify bv.T to account for dependent bvs
             #    raise NotImplementedError()
             if len(bves)==0:
-                return sort
+                return sort.node
             bv_node = bves[0].node
             bv_dom: ast.DomainExpr = bves[0]._map_dom
-            old_T = bves[0].T
+            old_T = bves[0]._T
             # check if old_T has bvs
             def _has_bv(n: ir.Node):
                 if isinstance(n, ir._BoundVarPlaceholder):
                     return True
                 return any(_has_bv(c) for c in n._children)
-            if _has_bv(old_T):
+            if _has_bv(old_T.node):
                 raise NotImplementedError("TODO need to handle depenedent types")
-            new_bv = ir._BoundVarPlaceholder(old_T)
+            new_bv = ir._BoundVarPlaceholder(old_T.node)
+            print("NEW BV", str(id(new_bv))[-5:], new_bv.T)
             T = ir.PiT(
                 bv_dom.node,
                 ir._LambdaTPlaceholder(
@@ -136,16 +131,17 @@ class PuzzleSpecBuilder:
         full_sort = make_sort(bv_exprs)
         var = ir._VarPlaceholder(full_sort, sid)
         var = ast.wrap(var)
-        # add codom constraint
-        if dom is not None:
-            def _con(n: int, val):
-                if n==0:
-                    return dom.contains(val)
-                else:
-                    return val.forall(lambda v: _con(n-1, v))
-            self += _con(len(bvs), var)
+        # add dom constraint
+        #if dom is not None:
+        #    def _con(n: int, val):
+        #        if n==0:
+        #            return dom.contains(val)
+        #        else:
+        #            return val.forall(lambda v: _con(n-1, v))
+        #    self += _con(len(bvs), var)
         for e in bv_exprs:
             var = var(e)
+        print(f"VAR {name})")
         return var
 
     def param(self, sort: ir.Type=None, name: str=None) -> ast.Expr:

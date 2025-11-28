@@ -4,7 +4,7 @@ from ..pass_base import Context, AnalysisObject, Analysis, handles
 from ..envobj import EnvsObj, TypeEnv
 from ...dsl import ir
 import typing as tp
-from ...dsl.utils import _is_type, _get_T, _is_kind, _is_same_kind, _is_value
+from ...dsl.utils import _is_type, _is_kind, _is_same_kind, _is_value
 
 class KindCheckResult(AnalysisObject):
     def __init__(self, Tmap: tp.Dict[ir.Node, ir.Type]):
@@ -95,22 +95,22 @@ class KindCheckingPass(Analysis):
         if not _is_kind(lamT, (ir.LambdaT, ir._LambdaTPlaceholder)):
             raise TypeError(f"PiT lambda must be a lambda, got {lamT}")
         # Verify piT domain carrier type matches lambdaT argument type
-        if not _is_same_kind(lamT.argT, _get_T(domT).carT):
+        if not _is_same_kind(lamT.argT, domT.carT):
             raise TypeError(f"LambdaT argument type {lamT.argT} does not match PiT domain carrier type {domT.carT}")
         return node
 
-    @handles(ir.ApplyT)
-    def _(self, node: ir.ApplyT):
-        piT, argT = self.visit_children(node)
-        if not _is_kind(piT, ir.PiT):
-            raise TypeError(f"ApplyT piT must be a pi, got {piT}")
-        if not _is_type(argT):
-            raise TypeError(f"ApplyT argT must be a type, got {argT}")
-        # Verify argument type matches piT domain carrier type
-        piT = _get_T(piT)
-        if not _is_same_kind(argT, _get_T(piT.dom.T).carT):
-            raise TypeError(f"ApplyT argument type {argT} does not match PiT domain carrier type {_get_T(piT.dom.T).carT}")
-        return node
+    #@handles(ir.ApplyT)
+    #def _(self, node: ir.ApplyT):
+    #    piT, argT = self.visit_children(node)
+    #    if not _is_kind(piT, ir.PiT):
+    #        raise TypeError(f"ApplyT piT must be a pi, got {piT}")
+    #    if not _is_type(argT):
+    #        raise TypeError(f"ApplyT argT must be a type, got {argT}")
+    #    # Verify argument type matches piT domain carrier type
+    #    piT = _get_T(piT)
+    #    if not _is_same_kind(argT, _get_T(piT.dom.T).carT):
+    #        raise TypeError(f"ApplyT argument type {argT} does not match PiT domain carrier type {_get_T(piT.dom.T).carT}")
+    #    return node
     
     ##############################
     ## Core-level IR Value nodes (Used throughout entire compiler flow)
@@ -160,8 +160,8 @@ class KindCheckingPass(Analysis):
         # Pop bound context
         self.bctx.pop()
         # Verify body type matches LambdaT result type
-        if not _is_same_kind(bodyT, lamT.retT):
-            raise TypeError(f"Lambda body type {bodyT} does not match LambdaT result type {lamT.retT}")
+        if not _is_same_kind(bodyT, lamT.resT):
+            raise TypeError(f"Lambda body type {bodyT} does not match LambdaT result type {lamT.resT}")
         return lamT
 
     @handles(ir.Lit)
@@ -182,7 +182,6 @@ class KindCheckingPass(Analysis):
             raise TypeError(f"Eq must have BoolT type, got {T}")
         # Verify operands have same type
         if not _is_same_kind(aT, bT):
-            print(_get_T(aT), _get_T(bT))
             raise TypeError(f"Eq has operands of inconsistent types: {aT} != {bT}")
         return T
 
@@ -268,7 +267,7 @@ class KindCheckingPass(Analysis):
 
     @handles(ir.Conj)
     def _(self, node: ir.Conj):
-        T, childTs = self.visit_children(node)
+        T, *childTs = self.visit_children(node)
         # Verify type is BoolT
         if not _is_kind(T, ir.BoolT):
             raise TypeError(f"Conj must have BoolT type, got {node.T}")
@@ -332,15 +331,14 @@ class KindCheckingPass(Analysis):
         # Verify N argument is Int
         if not _is_kind(NT, ir.IntT):
             raise TypeError(f"Fin expects Int argument, got {NT}")
-        domT = _get_T(T)
-        if not _is_kind(domT.carT, ir.IntT):
-            raise TypeError(f"Fin domain carrier type must be Int, got {domT.carT}")
-        if domT.rank != 1 or domT.axes[0] != 0:
-            raise TypeError(f"Fin domain must be rank 1, got {domT.axes}")        
-        if not domT.fin:
-            raise TypeError(f"Fin domain must be finite, got {domT.fins}")
-        if not domT.ord:
-            raise TypeError(f"Fin domain must be ordered, got {domT.ords}")
+        if not _is_kind(T.carT, ir.IntT):
+            raise TypeError(f"Fin domain carrier type must be Int, got {T.carT}")
+        if T.rank != 1 or T.axes[0] != 0:
+            raise TypeError(f"Fin domain must be rank 1, got {T.axes}")        
+        if not T.fin:
+            raise TypeError(f"Fin domain must be finite, got {T.fins}")
+        if not T.ord:
+            raise TypeError(f"Fin domain must be ordered, got {T.ords}")
         return T
 
     @handles(ir.EnumLit)
@@ -351,9 +349,10 @@ class KindCheckingPass(Analysis):
         if not _is_kind(T, ir.EnumT):
             raise TypeError(f"EnumLit must have EnumT type, got {node.T}")
         # Verify label is in the enum
-        enumT = _get_T(T)
-        if node.label not in enumT.labels:
-            raise TypeError(f"EnumLit label '{node.label}' not in enum labels {enumT.labels}")
+        if not _is_kind(T, ir.EnumT):
+            raise TypeError(f"EnumLit must have EnumT type, got {node.T}")
+        if node.label not in T.labels:
+            raise TypeError(f"EnumLit label '{node.label}' not in enum labels {T.labels}")
         return T
 
     @handles(ir.Card)
@@ -365,7 +364,6 @@ class KindCheckingPass(Analysis):
         # Verify domain argument is a domain
         if not _is_kind(domainT, ir.DomT):
             raise TypeError(f"Card expects domain argument, got {domainT}")
-        domainT = _get_T(domainT)
         if not domainT.fin:
             raise TypeError(f"Card expects finite domain, got {domainT}")
         return T
@@ -379,7 +377,6 @@ class KindCheckingPass(Analysis):
         # Verify domain argument is a domain
         if not _is_kind(domainT, ir.DomT):
             raise TypeError(f"IsMember expects domain argument, got {domainT}")
-        domainT = _get_T(domainT)
         # Verify value argument type matches domain carrier type
         if not _is_same_kind(valT, domainT.carT):
             raise TypeError(f"IsMember value type {valT} does not match domain carrier type {domainT.carT}")
@@ -392,12 +389,10 @@ class KindCheckingPass(Analysis):
         if not _is_kind(T, ir.DomT):
             raise TypeError(f"CartProd must have DomT type, got {node.T}")
         # Verify all arguments are domains
-        prod_domT = _get_T(T)
         for i, domT in enumerate(domTs):
             if not _is_kind(domT, ir.DomT):
                 raise TypeError(f"CartProd argument {i} must be a domain, got {domT}")
-        for i, (domT, factorT) in enumerate(zip(domTs, prod_domT.factors)):
-            domT = _get_T(domT)
+        for i, (domT, factorT) in enumerate(zip(domTs, T.factors)):
             if not _is_same_kind(domT.carT, factorT):
                 raise TypeError(f"CartProd argument {i} type {domT} does not match domain factor type {factorT}")
         return T
@@ -411,16 +406,14 @@ class KindCheckingPass(Analysis):
         # Verify domain argument is a domain
         if not _is_kind(domT, ir.DomT):
             raise TypeError(f"DomProj expects domain argument, got {domT}")
-        domproj_domT = _get_T(T)
-        domT = _get_T(domT)
         if node.idx >= len(domT.factors):
             raise TypeError(f"DomProj index {node.idx} out of bounds for tuple of length {len(domT.factors)}")
-        if not _is_same_kind(domproj_domT.carT, domT.factors[node.idx]):
+        if not _is_same_kind(T.carT, domT.factors[node.idx]):
             raise TypeError(f"DomProj result type {node.T} does not match domain factor type {domT.factors[node.idx]}")
-        if domproj_domT.fin != domT.fins[node.idx]:
-            raise TypeError(f"DomProj result domain must be finite, got {domproj_domT.fin}")
-        if domproj_domT.ord != domT.ords[node.idx]:
-            raise TypeError(f"DomProj result domain must be ordered, got {domproj_domT.ord}")
+        if T.fin != domT.fins[node.idx]:
+            raise TypeError(f"DomProj result domain must be finite, got {T.fin}")
+        if T.ord != domT.ords[node.idx]:
+            raise TypeError(f"DomProj result domain must be ordered, got {T.ord}")
         return T
 
     @handles(ir.TupleLit)
@@ -430,10 +423,9 @@ class KindCheckingPass(Analysis):
         if not _is_kind(T, ir.TupleT):
             raise TypeError(f"TupleLit must have TupleT type, got {T}")
         # Verify all value arguments match tuple element types
-        tupleT = _get_T(T)
-        if len(valTs) != len(tupleT.elemTs):
-            raise TypeError(f"TupleLit has {len(valTs)} values ({valTs}) but type has {len(tupleT.elemTs)} elements ({tupleT.elemTs})")
-        for i, (valT, elemT) in enumerate(zip(valTs, tupleT.elemTs)):
+        if len(valTs) != len(T.elemTs):
+            raise TypeError(f"TupleLit has {len(valTs)} values ({valTs}) but type has {len(T.elemTs)} elements ({T.elemTs})")
+        for i, (valT, elemT) in enumerate(zip(valTs, T.elemTs)):
             if not _is_same_kind(valT, elemT):
                 raise TypeError(f"TupleLit value {i} type {valT} does not match tuple element type {elemT}")
         return T
@@ -444,7 +436,6 @@ class KindCheckingPass(Analysis):
         # Verify tuple argument is a Value with TupleT type
         if not _is_kind(tupT, ir.TupleT):
             raise TypeError(f"Proj expects tuple argument, got {tupT}")
-        tupT = _get_T(tupT)
         if node.idx >= len(tupT.elemTs):
             raise TypeError(f"Proj index {node.idx} out of bounds for tuple of length {len(tupT.elemTs)}")
         # Verify result type matches projected element type
@@ -462,9 +453,8 @@ class KindCheckingPass(Analysis):
         for i, domT in enumerate(domTs):
             if not _is_kind(domT, ir.DomT):
                 raise TypeError(f"DisjUnion argument {i} must be a domain, got {domT}")
-        disjunion_T = _get_T(T)
-        if not _is_kind(disjunion_T.carT, ir.SumT):
-            raise TypeError(f"DisjUnion must have sum carrier type, got {disjunion_T.carT}")
+        if not _is_kind(T.carT, ir.SumT):
+            raise TypeError(f"DisjUnion must have sum carrier type, got {T.carT}")
         return T
 
     @handles(ir.DomInj)
@@ -476,15 +466,12 @@ class KindCheckingPass(Analysis):
         # Verify domain argument is a domain
         if not _is_kind(domT, ir.DomT):
             raise TypeError(f"DomInj expects domain argument, got {domT}")
-        dominj_domT = _get_T(T)
-        if not _is_kind(dominj_domT.carT, ir.SumT):
-            raise TypeError(f"DomInj must have sum carrier type, got {dominj_domT.carT}")
-        dominj_carT = _get_T(dominj_domT.carT)
-        if node.idx >= len(dominj_carT.elemTs):
-            raise TypeError(f"DomInj index {node.idx} out of bounds for sum of length {len(dominj_carT.elemTs)}")
-        domT_carT = _get_T(_get_T(domT).carT)
-        if not _is_same_kind(dominj_carT.elemTs[node.idx], domT_carT):
-            raise TypeError(f"DomInj's result carT {dominj_carT.elemTs[node.idx]} does not match domain carT {domT_carT}")
+        if not _is_kind(domT.carT, ir.SumT):
+            raise TypeError(f"DomInj must have sum carrier type, got {domT.carT}")
+        if node.idx >= len(domT.carT.elemTs):
+            raise TypeError(f"DomInj index {node.idx} out of bounds for sum of length {len(domT.carT.elemTs)}")
+        if not _is_same_kind(T.carT.elemTs[node.idx], domT.carT):
+            raise TypeError(f"DomInj's result carT {T.carT.elemTs[node.idx]} does not match domain carT {domT.carT}")
         return T
 
     @handles(ir.Inj)
@@ -492,11 +479,10 @@ class KindCheckingPass(Analysis):
         T, valT = self.visit_children(node)
         if not _is_kind(T, ir.SumT):
             raise TypeError(f"Inj must have SumT type, got {T}")
-        inj_sumT = _get_T(T)
-        if node.idx >= len(inj_sumT.elemTs):
-            raise TypeError(f"Inj index {node.idx} out of bounds for sum of length {len(inj_sumT.elemTs)}")
-        if not _is_same_kind(valT, inj_sumT.elemTs[node.idx]):
-            raise TypeError(f"Inj's value type {valT} does not match sum element type {inj_sumT.elemTs[node.idx]} of sum {inj_sumT}")
+        if node.idx >= len(T.elemTs):
+            raise TypeError(f"Inj index {node.idx} out of bounds for sum of length {len(T.elemTs)}")
+        if not _is_same_kind(valT, T.elemTs[node.idx]):
+            raise TypeError(f"Inj's value type {valT} does not match sum element type {T.elemTs[node.idx]} of sum {T}")
         return T
 
     @handles(ir.Match)
@@ -508,20 +494,16 @@ class KindCheckingPass(Analysis):
         # Verify branches is a Value with TupleT type
         if not _is_kind(branchesT, ir.TupleT):
             raise TypeError(f"Match branches must be TupleT, got {branchesT}")
-        branchesT = _get_T(branchesT)
-        scrutT = _get_T(scrutT)
-        match_T = _get_T(T)
         if len(branchesT.elemTs) != len(scrutT.elemTs):
             raise TypeError(f"Match branches count {len(branchesT.elemTs)} does not match sum type count {len(scrutT.elemTs)}")
         for i, (sum_elem_T, branch_T) in enumerate(zip(scrutT.elemTs, branchesT.elemTs)):
             if not _is_kind(branch_T, (ir.LambdaT, ir._LambdaTPlaceholder)):
                 raise TypeError(f"Match branch {i} must be lambdaT matching sum component {sum_elem_T} to match result type {T}. Got {branch_T}")
             # Verify branch argument type matches sum component
-            branch_T = _get_T(branch_T)
             if not _is_same_kind(branch_T.argT, sum_elem_T):
                 raise TypeError(f"Match branch {i} argument type {branch_T.argT} does not match sum component {sum_elem_T}")
-            if not _is_same_kind(branch_T.retT, match_T):
-                raise TypeError(f"Match branch {i} result type {branch_T.retT} does not match match result type {match_T}")
+            if not _is_same_kind(branch_T.resT, T):
+                raise TypeError(f"Match branch {i} result type {branch_T.resT} does not match match result type {T}")
         return T
 
     @handles(ir.Restrict)
@@ -533,18 +515,15 @@ class KindCheckingPass(Analysis):
         # Verify domain argument is a domain
         if not _is_kind(domainT, ir.DomT):
             raise TypeError(f"Restrict expects domain argument, got {domainT}")
-        domainT = _get_T(domainT)
-        predT = _get_T(predT)
-        restrict_T = _get_T(T)
         # Verify predicate is a LambdaT
         if not _is_kind(predT, (ir.LambdaT, ir._LambdaTPlaceholder)):
             raise TypeError(f"Restrict expects LambdaT predicate, got {predT}")
         if not _is_same_kind(predT.argT, domainT.carT):
             raise TypeError(f"Restrict predicate argument type {predT.argT} does not match domain carrier type {domainT.carT}")
-        if not _is_kind(predT.retT, ir.BoolT):
+        if not _is_kind(predT.resT, ir.BoolT):
             raise TypeError(f"Restrict predicate must return Bool, got {predT.resT}")
-        if not _is_same_kind(restrict_T.carT, domainT.carT):
-            raise TypeError(f"Restrict result carrier type {restrict_T.carT} does not match domain carrier type {domainT.carT}")
+        if not _is_same_kind(T.carT, domainT.carT):
+            raise TypeError(f"Restrict result carrier type {T.carT} does not match domain carrier type {domainT.carT}")
         return T
 
     @handles(ir.Forall)
@@ -559,12 +538,10 @@ class KindCheckingPass(Analysis):
         # Verify function is a LambdaT
         if not _is_kind(funT, (ir.LambdaT, ir._LambdaTPlaceholder)):
             raise TypeError(f"Forall expects LambdaT function, got {funT}")
-        domainT = _get_T(domainT)
-        funT = _get_T(funT)
         if not _is_same_kind(funT.argT, domainT.carT):
             raise TypeError(f"Forall function argument type {funT.argT} does not match domain carrier type {domainT.carT}")
-        if not _is_kind(funT.retT, ir.BoolT):
-            raise TypeError(f"Forall function must return Bool, got {funT.retT}")
+        if not _is_kind(funT.resT, ir.BoolT):
+            raise TypeError(f"Forall function must return Bool, got {funT.resT}")
         return T
 
     @handles(ir.Exists)
@@ -579,12 +556,10 @@ class KindCheckingPass(Analysis):
         # Verify function is a LambdaT
         if not _is_kind(funT, ir.LambdaT):
             raise TypeError(f"Exists expects LambdaT function, got {funT}")
-        funT = _get_T(funT)
-        domainT = _get_T(domainT)
         if not _is_same_kind(funT.argT, domainT.carT):
             raise TypeError(f"Exists function argument type {funT.argT} does not match domain carrier type {domainT.carT}")
-        if not _is_same_kind(funT.retT, ir.BoolT):
-            raise TypeError(f"Exists function must return Bool, got {funT.retT}")
+        if not _is_same_kind(funT.resT, ir.BoolT):
+            raise TypeError(f"Exists function must return Bool, got {funT.resT}")
         return T
 
     @handles(ir.Map)
@@ -599,14 +574,10 @@ class KindCheckingPass(Analysis):
         # Verify function is a LambdaT
         if not _is_kind(funT, (ir.LambdaT, ir._LambdaTPlaceholder)):
             raise TypeError(f"Map expects LambdaT function, got {funT}")
-        domT = _get_T(domT)
-        funT = _get_T(funT)
-        mapT = _get_T(T)
         if not _is_same_kind(funT.argT, domT.carT):
             raise TypeError(f"Map function argument type {funT.argT} does not match domain carrier type {domT.carT}")
-        mapT_lamT = _get_T(mapT.lam)
-        if not _is_same_kind(mapT_lamT.retT, funT.retT):
-            raise TypeError(f"Map result type {mapT_lamT.retT} does not match function result type {funT.retT}")
+        if not _is_same_kind(T.lam.resT, funT.resT):
+            raise TypeError(f"Map result type {T.lam.resT} does not match function result type {funT.resT}")
         return T
 
     @handles(ir.Image)
@@ -619,8 +590,8 @@ class KindCheckingPass(Analysis):
         # Verify function argument is a Value with FuncT type
         if not isinstance(funcT, ir.PiT):
             raise TypeError(f"Image expects FuncT argument, got {funcT}")
-        if not node.T.eq(funcT.retT):
-            raise TypeError(f"Image result type {node.T} does not match function result type {funcT.retT}")
+        if not node.T.eq(funcT.resT):
+            raise TypeError(f"Image result type {node.T} does not match function result type {funcT.resT}")
         return node.T
 
     @handles(ir.Domain)
@@ -639,15 +610,12 @@ class KindCheckingPass(Analysis):
         # Verify function argument is a PiT
         if not _is_kind(piT, ir.PiT):
             raise TypeError(f"Apply expects PiT function, got {piT}")
-        piT = _get_T(piT)
-        piT_domT = _get_T(piT.dom.T)
         # Verify argument type matches function domain carrier type
-        if not _is_same_kind(argT, piT_domT.carT):
-            raise TypeError(f"Apply argument type {argT} does not match function domain carrier type {piT_domT.carT}")
+        if not _is_same_kind(argT, piT.dom.T.carT):
+            raise TypeError(f"Apply argument type {argT} does not match function domain carrier type {piT.dom.T.carT}")
         # Verify result type matches function result type
-        piT_lamT = _get_T(piT.lam)
-        if not _is_same_kind(T, piT_lamT.retT):
-            raise TypeError(f"Apply result type {T} does not match function result type {piT_lamT.retT}")
+        if not _is_same_kind(T, piT.lam.resT):
+            raise TypeError(f"Apply result type {T} does not match function result type {piT.lam.resT}")
         return T
 
     @handles(ir.ListLit)
@@ -659,18 +627,15 @@ class KindCheckingPass(Analysis):
         # Verify all value arguments have same type
         if len(valTs) == 0:
             raise NotImplementedError("Cannot type check empty list literal")
-        elemT0 = _get_T(valTs[0])
+        elemT0 = valTs[0]
         for i, valT in enumerate(valTs):
             if not _is_same_kind(valT, elemT0):
                 raise TypeError(f"ListLit has heterogeneous elements: element 0 is {elemT0}, element {i} is {valT}")
         # Verify list domain construction matches PiT
-        piT = _get_T(T)
-        piT_domT = _get_T(piT.dom)
-        if not _is_same_kind(piT_domT.carT, ir.IntT()):
-            raise TypeError(f"ListLit domain type {piT_domT.carT} does not match expected type {ir.IntT()}")
-        piT_lamT = _get_T(piT.lam)
-        if not _is_same_kind(piT_lamT.retT, elemT0):
-            raise TypeError(f"ListLit result type {piT_lamT.retT} does not match first element type {elemT0}")
+        if not _is_same_kind(T.dom.T.carT, ir.IntT()):
+            raise TypeError(f"ListLit domain type {T.dom.T.carT} does not match expected type {ir.IntT()}")
+        if not _is_same_kind(T.lam.resT, elemT0):
+            raise TypeError(f"ListLit result type {T.lam.resT} does not match first element type {elemT0}")
         return T
 
     @handles(ir.Fold)
@@ -685,7 +650,7 @@ class KindCheckingPass(Analysis):
             raise TypeError(f"Fold expects ArrowT fun, got {funT}")
         # Fold signature: Seq[A] -> ((A,B) -> B) -> B -> B
         # So fun should be (elemT, resT) -> resT
-        elemT = funcT.retT
+        elemT = funcT.resT
         resT = funT.resT
         if not initT.eq(resT):
             raise TypeError(f"Fold init type {initT} does not match function result type {resT}")
@@ -711,10 +676,8 @@ class KindCheckingPass(Analysis):
             raise TypeError(f"Slice lo must be Int, got {loT}")
         if not _is_kind(hiT, ir.IntT):
             raise TypeError(f"Slice hi must be Int, got {hiT}")
-        domT = _get_T(domT)
-        sliceT = _get_T(T)
-        if not _is_same_kind(domT.carT, sliceT.carT):
-            raise TypeError(f"Slice result type {sliceT.carT} does not match domain carrier type {domT.carT}")
+        if not _is_same_kind(domT.carT, T.carT):
+            raise TypeError(f"Slice result type {T.carT} does not match domain carrier type {domT.carT}")
         return node.T
 
     @handles(ir.Index)
@@ -723,7 +686,6 @@ class KindCheckingPass(Analysis):
         # Verify domain argument is a domain
         if not _is_kind(domT, ir.DomT):
             raise TypeError(f"Index expects domain argument, got {domT}")
-        domT = _get_T(domT)
         if not _is_same_kind(idxT, domT.carT):
             raise TypeError(f"Index idx type {idxT} does not match domain carrier type {domT.carT}")
         # Index only works on rank 1 domains
@@ -731,13 +693,12 @@ class KindCheckingPass(Analysis):
             raise TypeError(f"Index only works on rank 1 domains, got {domT.rank}")
         if not _is_kind(T, ir.DomT):
             raise TypeError(f"Index result type {T} must be a domain, got {T}")
-        indexT = _get_T(T)
-        if not _is_same_kind(indexT.carT, domT.factors[domT.axes[0]]):
-            raise TypeError(f"Index result domain factor type {indexT.carT} does not match domain factor type {domT.factors[domT.axes[0]]}")
-        if indexT.fin != domT.fins[domT.axes[0]]:
-            raise TypeError(f"Index result domain must be finite, got {indexT.fin} != {domT.fins[domT.axes[0]]}")
-        if indexT.ord != domT.ords[domT.axes[0]]:
-            raise TypeError(f"Index result domain must be ordered, got {indexT.ord} != {domT.ords[domT.axes[0]]}")
+        if not _is_same_kind(T.carT, domT.factors[domT.axes[0]]):
+            raise TypeError(f"Index result domain factor type {T.carT} does not match domain factor type {domT.factors[domT.axes[0]]}")
+        if T.fin != domT.fins[domT.axes[0]]:
+            raise TypeError(f"Index result domain must be finite, got {T.fin} != {domT.fins[domT.axes[0]]}")
+        if T.ord != domT.ords[domT.axes[0]]:
+            raise TypeError(f"Index result domain must be ordered, got {T.ord} != {domT.ords[domT.axes[0]]}")
         return T
 
     ##############################
@@ -755,7 +716,7 @@ class KindCheckingPass(Analysis):
             raise TypeError(f"And operand a must be Bool, got {aT}")
         if not _is_kind(bT, ir.BoolT):
             raise TypeError(f"And operand b must be Bool, got {bT}")
-        return node.T
+        return T
 
     @handles(ir.Implies)
     def _(self, node: ir.Implies):
@@ -857,9 +818,8 @@ class KindCheckingPass(Analysis):
         # Verify function argument is a PiT
         if not _is_kind(piT, ir.PiT):
             raise TypeError(f"SumReduce expects PiT argument, got {piT}")
-        piT_lamT = _get_T(_get_T(piT).lam)
-        if not _is_kind(piT_lamT.retT, ir.IntT):
-            raise TypeError(f"SumReduce expects PiT with Int result type, got {piT_lamT.retT}")
+        if not _is_kind(piT.lam.resT, ir.IntT):
+            raise TypeError(f"SumReduce expects PiT with Int result type, got {piT.lam.resT}")
         return T
 
     @handles(ir.ProdReduce)
@@ -871,9 +831,8 @@ class KindCheckingPass(Analysis):
         # Verify function argument is a Value with PiT   type
         if not _is_kind(piT, ir.PiT):
             raise TypeError(f"ProdReduce expects PiT argument, got {piT}")
-        piT_lamT = _get_T(_get_T(piT).lam)
-        if not _is_same_kind(piT_lamT.retT, ir.IntT):
-            raise TypeError(f"ProdReduce expects PiT with Int result type, got {piT_lamT.retT}")
+        if not _is_same_kind(piT.lam.resT, ir.IntT):
+            raise TypeError(f"ProdReduce expects PiT with Int result type, got {piT.lam.resT}")
         return T
 
     @handles(ir.AllDistinct)
@@ -913,18 +872,17 @@ class KindCheckingPass(Analysis):
         # Verify type is LambdaT
         if not _is_kind(T, (ir.LambdaT, ir._LambdaTPlaceholder)):
             raise TypeError(f"_LambdaPlaceholder must have LambdaT type, got {T}")
-        lamT = _get_T(T)
-        if not _is_same_kind(boundVarT, lamT.argT):
-            raise TypeError(f"_LambdaPlaceholder bound variable type {boundVarT} does not match LambdaT argument type {lamT.argT}")
-        if not _is_same_kind(bodyT, lamT.retT):
-            raise TypeError(f"_LambdaPlaceholder body type {bodyT} does not match LambdaT result type {lamT.retT}")
+        if not _is_same_kind(boundVarT, T.argT):
+            raise TypeError(f"_LambdaPlaceholder bound variable type {boundVarT} does not match LambdaT argument type {T.argT}")
+        if not _is_same_kind(bodyT, T.resT):
+            raise TypeError(f"_LambdaPlaceholder body type {bodyT} does not match LambdaT result type {T.resT}")
         return T
     
     @handles(ir._LambdaTPlaceholder)
     def _(self, node: ir._LambdaTPlaceholder):
-        bv_T, retT = self.visit_children(node)
-        if not _is_type(retT):
-            raise TypeError(f"_LambdaTPlaceholder return type {retT} must be a type")
+        bv_T, resT = self.visit_children(node)
+        if not _is_type(resT):
+            raise TypeError(f"_LambdaTPlaceholder return type {resT} must be a type")
         if not _is_type(bv_T):
             raise TypeError(f"_LambdaTPlaceholder bound variable type {bv_T} must be a type")
         return node

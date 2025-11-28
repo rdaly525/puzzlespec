@@ -2,6 +2,9 @@ from .. import ast, ir
 import typing as tp
 
 
+def Func(gen: tp.Generator):
+    ...
+
 def Enum(*labels: str, name: str=None) -> tp.Tuple[ast.EnumDomainExpr, ast._EnumAttrs]:
     expr = ast.EnumDomainExpr.make_from_labels(*labels, name=name)
     return expr, expr.members
