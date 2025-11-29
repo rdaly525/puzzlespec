@@ -34,11 +34,3 @@ class SubstitutionPass(Transform):
                 return submap.replace(node)
         new_children = self.visit_children(node)
         return node.replace(*new_children)
-
-    @handles()
-    def _(self, node: ir._Param):
-        for submap in self.sub_mapping:
-            if submap.match(node):
-                return submap.replace(node)
-        raise ValueError("SHOULD NOT BE HERE")
-

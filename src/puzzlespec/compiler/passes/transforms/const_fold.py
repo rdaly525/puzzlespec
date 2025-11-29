@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..pass_base import Transform, Context, handles
-from ...dsl import ir, ir_types as irT
+from ...dsl import ir
 import math
 import typing as tp
 
@@ -48,50 +48,67 @@ class ConstFoldPass(Transform):
     @handles(*_binops.keys())
     def _(self, node: ir.Node) -> ir.Node:
         new_children = self.visit_children(node)
+        T = new_children[0]
+        new_children = new_children[1:]
         if all(isinstance(c, ir.Lit) for c in new_children):
             vals = [c.val for c in new_children]
-            T = irT.Int if type(node) in self._int_ops else irT.Bool
-            return ir.Lit(self._binops[type(node)](*vals), T)
-        return node.replace(*new_children)
+            new_lit = ir.Lit(T, self._binops[type(node)](*vals))
+            return new_lit
+        return node.replace(T, *new_children)
 
     # variadic operations: Fold constants
     @handles(*_variadic_ops.keys())
     def _(self, node: ir.Node) -> ir.Node:
         new_children = self.visit_children(node)
+        T = new_children[0]
+        new_children = new_children[1:]
         if all(isinstance(c, ir.Lit) for c in new_children):
             vals = [c.val for c in new_children]
-            T = irT.Int if type(node) in self._int_ops else irT.Bool
-            return ir.Lit(self._variadic_ops[type(node)](*vals), T)
-        return node.replace(*new_children)
+            return ir.Lit(T, self._variadic_ops[type(node)](*vals))
+        return node.replace(T, *new_children)
     
+
+    @handles(ir.Apply)
+    def _(self, node: ir.Apply):
+        T, func, arg = self.visit_children(node)
+        # Index into a ListLit
+        if isinstance(func, ir.ListLit):
+            T, vals = func._children
+            match (arg):
+                case ir.Lit(val=idx):
+                    assert isinstance(idx, int) and 0 <= idx < len(vals)
+                    return vals[idx]
+        return node.replace(*self.visit_children(node))
+
+
     # Higher order ops
-    @handles(ir.SumReduce)
-    def _(self, node: ir.SumReduce) -> ir.Node:
-        lst, = self.visit_children(node)
-        match (lst):
-            case ir.List(elems):
-                if all(isinstance(e, ir.Lit) for e in elems):
-                    vals = [e.val for e in elems]
-                    return ir.Lit(self._variadic_ops[ir.Sum](*vals), irT.Int)
-        return node.replace(lst)
+    #@handles(ir.SumReduce)
+    #def _(self, node: ir.SumReduce) -> ir.Node:
+    #    lst, = self.visit_children(node)
+    #    match (lst):
+    #        case ir.List(elems):
+    #            if all(isinstance(e, ir.Lit) for e in elems):
+    #                vals = [e.val for e in elems]
+    #                return ir.Lit(self._variadic_ops[ir.Sum](*vals), irT.Int)
+    #    return node
 
-    @handles(ir.ProdReduce)
-    def _(self, node: ir.ProdReduce) -> ir.Node:
-        lst, = self.visit_children(node)
-        match (lst):
-            case ir.List(elems):
-                if all(isinstance(e, ir.Lit) for e in elems):
-                    vals = [e.val for e in elems]
-                    return ir.Lit(self._variadic_ops[ir.Prod](*vals), irT.Int)
-        return node.replace(lst)
+    #@handles(ir.ProdReduce)
+    #def _(self, node: ir.ProdReduce) -> ir.Node:
+    #    lst, = self.visit_children(node)
+    #    match (lst):
+    #        case ir.List(elems):
+    #            if all(isinstance(e, ir.Lit) for e in elems):
+    #                vals = [e.val for e in elems]
+    #                return ir.Lit(self._variadic_ops[ir.Prod](*vals), irT.Int)
+    #    return node.replace(lst)
 
-    @handles(ir.Distinct)
-    def _(self, node: ir.Distinct) -> ir.Node:
-        lst, = self.visit_children(node)
-        match (lst):
-            case ir.List(elems):
-                if all(isinstance(e, ir.Lit) for e in elems):
-                    vals = [e.val for e in elems]
-                    distinct = len(set(vals)) == len(vals)
-                    return ir.Lit(distinct, irT.Bool)
-        return node.replace(lst)
+    #@handles(ir.AllDistinct)
+    #def _(self, node: ir.AllDistinct) -> ir.Node:
+    #    lst, = self.visit_children(node)
+    #    match (lst):
+    #        case ir.List(elems):
+    #            if all(isinstance(e, ir.Lit) for e in elems):
+    #                vals = [e.val for e in elems]
+    #                distinct = len(set(vals)) == len(vals)
+    #                return ir.Lit(distinct, irT.Bool)
+    #    return node.replace(lst)

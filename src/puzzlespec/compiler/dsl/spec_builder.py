@@ -1,85 +1,183 @@
-from ast import Pass
 import typing as tp
 
-from . import ast, ir, ir_types as irT
-from .topology import Topology
-from .envs import SymTable, ShapeEnv, TypeEnv
-from ..passes.pass_base import PassManager, Context
-from ..passes.analyses import SymTableEnv_
+from puzzlespec.compiler.passes.analyses.ast_printer import AstPrinterPass, PrintedAST
+from puzzlespec.compiler.passes.analyses.kind_check import KindCheckingPass
+from puzzlespec.compiler.passes.analyses.pretty_printer import PrettyPrinterPass
+from puzzlespec.compiler.passes.transforms.resolve_vars import ResolveBoundVars, ResolveFreeVars, VarMap
+from . import ast, ir
+from .envs import SymTable, TypeEnv
+from ..passes.pass_base import Context, PassManager
 from ..passes.transforms.cse import CSE
-from ..passes.analyses.constraint_categorizer import ConstraintCategorizerVals, ConstraintCategorizer
-from ..passes.analyses.type_inference import TypeInferencePass, TypeEnv_, TypeValues
-from ..passes.analyses.getter import ParamGetter
-from ..passes.transforms import SubstitutionPass, SubMapping, ConstFoldPass, ResolveBoundVars
+from ..passes.envobj import EnvsObj
 from .spec import PuzzleSpec
+from .utils import _substitute, _has_bv
 
-class PuzzleSpecBuilder(PuzzleSpec):
-    def __init__(self, name: str, desc: str, topo: Topology):
-        self.name = name
-        self.desc = desc
-        self.topo = topo
-        super().__init__(name, desc, topo, SymTable(), TypeEnv(), ShapeEnv(), ir.List())
-
-        self._name_name_cnt = 0
-
-        # Params are declared before intiializing Builder.
-        # During the Builder lifetime, these are stored in _params
-        # Register these used parameters from topo
-        self._params = {}
-        self._register_params(topo.terms_node())
-
-    def _register_params(self, terms: ir.Node):
-        pset = ParamGetter()(terms, ctx=Context()).vars
-        for p in pset:
-            assert isinstance(p, ir._Param)
-            if p.name in self._params and p.T != self._params[p.name]:
-                raise ValueError(f"param {p.name} already exists")
-            self._params[p.name] = p.T
+class PuzzleSpecBuilder:
+    def __init__(self):
+        self.sym = SymTable()
+        self._name_cnt = 0
+        self._rules = []
+        self.dom_cons = []
 
     def _new_var_name(self):
         self._var_name_cnt += 1
-        return f"x{self._var_name_cnt}"
+        return f"_X{self._var_name_cnt}"
 
-    def __repr__(self):
-        return f"PuzzleSpecBuilder(name={self.name}, desc={self.desc}, topo={self.topo})"
-    
-    def _create_var(self, sort: irT.Type_, role: str, name: tp.Optional[str] = None) -> ast.Expr:
+    def func_var(self, 
+        role: str, 
+        dom: tp.Optional[ast.DomainExpr],
+        sort: ir.Type=None,
+        codom: tp.Optional[ast.DomainExpr]=None,
+        name: tp.Optional[str]=None, 
+    ):
+        #if sort is not None:
+        #    assert codom is None
+        #if codom is not None:
+        #    assert sort is None
+        #    sort = codom.carT
+        #new_bv = ir._BoundVarPlaceholder(dom.carT)
+        #T = ir.PiT(
+        #    dom.node,
+        #    ir._LambdaTPlaceholder(
+        #        new_bv,
+        #        sort
+        #    )
+        #)
+        #var = self.var(role, T, None, name, None)
+        #self += var.forall(lambda v: codom.contains(v))
+        #return var
+        return dom.map(lambda i: self.var(
+            role=role,
+            sort=sort,
+            dom=codom,
+            name=name,
+            indices=(i,)
+        ))
+
+    def var(self, 
+        role: str, 
+        sort: ast.TExpr=None,
+        dom: tp.Optional[ast.DomainExpr]=None,
+        name: tp.Optional[str]=None, 
+        indices: tp.Optional[tp.Tuple[ast.Expr, ...]]=None
+    ) -> ast.Expr:
+        public = True
         if name is None:
             name = self._new_var_name()
-        assert role in "GDP"
-        sid = self.sym.new_var(name, role)
-        v = ast.wrap(ir.VarRef(sid), sort)
-        self.tenv.add(sid, sort)
-        return sid, v
+            public = False
+        err_prefix=f"ERROR In var {name}: "
+        if sort is not None and not isinstance(sort, ast.TExpr):
+            raise ValueError(f"{err_prefix}sort must be a TExpr, got {type(sort)}")
+        if role not in "GDP":
+            raise ValueError(f"{err_prefix}role must be G, P, or D, got {role}")
+        if sum((sort is None, dom is None)) != 1:
+            raise ValueError(f"{err_prefix}Either codom or sort must be provided")
+        if indices is None:
+            bv_exprs = ()
+        elif not isinstance(indices, tp.Tuple):
+            bv_exprs = (indices,)
+        else:
+            bv_exprs = indices
+        bvs = [e.node for e in bv_exprs]
+        if not all(isinstance(bv, ir._BoundVarPlaceholder) for bv in bvs):
+            raise ValueError(f"{err_prefix}indices must be bound variables, got {indices}")
+        if not all(hasattr(e, '_map_dom') for e in bv_exprs):
+            raise ValueError(f"{err_prefix}indices must be 'mapped' bound variables, got {indices}")
+        if sort is None:
+            sort = dom.T.carT
 
-    def var(self, sort: irT.Type_, gen: bool=False, name: tp.Optional[str] = None) -> ast.Expr:
-        role = "G" if gen else "D"
-        sid, v = self._create_var(sort, role, name)
-        self.shape_env.add(sid, shape=ir.Unit)
-        return v
+        ## Do dependency analysis
+        # indices = (i,j,k)
+        # dom(i) and i must not depend on (i,j,k)
+        # dom(j) and j must not depend on (j,k)
+        # ...
+        for i, cur_bv in enumerate(bv_exprs):
+            for j, bv in enumerate(bv_exprs[i:]):
+                if _has_bv(bv.node, cur_bv.T.node):
+                    raise ValueError(f"indices[{i}].T depends on indices[{i+j}]")
+                if _has_bv(bv.node, cur_bv._map_dom.node):
+                    raise ValueError(f"Dom[indices[{i}]] depends on indices[{i+j}]")
+       
+        public = True
+        if name is None:
+            name = self._new_var_name()
+            public = False
+        sid = self.sym.new_var(name, role, public)
+        def _any_bv(n: ir.Node):
+            if isinstance(n, ir._BoundVarPlaceholder):
+                return True
+            return any(_any_bv(c) for c in n._children)
+        if dom is not None and _any_bv(dom.node):
+            raise NotImplementedError("cannot handle dependent doms")
+        
+        # This is very brittle code
+        # High level: for indices=(i,j) dom(j) might depend on i. so I need to substitute the new boundvar of i into dom(j)
+        bv_map = {}
+        def make_sort(bves: tp.Tuple[ast.Expr]) -> ir.Type:
+            if len(bves)==0:
+                return sort.node
+            old_bv = bves[0].node
+            bv_T = bves[0]._T.node
+            bv_dom: ast.DomainExpr = bves[0]._map_dom.node
+            for o, n in bv_map.items():
+                bv_dom = _substitute(bv_dom, o, n)
+                bv_T = _substitute(bv_T, o, n)
+            new_bv = ir._BoundVarPlaceholder(bv_T)
+            for o, n in bv_map.items():
+                bv_dom = _substitute(bv_dom, o, n)
+            bv_map[old_bv] = new_bv
+            T = ir.PiT(
+                bv_dom,
+                ir._LambdaTPlaceholder(
+                    new_bv,
+                    make_sort(bves[1:])
+                )
+            )
+            return T
+        full_sort = make_sort(bv_exprs)
+        var = ir._VarPlaceholder(full_sort, sid)
+        var = ast.wrap(var)
+        # add dom constraint
 
-    def var_list(self, size: ast.IntExpr, sort: irT.Type_, gen: bool=False, name: tp.Optional[str] = None) -> ast.ListExpr[irT.Type_]:
-        role = "G" if gen else "D"
-        varT = irT.ListT(sort)
-        sid, v = self._create_var(varT, role, name)
-        self.shape_env.add(sid, shape=size.node)
-        return v
+        if dom is not None:
+            def _con(val):
+                if isinstance(val.T, ast.PiType):
+                    return val.forall(lambda v: _con(v))
+                return dom.contains(val)
+            self += _con(var)
+        for e in bv_exprs:
+            var = var(e)
+        return var
 
-    def var_dict(self, keys: ast.ListExpr[ast.Expr], sort: irT.Type_, name: str, gen: bool=False) -> ast.DictExpr[ast.Expr, irT.Type_]:
-        role = "G" if gen else "D"
-        varT = irT.DictT(keys.elem_type, sort)
-        sid, v = self._create_var(varT, role, name)
-        self.shape_env.add(sid, shape=keys.node)
-        return v
+    def param(self, sort: ir.Type=None, name: str=None) -> ast.Expr:
+        return self.var(role='P', sort=sort, name=name)
+    
+    def gen_var(self, sort: ir.Type=None, name: str=None) -> ast.Expr:
+        return self.var(role='G', sort=sort, name=name)
+    
+    def decision_var(self, sort: ir.Type=None, name: str=None) -> ast.Expr:
+        return self.var(role='D', sort=sort, name=name)
 
-    def _replace_rules(self, new_rules: ir.Node):
-        self._rules = new_rules
+
+    #def param(self, sort: ir.Type=None, dom: ast.DomainExpr=None, name: str=None, dep=()) -> ast.Expr:
+    #    return self.var(sort=sort, dom=dom, name=name, dep=dep)
+    
+    #def gen_var(self, sort: ir.Type=None, dom: ast.DomainExpr=None, name: str=None, dep=()) -> ast.Expr:
+    #    return self.var(sort=sort, dom=dom, name=name, dep=dep)
+    
+    #def decision_var(self, sort: ir.Type=None, dom: ast.DomainExpr=None, name: str=None, dep=()) -> ast.Expr:
+    #    return self.var(sort=sort, dom=dom, name=name, dep=dep)
+
+    #def func_var(self, dom: ast.DomainExpr, role: str='G', sort: irT.Type_=None, codom: ast.DomainExpr=None, name: str=None) -> ast.Expr:
+    #    return dom.map(lambda i: self.var(role, sort, codom, name, dep=i))
+
+    #def _replace_rules(self, new_rules: tp.Iterable[ir.Node]):
+    #    self._rules = ir.TupleLit(*new_rules)
  
     def _add_rules(self, *new_rules: ast.Expr):
-        nodes = [*self._rules._children, *[r.node for r in new_rules]]
-        self._replace_rules(ir.List(*nodes))
+        self._rules += [r.node for r in new_rules]
 
-    def __iadd__(self, other):
+    def __iadd__(self, other: tp.Union[ast.BoolExpr, tp.Iterable[ast.BoolExpr]]) -> tp.Self:
         
         constraints = other
         if not isinstance(other, tp.Iterable):
@@ -89,63 +187,44 @@ class PuzzleSpecBuilder(PuzzleSpec):
         if not all(isinstance(c, ast.BoolExpr) for c in constraints):
             raise ValueError(f"Constraints, {constraints}, is not a BoolExpr")
         
-        # For every constraint:
-
         self._add_rules(*constraints)
-        # Extract all Parameters and add to sym table if they do not already exist
-        self._register_params(self._rules)
-
-        #  2: Resolve Placeholders (for bound bars/lambdas) and run CSE
-        pm = PassManager(ResolveBoundVars(), CSE())
-        self._replace_rules(pm.run(self._rules))
-        self._type_check()
         return self
 
-    def _unify_params(self):
-        smap = SubMapping()
-        for pname, T in self._params.items():
-            sid, _ = self._create_var(T, 'P', pname)
-            self.shape_env.add(sid, shape=ir.Unit)
-            smap.add(
-                match=lambda node, pname=pname: isinstance(node, ir._Param) and node.name==pname,
-                replace=lambda node, sid=sid: ir.VarRef(sid)
-            )
-        ctx = Context()
-        ctx.add(smap)
-        new_topo, new_shape_env, new_rules, _ = self._transform([SubstitutionPass()], ctx=ctx)
-        self.topo = new_topo
-        self.shape_env = new_shape_env
-        self._replace_rules(new_rules)
-
     # Freezes the spec and makes it immutable 
-    def build(self) -> PuzzleSpec:
-        # 1) Unify parameters (change parameters to vars)
-        self._unify_params()
-        all_vars = []
-        for sid in self.sym:
-            name = self.sym.get_name(sid)
-            T = self.tenv[sid]
-            role = self.sym.get_role(sid)
-            shape = self.shape_env.get_shape(sid)
-            all_vars.append((sid, name, T, role, shape))
+    def build(self, name: str) -> PuzzleSpec:
+        # 1: Resolve Placeholders (for bound bars/lambdas)
+        ctx = Context(EnvsObj(None, None))
+        pm = PassManager(KindCheckingPass(), ResolveBoundVars(), verbose=True)
+        rules_node = ir.TupleLit(ir.TupleT(*(ir.BoolT() for _ in self._rules)), *self._rules)
+        new_rules_node = pm.run(rules_node, ctx=ctx)
+        # Populate tenv
+        ctx = Context(EnvsObj(None, None))
+        #pm = PassManager(KindCheckingPass(), AstPrinterPass(), ResolveFreeVars(), AstPrinterPass(), verbose=True)
+        pm = PassManager(KindCheckingPass(), ResolveFreeVars(), verbose=True)
+        new_rules_node = pm.run(new_rules_node, ctx=ctx)
+        sid_to_T = ctx.get(VarMap).sid_to_T
+        assert len(sid_to_T) != 0
+        tenv = TypeEnv()
+        for sid, T in sid_to_T.items():
+            tenv.add(sid, T)
+           
 
-        spec = PuzzleSpec.make(
-            self.name,
-            self.desc,
-            self.topo,
-            all_vars,
-            self._rules
+        spec = PuzzleSpec(
+            name=name,
+            sym=self.sym.copy(),
+            tenv=tenv,
+            rules=new_rules_node
         )
-        return spec.optimize()
+        #spec_obls = spec.extract_obligations()
+        # 3: Optimize/canonicalize
+        spec_opt = spec.optimize()
+        return spec_opt
 
-        # TODO run passes on spec
-
-        # Print AST
-        # 3) Fold/invalidate the shape_env
-        #   - eg, replace any Len(Var) with the shape_env size
-        #   - eg, Replace any Keys(Var) with shape_env keys
-        # 2) Run simplification loop
-        # Do type checking/shape validation
-        # Extract implicit constraints
-        return spec
-    
+    def print(self, rules_node=None):
+        if rules_node is None:
+            rules_node = ir.TupleLit(ir.TupleT(*(ir.BoolT() for _ in self._rules)), *self._rules)
+        ctx = Context()
+        pm = PassManager([AstPrinterPass()], verbose=True)
+        pm.run(rules_node, ctx)
+        a = ctx.get(PrintedAST)
+        print(a.text)
