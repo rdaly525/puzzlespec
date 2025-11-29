@@ -66,7 +66,6 @@ class SumType(TExpr):
     def make_sum(self, val: tp.Any) -> SumExpr:
         return SumExpr.make(self, val)
 
-
     def elemT(self, i: int) -> TExpr:
         if not isinstance(i, int):
             raise ValueError("Tuple index must be concrete (python) int")
@@ -83,11 +82,11 @@ class SumType(TExpr):
         return self.elemT(i)
 
 
-class LambdaType(TExpr):
+class PiType(TExpr):
     def __post_init__(self):
         super().__post_init__()
-        if not isinstance(self.node, ir._LambdaTPlaceholder):
-            raise ValueError(f"Expected LambdaType, got {self.node}")
+        if not isinstance(self.node, ir.PiTHOAS):
+            raise ValueError(f"Expected PiType, got {self.node}")
 
     @property
     def argT(self) -> TExpr:
@@ -96,6 +95,7 @@ class LambdaType(TExpr):
     @property
     def resT(self) -> TExpr:
         return wrapT(self.node.resT)
+
 
 class DomainType(TExpr):
     def __post_init__(self):
@@ -139,11 +139,11 @@ class DomainType(TExpr):
         return wrapT(self.node.factors[idx])
 
 
-class PiType(TExpr):
+class FuncType(TExpr):
     def __post_init__(self):
         super().__post_init__()
-        if not isinstance(self.node, ir.PiT):
-            raise ValueError(f"Expected PiType, got {self.node}")
+        if not isinstance(self.node, ir.FuncT):
+            raise ValueError(f"Expected FuncType, got {self.node}")
 
     def elemT(self, arg: Expr) -> TExpr:
         return wrapT(_applyT(self.node, arg.node))
@@ -153,8 +153,8 @@ class PiType(TExpr):
         return wrap(self.node.dom)
 
     @property
-    def lamT(self) -> LambdaType:
-        return wrapT(self.node.lamT)
+    def piT(self) -> PiType:
+        return wrapT(self.node.piT)
 
 
 def wrapT(T: ir.Type):
@@ -172,12 +172,12 @@ def wrapT(T: ir.Type):
             return TupleType(T)
         case ir.SumT:
             return SumType(T)
-        case ir._LambdaTPlaceholder:
-            return LambdaType(T)
+        case ir.PiTHOAS:
+            return PiType(T)
         case ir.DomT:
             return DomainType(T)
-        case ir.PiT:
-            return PiType(T)
+        case ir.FuncT:
+            return FuncType(T)
         case _:
             raise ValueError(f"Expected Type, got {T}")
 
@@ -230,7 +230,7 @@ class Expr:
     # "Hack" to construct variables within a map
     def _set_map_dom(self, dom: DomainExpr):
         if dom is not None:
-            assert isinstance(self.node, ir._BoundVarPlaceholder)
+            assert isinstance(self.node, ir.BoundVarHOAS)
             assert isinstance(dom, DomainExpr)
             self._map_dom = dom
 
@@ -522,12 +522,12 @@ class LambdaExpr(Expr):
         super().__post_init__()
         if not is_LambdaExpr(self.node):
             raise ValueError(f"Expected LambdaExpr, got {self}")
-        if not isinstance(self._T, LambdaType):
-            raise ValueError(f"Expected LambdaType, got {self._T}")
+        if not isinstance(self._T, PiType):
+            raise ValueError(f"Expected PiType, got {self._T}")
 
     @property
-    def T(self) -> LambdaType:
-        return tp.cast(LambdaType, self._T)
+    def T(self) -> PiType:
+        return tp.cast(PiType, self._T)
  
     @property
     def argT(self) -> ir.Type:
@@ -541,14 +541,14 @@ class LambdaExpr(Expr):
         return f"{self.argT} -> {self.resT}"
 
 def make_lambda(fn: tp.Callable, sort: TExpr, map_dom: DomainExpr=None) -> LambdaExpr:
-    bv_node = ir._BoundVarPlaceholder(sort.node)
+    bv_node = ir.BoundVarHOAS(sort.node)
     bv_expr = wrap(bv_node)
     # 'Hack' to get fancy var constructors working
     bv_expr._set_map_dom(map_dom)
     ret_expr = fn(bv_expr)
     ret_expr = Expr.make(ret_expr)
-    lamT = ir._LambdaTPlaceholder(bv_node, ret_expr._T.node)
-    lambda_node = ir._LambdaPlaceholder(lamT, bv_node, ret_expr.node)
+    piT = ir.PiTHOAS(bv_node, ret_expr._T.node)
+    lambda_node = ir.LambdaHOAS(piT, bv_node, ret_expr.node)
     return LambdaExpr(lambda_node)
 
 class DomainExpr(Expr):
@@ -577,8 +577,8 @@ class DomainExpr(Expr):
 
     def map(self, fn: tp.Callable) -> FuncExpr:
         lambda_expr = make_lambda(fn, sort=self.T.carT, map_dom=self)
-        lamT = lambda_expr.T
-        T = ir.PiT(self.node, lamT.node)
+        piT = lambda_expr.T
+        T = ir.FuncT(self.node, piT.node)
         node = ir.Map(T, self.node, lambda_expr.node)
         return wrap(node)
 
@@ -808,12 +808,12 @@ class FuncExpr(Expr):
             raise ValueError(f"Expected FuncExpr, got {self.T}")
 
     @property
-    def T(self) -> PiType:
-        return tp.cast(PiType, self._T)
+    def T(self) -> FuncType:
+        return tp.cast(FuncType, self._T)
 
     @property
     def domain(self) -> DomainExpr:
-        if isinstance(self.T.node, ir.PiT):
+        if isinstance(self.T.node, ir.FuncT):
             return wrap(self.T.node.dom)
         domT = self.T.domT
         domain = ir.Domain(domT.node, self.node)
@@ -827,7 +827,7 @@ class FuncExpr(Expr):
 
     def apply(self, arg: Expr) -> Expr:
         arg = Expr.make(arg)
-        node = ir.Apply(self.T.elemT(arg).node, self.node, arg.node)
+        node = ir.ApplyFunc(self.T.elemT(arg).node, self.node, arg.node)
         return wrap(node)
 
     # Func[Dom(A) -> B] -> (B -> C) -> Func[Dom(A) -> C]
@@ -957,7 +957,7 @@ def is_SumExpr(node: ir.Node) -> bool:
     return isinstance(node, ir.Value) and _is_kind(node.T, ir.SumT)
 
 def is_LambdaExpr(node: ir.Node) -> bool:
-    return isinstance(node, ir.Value) and _is_kind(node.T, ir._LambdaTPlaceholder)
+    return isinstance(node, ir.Value) and _is_kind(node.T, ir.PiTHOAS)
 
 def is_DomainExpr(node: ir.Node) -> bool:
     return isinstance(node, ir.Value) and _is_kind(node.T, ir.DomT)
@@ -975,7 +975,7 @@ def is_NDSeqDomainExpr(node: ir.Node) -> bool:
     return is_DomainExpr(node) and node.T.ord and node.T.fin and node.T.rank > 1
 
 def is_FuncExpr(node: ir.Node) -> bool:
-    return isinstance(node, ir.Value) and _is_kind(node.T, ir.PiT)
+    return isinstance(node, ir.Value) and _is_kind(node.T, ir.FuncT)
 
 def is_ArrayExpr(node: ir.Node) -> bool:
     return is_FuncExpr(node) and is_SeqDomainExpr(node.T.dom)

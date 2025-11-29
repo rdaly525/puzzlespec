@@ -62,10 +62,10 @@ class EvalPass(Analysis):
         return lambda_fn
 
     @handles(mark_invalid=True)
-    def _(self, node: ir._BoundVarPlaceholder) -> tp.Any:
+    def _(self, node: ir.BoundVarHOAS) -> tp.Any:
         """Analyze bound variable placeholder nodes."""
-        # TODO: Implement analysis for _BoundVarPlaceholder nodes
-        raise NotImplementedError("_BoundVarPlaceholder evaluation should be handled after transformation to BoundVar")
+        # TODO: Implement analysis for BoundVarHOAS nodes
+        raise NotImplementedError("BoundVarHOAS evaluation should be handled after transformation to BoundVar")
 
     # Arithmetic + Boolean
     @handles(ir.Eq)
@@ -300,7 +300,7 @@ class EvalPass(Analysis):
             raise NotImplementedError(f"ImageOf evaluation for {type(func)} not implemented")
 
     @handles()
-    def _(self, node: ir.Apply) -> tp.Any:
+    def _(self, node: ir.ApplyFunc) -> tp.Any:
         """Analyze apply nodes."""
         func, arg = self.visit_children(node)
         if isinstance(func, dict):
@@ -310,13 +310,7 @@ class EvalPass(Analysis):
         elif callable(func):
             return func(arg)
         else:
-            raise NotImplementedError(f"Apply evaluation for {type(func)} not implemented")
-
-    @handles()
-    def _(self, node: ir.ListLit) -> tp.Any:
-        """Analyze list literal nodes."""
-        children = self.visit_children(node)
-        return list(children)
+            raise NotImplementedError(f"ApplyFunc evaluation for {type(func)} not implemented")
 
     @handles()
     def _(self, node: ir.RestrictEq) -> tp.Any:
@@ -332,10 +326,10 @@ class EvalPass(Analysis):
         raise NotImplementedError("Tiles evaluation not implemented")
 
     @handles(mark_invalid=True)
-    def _(self, node: ir._LambdaPlaceholder) -> tp.Any:
+    def _(self, node: ir.LambdaHOAS) -> tp.Any:
         """Analyze lambda placeholder nodes."""
-        # TODO: Implement analysis for _LambdaPlaceholder nodes
-        raise NotImplementedError("_LambdaPlaceholder evaluation should be handled after transformation")
+        # TODO: Implement analysis for LambdaHOAS nodes
+        raise NotImplementedError("LambdaHOAS evaluation should be handled after transformation")
 
     @handles()
     def _(self, node: ir.Fold) -> tp.Any:

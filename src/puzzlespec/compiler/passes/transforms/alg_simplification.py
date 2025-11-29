@@ -177,3 +177,23 @@ class AlgebraicSimplificationPass(Transform):
             case (_, ir.Lit(val=False)):
                 return ir.Not(T, a)
         return node.replace(T, a, b)
+
+    @handles(ir.Match)
+    def _(self, node: ir.Match):
+        T, scrut, cases = self.visit_children(node)
+        assert isinstance(scrut.T, ir.SumT)
+        if isinstance(scrut, ir.Inj):
+            idx = scrut.idx
+            assert isinstance(idx, int)
+            scrutT, val = scrut._children
+            casesT = cases.T
+            assert isinstance(casesT, ir.TupleT)
+            assert idx < len(casesT)
+            dom = ir.Universe(ir.DomT.make(T, False, False))
+            m = ir.Map(
+                T=ir.FuncT(dom, casesT[idx]),
+                dom=dom,
+                fun= cases._children[1:][idx]
+            )
+            return ir.ApplyFunc(T, m, val)
+        return node.replace(T, scrut, cases)

@@ -17,12 +17,12 @@ class ResolveBoundVars(Transform):
         return new_root
 
     def _check_no_placeholders(self, node):
-        if isinstance(node, (ir._BoundVarPlaceholder, ir._LambdaPlaceholder, ir._LambdaTPlaceholder)):
+        if isinstance(node, (ir.BoundVarHOAS, ir.LambdaHOAS, ir.PiTHOAS)):
             raise ValueError(f"Failed resolve bound, found {node}")
         for c in node._children:
             self._check_no_placeholders(c)
 
-    @handles(ir._LambdaPlaceholder)
+    @handles(ir.LambdaHOAS)
     def _(self, node):
         T, bv, body = node._children
         new_T = self.visit(T)
@@ -31,16 +31,16 @@ class ResolveBoundVars(Transform):
         self.stack.pop()
         return ir.Lambda(new_T, new_body)
 
-    @handles(ir._LambdaTPlaceholder)
+    @handles(ir.PiTHOAS)
     def _(self, node):
         bv, bodyT = node._children
         bv_T = self.visit(bv.T)
         self.stack.append(bv)
         new_bodyT = self.visit(bodyT)
         self.stack.pop()
-        return ir.LambdaT(bv_T, new_bodyT)
+        return ir.PiT(bv_T, new_bodyT)
 
-    @handles(ir._BoundVarPlaceholder)
+    @handles(ir.BoundVarHOAS)
     def _(self, use):
         # find binder in stack from the end
         for depth_from_end, binder in enumerate(reversed(self.stack)):
@@ -61,7 +61,7 @@ class ResolveBoundVars(Transform):
 #        self.bctx = {}
 #        new_root = self.visit(root)
 #        def check(node: ir.Node):
-#            if isinstance(node, (ir._BoundVarPlaceholder, ir._LambdaPlaceholder, ir._LambdaTPlaceholder)):
+#            if isinstance(node, (ir.BoundVarHOAS, ir.LambdaHOAS, ir.PiTHOAS)):
 #                raise ValueError(f"Failed resolve bound, found {node}")
 #            for c in node._children:
 #                check(c)
@@ -73,8 +73,8 @@ class ResolveBoundVars(Transform):
 #            print("  BV", str(id(bv))[-5:], i)
 #        print()
 #
-#    @handles(ir._BoundVarPlaceholder)
-#    def _(self, bv: ir._BoundVarPlaceholder):
+#    @handles(ir.BoundVarHOAS)
+#    def _(self, bv: ir.BoundVarHOAS):
 #        new_T, = self.visit_children(bv)
 #        print("BV ", str(id(bv))[-5:], new_T)
 #        self.print_ctx()
@@ -85,8 +85,8 @@ class ResolveBoundVars(Transform):
 #        return ir.BoundVar(idx=db_idx)
 #    
 #    # pushes/pops binding contexts
-#    @handles(ir._LambdaPlaceholder)
-#    def _(self, node: ir._LambdaPlaceholder):
+#    @handles(ir.LambdaHOAS)
+#    def _(self, node: ir.LambdaHOAS):
 #        T, bv, body = node._children
 #        new_T = self.visit(T)
 #        self.bctx[bv] = len(self.bctx)
@@ -96,8 +96,8 @@ class ResolveBoundVars(Transform):
 #        del self.bctx[bv]
 #        return ir.Lambda(new_T, new_body)
 #    
-#    @handles(ir._LambdaTPlaceholder)
-#    def _(self, node: ir._LambdaTPlaceholder):
+#    @handles(ir.PiTHOAS)
+#    def _(self, node: ir.PiTHOAS):
 #        bv, bodyT = node._children
 #        bv_T = self.visit(bv.T)
 #        self.bctx[bv] = len(self.bctx)
@@ -105,7 +105,7 @@ class ResolveBoundVars(Transform):
 #        self.print_ctx()
 #        new_bodyT = self.visit(bodyT)
 #        del self.bctx[bv]
-#        return ir.LambdaT(bv_T, new_bodyT)
+#        return ir.PiT(bv_T, new_bodyT)
 
 
 class VarMap(AnalysisObject):
@@ -124,8 +124,8 @@ class ResolveFreeVars(Transform):
         new_root = self.visit(root)
         return new_root, VarMap(self.sid_to_T)
 
-    @handles(ir._VarPlaceholder)
-    def _(self, v: ir._VarPlaceholder):
+    @handles(ir.VarHOAS)
+    def _(self, v: ir.VarHOAS):
         new_T, = self.visit_children(v)
         self.sid_to_T[v.sid] = new_T
         return ir.VarRef(v.sid)

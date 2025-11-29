@@ -35,10 +35,10 @@ class PuzzleSpecBuilder:
         #if codom is not None:
         #    assert sort is None
         #    sort = codom.carT
-        #new_bv = ir._BoundVarPlaceholder(dom.carT)
-        #T = ir.PiT(
+        #new_bv = ir.BoundVarHOAS(dom.carT)
+        #T = ir.FuncT(
         #    dom.node,
-        #    ir._LambdaTPlaceholder(
+        #    ir.PiTHOAS(
         #        new_bv,
         #        sort
         #    )
@@ -79,7 +79,7 @@ class PuzzleSpecBuilder:
         else:
             bv_exprs = indices
         bvs = [e.node for e in bv_exprs]
-        if not all(isinstance(bv, ir._BoundVarPlaceholder) for bv in bvs):
+        if not all(isinstance(bv, ir.BoundVarHOAS) for bv in bvs):
             raise ValueError(f"{err_prefix}indices must be bound variables, got {indices}")
         if not all(hasattr(e, '_map_dom') for e in bv_exprs):
             raise ValueError(f"{err_prefix}indices must be 'mapped' bound variables, got {indices}")
@@ -104,7 +104,7 @@ class PuzzleSpecBuilder:
             public = False
         sid = self.sym.new_var(name, role, public)
         def _any_bv(n: ir.Node):
-            if isinstance(n, ir._BoundVarPlaceholder):
+            if isinstance(n, ir.BoundVarHOAS):
                 return True
             return any(_any_bv(c) for c in n._children)
         if dom is not None and _any_bv(dom.node):
@@ -122,26 +122,26 @@ class PuzzleSpecBuilder:
             for o, n in bv_map.items():
                 bv_dom = _substitute(bv_dom, o, n)
                 bv_T = _substitute(bv_T, o, n)
-            new_bv = ir._BoundVarPlaceholder(bv_T)
+            new_bv = ir.BoundVarHOAS(bv_T)
             for o, n in bv_map.items():
                 bv_dom = _substitute(bv_dom, o, n)
             bv_map[old_bv] = new_bv
-            T = ir.PiT(
+            T = ir.FuncT(
                 bv_dom,
-                ir._LambdaTPlaceholder(
+                ir.PiTHOAS(
                     new_bv,
                     make_sort(bves[1:])
                 )
             )
             return T
         full_sort = make_sort(bv_exprs)
-        var = ir._VarPlaceholder(full_sort, sid)
+        var = ir.VarHOAS(full_sort, sid)
         var = ast.wrap(var)
         # add dom constraint
 
         if dom is not None:
             def _con(val):
-                if isinstance(val.T, ast.PiType):
+                if isinstance(val.T, ast.FuncType):
                     return val.forall(lambda v: _con(v))
                 return dom.contains(val)
             self += _con(var)

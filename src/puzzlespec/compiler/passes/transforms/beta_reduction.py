@@ -51,7 +51,7 @@ class BetaReductionPass(Transform):
             body2 = self.shift(body, d, cutoff + 1)
             return t.replace(argT2, body2)
 
-        if isinstance(t, ir.LambdaT):
+        if isinstance(t, ir.PiT):
             argT, body = t._children
             # binder does *not* apply inside argT
             argT2 = self.shift(argT, d, cutoff)
@@ -82,7 +82,7 @@ class BetaReductionPass(Transform):
             body2 = self.subst(body, j, s, depth + 1)    # binder in body
             return t.replace(argT2, body2)
 
-        if isinstance(t, ir.LambdaT):
+        if isinstance(t, ir.PiT):
             argT, body = t._children
             argT2 = self.subst(argT, j, s, depth)        # no new binder in argT
             body2 = self.subst(body, j, s, depth + 1)
@@ -94,7 +94,7 @@ class BetaReductionPass(Transform):
     # ---------- visitors ----------
 
     
-    #@handles(ir.Lambda, ir.LambdaT)
+    #@handles(ir.Lambda, ir.PiT)
     #def _(self, node: ir.Node):
     #    # record depth at definition site
     #    self.lambda_depth[node] = self.cur_lam_depth
@@ -112,14 +112,14 @@ class BetaReductionPass(Transform):
         # no change outside of β-redexes
         return node
 
-    @handles(ir.Apply)
-    def _(self, node: ir.Apply):
+    @handles(ir.ApplyFunc)
+    def _(self, node: ir.ApplyFunc):
         # first recursively reduce inside
         T, func, arg = self.visit_children(node)
 
         if isinstance(func, ir.Map):
             domT, dom, lam = func._children
-            lamT, body = lam._children
+            piT, body = lam._children
 
             # (Lam(body) arg)
 

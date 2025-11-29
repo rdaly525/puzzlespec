@@ -267,7 +267,7 @@ class DomT(Type):
     def eq(self, other):
         return isinstance(other, DomT) and self.carT.eq(other.carT) and self.fins==other.fins and self.ords==other.ords and self.axes==other.axes
 
-class _LambdaTPlaceholder(Type):
+class PiTHOAS(Type):
     _numc = 2
     def __init__(self, bound_var: Value, resT: Type):
         super().__init__(bound_var, resT)
@@ -283,7 +283,7 @@ class _LambdaTPlaceholder(Type):
     def __repr__(self):
         return f"(\{self._children[0]}. {self.resT})"
 
-class LambdaT(Type):
+class PiT(Type):
     _numc = 2
     def __init__(self, argT: Type, resT: Type):
         super().__init__(argT, resT)
@@ -297,42 +297,42 @@ class LambdaT(Type):
         return self._children[0]
 
 
-class PiT(Type):
+class FuncT(Type):
     _numc = 2
-    def __init__(self, dom: Value, lamT: Type):
-        assert isinstance(lamT, (LambdaT, _LambdaTPlaceholder))
-        super().__init__(dom, lamT)
+    def __init__(self, dom: Value, piT: Type):
+        assert isinstance(piT, (PiT, PiTHOAS))
+        super().__init__(dom, piT)
 
     @property
     def dom(self) -> Value:
         return self._children[0]
     
     @property
-    def lamT(self) -> LambdaT:
+    def piT(self) -> PiT:
         return self._children[1]
 
     def __repr__(self):
-        return f"Func[{self.dom.T}, {self.lamT}]"
+        return f"Func[{self.dom.T}, {self.piT}]"
 
     def eq(self, other):
-        return isinstance(other, PiT) and self.dom.eq(other.dom) and self.lamT.eq(other.lamT)
+        return isinstance(other, FuncT) and self.dom.eq(other.dom) and self.piT.eq(other.piT)
 
 def _is_value(v: Node) -> bool:
     return isinstance(v, (Value, BoundVar, VarRef))
 
 #class ApplyT(Type):
 #    _numc = 2
-#    def __init__(self, piT: PiT, arg: Value):
+#    def __init__(self, funcT: FuncT, arg: Value):
 #        assert _is_value(arg)
-#        if not isinstance(piT._raw_T, PiT):
-#            raise ValueError(f"ApplyT piT must be a PiT, got {piT._raw_T}")
-#        super().__init__(piT, arg)
+#        if not isinstance(funcT._raw_T, FuncT):
+#            raise ValueError(f"ApplyT funcT must be a FuncT, got {funcT._raw_T}")
+#        super().__init__(funcT, arg)
 #
 #    def __repr__(self):
-#        return f"AppT({self.piT}, {self.arg})"
+#        return f"AppT({self.funcT}, {self.arg})"
 #
 #    @property
-#    def piT(self) -> PiT:
+#    def funcT(self) -> FuncT:
 #        return self._children[0]
 #
 #    @property
@@ -576,17 +576,29 @@ class Map(Value):
     def __init__(self, T: Type, dom: Value, fun: Value):
         super().__init__(T, dom, fun)
 
+@dataclass(eq=True, frozen=True)
 class _FuncLitLayout:
+    def index(self, val) -> tp.Optional[bool]:
+        raise NotImplementedError()
     ...
 class _SparseLayout(_FuncLitLayout):
     ...
 
 @dataclass(eq=True, frozen=True)
 class _DenseLayout(_FuncLitLayout):
-    num_elems: int
+    val_map: tp.Mapping[tp.Any, int]
+
+    def index(self, val: Node):
+        return self.val_map.get(val._key, None)
 
     def __repr__(self):
-        return f"Dense({self.num_elems})"
+        return f"Dense({len(self.val_map)})"
+
+    def __hash__(self):
+        return hash(frozenset(self.val_map))
+
+    def __eq__(self, other):
+        return isinstance(other, _DenseLayout) and self.val_map==other.val_map
 
 class FuncLit(Value):
     _fields= ('layout',)
@@ -606,16 +618,10 @@ class Image(Value):
         super().__init__(T, func)
 
 # Func(Dom(A)->B) -> A -> B
-class Apply(Value):
+class ApplyFunc(Value):
     _numc = 3
     def __init__(self, T: Type, func: Value, arg: Value):
         super().__init__(T, func, arg)
-
-#(v0:A,v1:A,...) -> Func(Fin(n) -> A)
-class ListLit(Value):
-    _numc = -1
-    def __init__(self, T: Type, *vals: Value):
-        super().__init__(T, *vals)
 
 # only used on Seq Funcs TODO maybe should have scan as the fundimental IR node
 # Seq[A] -> ((A,B) -> B) -> B -> B
@@ -742,7 +748,7 @@ class AllSame(Value):
 ##############################
 
 # gets tranformed to a de-bruijn BoundVar
-class _BoundVarPlaceholder(Value):
+class BoundVarHOAS(Value):
     #_fields = ('_map_dom', '_is_map')
     _numc = 1
     def __init__(self, T: Type):#, _map_dom: Value, _is_map: bool=False):
@@ -753,12 +759,12 @@ class _BoundVarPlaceholder(Value):
     def __str__(self):
         return f"BV[{str(id(self))[-5:]}]"
 
-class _LambdaPlaceholder(Value):
+class LambdaHOAS(Value):
     _numc = 3
     def __init__(self, T: Type, bound_var: Value, body: Value):
         super().__init__(T, bound_var, body)
 
-class _VarPlaceholder(Value):
+class VarHOAS(Value):
     _fields = ('sid',)
     _numc = 1
     def __init__(self, T: Type, sid: int):
@@ -776,16 +782,15 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     TupleT: -2,
     SumT: -2,
     DomT: -2,
-    #ApplyT: -2,
+    FuncT: -2,
+    PiTHOAS: -2,
     PiT: -2,
-    _LambdaTPlaceholder: -2,
-    LambdaT: -2,
     Unit: -1,
     Lit: 0,
     VarRef: 1,
-    _VarPlaceholder: 1,
+    VarHOAS: 1,
     BoundVar: 2,
-    _BoundVarPlaceholder: 2,
+    BoundVarHOAS: 2,
     Not: 3,
     Neg: 3,
     And: 4,
@@ -826,12 +831,11 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     Map: 10,
     FuncLit: 10,
     Image: 10,
-    Apply: 10,
-    ListLit: 10,
+    ApplyFunc: 10,
     RestrictEq: 10,
     Slice: 10,
     Lambda: 12,
-    _LambdaPlaceholder: 12,
+    LambdaHOAS: 12,
     Fold: 13,
     SumReduce: 14,
     ProdReduce: 14,

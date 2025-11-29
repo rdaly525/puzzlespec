@@ -43,7 +43,7 @@ class PuzzleSpec:
 
     def _ph_check(self):
         def check(node: ir.Node):
-            if isinstance(node, (ir._BoundVarPlaceholder, ir._LambdaPlaceholder, ir._LambdaTPlaceholder, ir._VarPlaceholder)):
+            if isinstance(node, (ir.BoundVarHOAS, ir.LambdaHOAS, ir.PiTHOAS, ir.VarHOAS)):
                 raise ValueError(f"Found placeholder node {node} in rules")
             for c in node._children:
                 check(c)
@@ -87,12 +87,12 @@ class PuzzleSpec:
             obls=new_spec_node.obls,
         )
 
-    def optimize(self) -> 'PuzzleSpec':
+    def optimize(self, max_dom_size=20) -> 'PuzzleSpec':
         ctx = Context()
         opt_passes = [
             CanonicalizePass(),
             AlgebraicSimplificationPass(),
-            ConstFoldPass(),
+            ConstFoldPass(max_dom_size=max_dom_size),
             DomainSimplificationPass(),
             BetaReductionPass(),
             #CSE(),
