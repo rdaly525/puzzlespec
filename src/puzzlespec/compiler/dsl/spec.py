@@ -2,7 +2,6 @@ import typing as tp
 
 from puzzlespec.compiler.passes.analyses.ast_printer import AstPrinterPass
 from puzzlespec.compiler.passes.envobj import EnvsObj
-from puzzlespec.compiler.passes.transforms.substitution import SubMapping, SubstitutionPass
 from . import ir
 from ..passes.analyses.pretty_printer import PrettyPrinterPass, PrettyPrintedExpr
 from .envs import SymTable, TypeEnv
@@ -14,8 +13,6 @@ from ..passes.transforms.cse import CSE
 from ..passes.analyses.getter import VarGetter, VarSet
 from ..passes.analyses.kind_check import KindCheckingPass
 #from ..passes.analyses.ast_printer import AstPrinterPass, PrintedAST
-from ..passes.analyses.evaluator import EvalPass, EvalResult, VarMap
-from .utils import _is_kind
 class PuzzleSpec:
 
     def __init__(self,
@@ -36,8 +33,13 @@ class PuzzleSpec:
             obls = ir.TupleLit(ir.TupleT())
         else:
             assert isinstance(obls, ir.TupleLit)
-        Ts = ir.TupleT(*self.tenv.vars.values())
-        self._spec = ir.Spec(cons=rules, obls=obls, Ts=Ts)
+        sids = []
+        Ts = []
+        for sid, T in self.tenv.vars.items():
+            sids.append(sid)
+            Ts.append(T)
+        Ts = ir.TupleT(*Ts)
+        self._spec = ir.Spec(cons=rules, obls=obls, Ts=Ts, sids=tuple(sids))
         self._ph_check()
         self._kind_check()
 
@@ -78,7 +80,11 @@ class PuzzleSpec:
         pm.run(new_spec_node, ctx=ctx)
         new_sids = set(v.sid for v in ctx.get(VarSet).vars)
         new_sym = self.sym.copy(new_sids)
-        new_tenv = self.tenv.copy(new_spec_node.Ts._children)
+
+        tmap = {sid: T for sid, T in zip(new_spec_node.sids, new_spec_node.Ts._children)}
+        new_tenv = TypeEnv()
+        for sid, T in tmap.items():
+            new_tenv.add(sid, T)
         return PuzzleSpec(
             name=self.name,
             sym=new_sym,

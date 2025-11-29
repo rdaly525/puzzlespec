@@ -380,6 +380,7 @@ class Unit(Value):
 class Lambda(Value):
     _numc = 2
     def __init__(self, T: Type, body: Value):
+        assert isinstance(T, PiT)
         super().__init__(T, body)
 
 ### Int/Bool 
@@ -465,6 +466,14 @@ class Universe(Value):
     def __init__(self, T: Type):
         super().__init__(T)
 
+# Dom(T) with literal elements
+class DomLit(Value):
+    _numc = -1
+    def __init__(self, T: Type, *elems: Value):
+        if not all(isinstance(elem, Value) for elem in elems):
+            raise ValueError("DomLit children must be Values")
+        super().__init__(T, *elems)
+
 # Int -> Dom[Int]
 class Fin(Value):
     _numc = 2
@@ -548,27 +557,27 @@ class Inj(Value):
 
 # (A|B|...) -> (A->T, B->T,...) -> T
 class Match(Value):
-    _numc = 3
-    def __init__(self, T: Type, scrut: Value, branches: Value):
-        super().__init__(T, scrut, branches)
+    _numc = -1
+    def __init__(self, T: Type, scrut: Value, *branches: Value):
+        super().__init__(T, scrut, *branches)
 
-# Dom(A) -> (A->Bool) -> Dom(A)
+# Func(Dom(A) -> Bool) -> Dom(A)
 class Restrict(Value):
-    _numc = 3
-    def __init__(self, T: Type, domain: Value, pred: Value):
-        super().__init__(T, domain, pred)
+    _numc = 2
+    def __init__(self, T: Type, func: Value):
+        super().__init__(T, func)
 
-# Dom(A) -> (A -> Bool) -> Bool
+# Func(Dom(A) -> Bool) -> Bool
 class Forall(Value):
-    _numc = 3
-    def __init__(self, T: Type, domain: Value, fun: Value):
-        super().__init__(T, domain, fun)
+    _numc = 2
+    def __init__(self, T: Type, func: Value):
+        super().__init__(T, func)
 
-# Dom(A) -> (A -> Bool) -> Bool
+# Func(Dom(A) -> Bool) -> Bool
 class Exists(Value):
-    _numc = 3
-    def __init__(self, T: Type, domain: Value, fun: Value):
-        super().__init__(T, domain, fun)
+    _numc = 2
+    def __init__(self, T: Type, func: Value):
+        super().__init__(T, func)
 
 # Dom(A) -> (A->B) -> Func(Dom(A)->B)
 class Map(Value):
@@ -623,6 +632,11 @@ class ApplyFunc(Value):
     def __init__(self, T: Type, func: Value, arg: Value):
         super().__init__(T, func, arg)
 
+class Apply(Value):
+    _numc = 3
+    def __init__(self, T: Type, lam: Value, arg: Value):
+        super().__init__(T, lam, arg)
+
 # only used on Seq Funcs TODO maybe should have scan as the fundimental IR node
 # Seq[A] -> ((A,B) -> B) -> B -> B
 class Fold(Value):
@@ -654,8 +668,11 @@ class ElemAt(Value):
 
 # Special Node for 'spec'
 class Spec(Node):
+    _fields = ('sids',)
     _numc = 3
-    def __init__(self, cons: Value, obls: Value, Ts: TupleT):
+    def __init__(self, cons: Value, obls: Value, Ts: TupleT, sids: tp.Tuple[int]):
+        self.sids = sids
+        assert len(sids) == len(Ts._children)
         super().__init__(cons, obls, Ts)
 
     @property
@@ -816,6 +833,7 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     Fin: 9,
     Range: 9,
     EnumLit: 9,
+    DomLit: 9,
     Card: 9,
     IsMember: 9,
     CartProd: 9,
@@ -832,6 +850,7 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     FuncLit: 10,
     Image: 10,
     ApplyFunc: 10,
+    Apply: 10,
     RestrictEq: 10,
     Slice: 10,
     Lambda: 12,

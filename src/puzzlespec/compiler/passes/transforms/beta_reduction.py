@@ -15,7 +15,6 @@ class BetaReductionPass(Transform):
     enable_memoization = False
     requires: tp.Tuple[type, ...] = ()
     produces: tp.Tuple[type, ...] = ()
-    #cse=True
     name = "beta_reduction"
 
 
@@ -112,26 +111,22 @@ class BetaReductionPass(Transform):
         # no change outside of β-redexes
         return node
 
-    @handles(ir.ApplyFunc)
-    def _(self, node: ir.ApplyFunc):
+    @handles(ir.Apply)
+    def _(self, node: ir.Apply):
         # first recursively reduce inside
-        T, func, arg = self.visit_children(node)
+        T, lam, arg = self.visit_children(node)
+        assert isinstance(lam, ir.Lambda)
+        piT, body = lam._children
 
-        if isinstance(func, ir.Map):
-            domT, dom, lam = func._children
-            piT, body = lam._children
+        # (Lam(body) arg)
 
-            # (Lam(body) arg)
+        # 1. shift argument up by 1 for the binder we’re eliminating
+        arg_p1 = self.shift(arg, +1, cutoff=0)
 
-            # 1. shift argument up by 1 for the binder we’re eliminating
-            arg_p1 = self.shift(arg, +1, cutoff=0)
+        # 2. substitute for "0" (j=0) in body
+        body_sub = self.subst(body, 0, arg_p1, depth=0)
 
-            # 2. substitute for "0" (j=0) in body
-            body_sub = self.subst(body, 0, arg_p1, depth=0)
+        # 3. shift everything down by 1 (remove the binder)
+        body_m1 = self.shift(body_sub, -1, cutoff=0)
 
-            # 3. shift everything down by 1 (remove the binder)
-            body_m1 = self.shift(body_sub, -1, cutoff=0)
-
-            return body_m1
-
-        return node.replace(T, func, arg)
+        return body_m1

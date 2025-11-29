@@ -97,42 +97,62 @@ class ConstFoldPass(Transform):
                 return ir.Lit(ir.BoolT(), val=False)
         return node.replace(T, domain, val)
         
+    @handles(ir.Forall)
+    def _(self, node: ir.Forall):
+        T, func = self.visit_children(node)
+        # Extract domain and lambda from func if it's a Map
+        if isinstance(func, ir.FuncLit):
+            _, dom, *vals = func._children
+            dom_size = utils._dom_size(dom)
+            if dom_size is not None and dom_size <= self.max_dom_size:
+                conj_vals = []
+                for v in utils._iterate(dom):
+                    assert v is not None
+                    i = func.layout.index(v)
+                    assert i is not None and 0 <= i < len(vals)
+                    conj_vals.append(vals[i])
+                return ir.Conj(T, *conj_vals)
 
-    # should check for free vars/outer bound vars in pred
-    # but semantically should work regardless
-    #@handles(ir.Forall)
-    #def _(self, node: ir.Forall):
-    #    T, dom, pred = self.visit_children(node)
-    #    dom_size = utils._dom_size(dom)
-    #    if dom_size is not None and dom_size <= self.max_dom_size:
-    #        apps = []
-    #        m = ir.Map(
-    #            ir.FuncT(dom, pred.T),
-    #            dom,
-    #            pred
-    #        )
-    #        for v in utils._iterate(dom):
-    #            assert v is not None
-    #            apps.append(ir.ApplyFunc(T, m, v.node))
-    #        return ir.Conj(T, *apps)
-    #    return node.replace(T, dom, pred)
+        return node.replace(T, func)
 
     @handles(ir.Exists)
     def _(self, node: ir.Exists):
-        T, dom, pred = self.visit_children(node)
-        dom_size = utils._dom_size(dom)
-        if dom_size is not None and dom_size <= self.max_dom_size:
-            apps = []
-            m = ir.Map(
-                ir.FuncT(dom, pred.T),
-                dom,
-                pred
-            )
+        T, func = self.visit_children(node)
+        # Extract domain and lambda from func if it's a Map
+        if isinstance(func, ir.FuncLit):
+            _, dom, *vals = func._children
+            disj_vals = []
             for v in utils._iterate(dom):
                 assert v is not None
-                apps.append(ir.ApplyFunc(T, m, v))
-            return ir.Disj(T, *apps)
-        return node.replace(T, dom, pred)
+                i = func.layout.index(v)
+                assert i is not None and 0 <= i < len(vals)
+                disj_vals.append(vals[i])
+            return ir.Disj(T, *disj_vals)
+        return node.replace(T, func)
+
+    @handles(ir.Restrict)
+    def _(self, node: ir.Restrict):
+        T, func = self.visit_children(node)
+        # Extract domain and predicate values from func if it's a FuncLit
+        if isinstance(func, ir.FuncLit):
+            _, dom, *vals = func._children
+            dom_size = utils._dom_size(dom)
+            if dom_size is not None and dom_size <= self.max_dom_size:
+                # Early out: check that all predicate values are literals
+                if not all(isinstance(v, ir.Lit) for v in vals):
+                    return node.replace(T, func)
+                restricted_elems = []
+                for v in utils._iterate(dom):
+                    assert v is not None
+                    i = func.layout.index(v)
+                    assert i is not None and 0 <= i < len(vals)
+                    pred_val = vals[i]
+                    # Only include elements where predicate is True
+                    if isinstance(pred_val.T, ir.BoolT) and pred_val.val is True:
+                        restricted_elems.append(v)
+                # Create DomLit with the restricted elements
+                return ir.DomLit(T, *restricted_elems)
+        return node.replace(T, func)
 
     # Higher order ops
     #@handles(ir.SumReduce)
