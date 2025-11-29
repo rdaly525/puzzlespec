@@ -377,6 +377,30 @@ class KindCheckingPass(Analysis):
             raise TypeError(f"EnumLit label '{node.label}' not in enum labels {T.labels}")
         return T
 
+    @handles(ir.DomLit)
+    def _(self, node: ir.DomLit):
+        T, *elemTs = self.visit_children(node)
+        # Verify type is DomT
+        if not _is_kind(T, ir.DomT):
+            raise TypeError(f"DomLit must have DomT type, got {T}")
+        # Verify all elements have the same type
+        if len(elemTs) > 0:
+            first_elemT = elemTs[0]
+            for i, elemT in enumerate(elemTs):
+                if not _is_same_kind(elemT, first_elemT):
+                    raise TypeError(f"DomLit element {i} has type {elemT} which differs from first element type {first_elemT}")
+            # Verify element type matches domain carrier type
+            if not _is_same_kind(first_elemT, T.carT):
+                raise TypeError(f"DomLit element type {first_elemT} does not match domain carrier type {T.carT}")
+        # Verify domain attributes: fins=(True,), ords=(True,), axes=()
+        if T.fins != (True,):
+            raise TypeError(f"DomLit domain must have fins=(True,), got {T.fins}")
+        if T.ords != (True,):
+            raise TypeError(f"DomLit domain must have ords=(True,), got {T.ords}")
+        if T.axes != ():
+            raise TypeError(f"DomLit domain must have axes=(), got {T.axes}")
+        return T
+
     @handles(ir.Card)
     def _(self, node: ir.Card):
         T, domainT = self.visit_children(node)
@@ -521,16 +545,14 @@ class KindCheckingPass(Analysis):
 
     @handles(ir.Match)
     def _(self, node: ir.Match):
-        T, scrutT, branchesT = self.visit_children(node)
+        T, scrutT, *branchesT = self.visit_children(node)
         # Verify scrutinee is a Value with SumT type
         if not _is_kind(scrutT, ir.SumT):
             raise TypeError(f"Match scrutinee must be SumT, got {scrutT}")
         # Verify branches is a Value with TupleT type
-        if not _is_kind(branchesT, ir.TupleT):
-            raise TypeError(f"Match branches must be TupleT, got {branchesT}")
-        if len(branchesT.elemTs) != len(scrutT.elemTs):
-            raise TypeError(f"Match branches count {len(branchesT.elemTs)} does not match sum type count {len(scrutT.elemTs)}")
-        for i, (sum_elem_T, branch_T) in enumerate(zip(scrutT.elemTs, branchesT.elemTs)):
+        if len(branchesT) != len(scrutT.elemTs):
+            raise TypeError(f"Match branches count {len(branchesT)} does not match sum type count {len(scrutT.elemTs)}")
+        for i, (sum_elem_T, branch_T) in enumerate(zip(scrutT.elemTs, branchesT)):
             if not _is_kind(branch_T, (ir.PiT, ir.PiTHOAS)):
                 raise TypeError(f"Match branch {i} must be lambdaT matching sum component {sum_elem_T} to match result type {T}. Got {branch_T}")
             # Verify branch argument type matches sum component
@@ -542,58 +564,52 @@ class KindCheckingPass(Analysis):
 
     @handles(ir.Restrict)
     def _(self, node: ir.Restrict):
-        T, domainT, predT = self.visit_children(node)
+        T, funcT = self.visit_children(node)
         # Verify type is DomT
         if not _is_kind(T, ir.DomT):
             raise TypeError(f"Restrict must have DomT type, got {T}")
-        # Verify domain argument is a domain
-        if not _is_kind(domainT, ir.DomT):
-            raise TypeError(f"Restrict expects domain argument, got {domainT}")
-        # Verify predicate is a PiT
-        if not _is_kind(predT, (ir.PiT, ir.PiTHOAS)):
-            raise TypeError(f"Restrict expects PiT predicate, got {predT}")
-        if not _is_same_kind(predT.argT, domainT.carT):
-            raise TypeError(f"Restrict predicate argument type {predT.argT} does not match domain carrier type {domainT.carT}")
-        if not _is_kind(predT.resT, ir.BoolT):
-            raise TypeError(f"Restrict predicate must return Bool, got {predT.resT}")
+        # Verify function argument is a FuncT
+        if not _is_kind(funcT, ir.FuncT):
+            raise TypeError(f"Restrict expects FuncT argument, got {funcT}")
+        # Verify function returns Bool
+        if not _is_kind(funcT.piT.resT, ir.BoolT):
+            raise TypeError(f"Restrict expects FuncT with Bool result type, got {funcT.piT.resT}")
+        # Verify function argument type matches domain carrier type
+        domainT = funcT.dom.T
+        if not _is_same_kind(funcT.piT.argT, domainT.carT):
+            raise TypeError(f"Restrict function argument type {funcT.piT.argT} does not match domain carrier type {domainT.carT}")
+        # Verify result carrier type matches domain carrier type
         if not _is_same_kind(T.carT, domainT.carT):
             raise TypeError(f"Restrict result carrier type {T.carT} does not match domain carrier type {domainT.carT}")
         return T
 
     @handles(ir.Forall)
     def _(self, node: ir.Forall):
-        T, domainT, funT = self.visit_children(node)
+        T, funcT = self.visit_children(node)
         # Verify type is BoolT
         if not _is_kind(T, ir.BoolT):
             raise TypeError(f"Forall must have BoolT type, got {T}")
-        # Verify domain argument is a domain
-        if not _is_kind(domainT, ir.DomT):
-            raise TypeError(f"Forall expects domain argument, got {domainT}")
-        # Verify function is a PiT
-        if not _is_kind(funT, (ir.PiT, ir.PiTHOAS)):
-            raise TypeError(f"Forall expects PiT function, got {funT}")
-        if not _is_same_kind(funT.argT, domainT.carT):
-            raise TypeError(f"Forall function argument type {funT.argT} does not match domain carrier type {domainT.carT}")
-        if not _is_kind(funT.resT, ir.BoolT):
-            raise TypeError(f"Forall function must return Bool, got {funT.resT}")
+        # Verify function argument is a FuncT
+        if not _is_kind(funcT, ir.FuncT):
+            raise TypeError(f"Forall expects FuncT argument, got {funcT}")
+        # Verify function returns Bool
+        if not _is_kind(funcT.piT.resT, ir.BoolT):
+            raise TypeError(f"Forall expects FuncT with Bool result type, got {funcT.piT.resT}")
+        # Verify function argument type matches domain carrier type
         return T
 
     @handles(ir.Exists)
     def _(self, node: ir.Exists):
-        T, domainT, funT = self.visit_children(node)
+        T, funcT = self.visit_children(node)
         # Verify type is BoolT
         if not _is_kind(T, ir.BoolT):
             raise TypeError(f"Exists must have BoolT type, got {T}")
-        # Verify domain argument is a domain
-        if not _is_kind(domainT, ir.DomT):
-            raise TypeError(f"Exists expects domain argument, got {domainT}")
-        # Verify function is a PiT
-        if not _is_kind(funT, ir.PiT):
-            raise TypeError(f"Exists expects PiT function, got {funT}")
-        if not _is_same_kind(funT.argT, domainT.carT):
-            raise TypeError(f"Exists function argument type {funT.argT} does not match domain carrier type {domainT.carT}")
-        if not _is_same_kind(funT.resT, ir.BoolT):
-            raise TypeError(f"Exists function must return Bool, got {funT.resT}")
+        # Verify function argument is a FuncT
+        if not _is_kind(funcT, ir.FuncT):
+            raise TypeError(f"Exists expects FuncT argument, got {funcT}")
+        # Verify function returns Bool
+        if not _is_kind(funcT.piT.resT, ir.BoolT):
+            raise TypeError(f"Exists expects FuncT with Bool result type, got {funcT.piT.resT}")
         return T
 
     @handles(ir.Map)

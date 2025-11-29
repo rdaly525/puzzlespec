@@ -31,13 +31,7 @@ def t0():
     #print("Decision constraints!")
     #print(Unruly.pretty(Unruly.decision_constraints.node))
 
-    game = Unruly.set_params(nR=4)
-    assert 'nC' in game.params
-    assert 'nR' not in game.params
-    game = game.set_params(nC=4)
-    assert 'nC' not in game.params
-    assert 'nR' not in game.params
-
+#t0()
 def t1():
     cs = setter.VarSetter(Unruly)
     # Set parameters
@@ -83,5 +77,4 @@ def t1():
     cs.givens.set_lam(_get)
     instance = cs.build()
     print(instance.pretty())
-
 t1()

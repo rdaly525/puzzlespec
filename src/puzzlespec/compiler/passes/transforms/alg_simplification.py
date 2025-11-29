@@ -3,7 +3,7 @@ from hmac import new
 import math
 
 from ..pass_base import Transform, Context, handles
-from ...dsl import ir
+from ...dsl import ir, utils
 import typing as tp
 
 
@@ -29,6 +29,10 @@ class AlgebraicSimplificationPass(Transform):
     requires: tp.Tuple[type, ...] = ()
     produces: tp.Tuple[type, ...] = ()
     name = "alg_simplification"
+
+    def __init__(self, max_dom_size=20):
+        self.max_dom_size=max_dom_size
+        super().__init__()
 
     # Arithmetic
 
@@ -180,20 +184,40 @@ class AlgebraicSimplificationPass(Transform):
 
     @handles(ir.Match)
     def _(self, node: ir.Match):
-        T, scrut, cases = self.visit_children(node)
+        T, scrut, *cases = self.visit_children(node)
         assert isinstance(scrut.T, ir.SumT)
         if isinstance(scrut, ir.Inj):
             idx = scrut.idx
             assert isinstance(idx, int)
-            scrutT, val = scrut._children
-            casesT = cases.T
-            assert isinstance(casesT, ir.TupleT)
-            assert idx < len(casesT)
-            dom = ir.Universe(ir.DomT.make(T, False, False))
-            m = ir.Map(
-                T=ir.FuncT(dom, casesT[idx]),
-                dom=dom,
-                fun= cases._children[1:][idx]
-            )
-            return ir.ApplyFunc(T, m, val)
-        return node.replace(T, scrut, cases)
+            _, val = scrut._children
+            assert idx < len(cases)
+            return ir.Apply(T, cases[idx], val)
+        return node.replace(T, scrut, *cases)
+
+    @handles(ir.ApplyFunc)
+    def _(self, node: ir.ApplyFunc):
+        T, func, arg = self.visit_children(node)
+        # TODO Add obligation for arg being in func's domain
+        if isinstance(func, ir.Map):
+            _, _, lam = func._children
+            return ir.Apply(T, lam, arg)
+        return node.replace(T, func, arg)
+
+    @handles(ir.Map)
+    def _(self, node: ir.Map):
+        T, dom, lam = self.visit_children(node)
+        dom_size = utils._dom_size(dom)
+        if dom_size is not None and dom_size <= self.max_dom_size:
+            # Convert Map to FuncLit by evaluating lambda for each domain element
+            elems = []
+            val_map = {}
+            for i, v in enumerate(utils._iterate(dom)):
+                assert v is not None
+                # Apply lambda and visit to simplify
+                val = ir.Apply(T.piT.resT, lam, v)
+                val = self.visit(val)
+                elems.append(val)
+                val_map[v._key] = i
+            layout = ir._DenseLayout(val_map=val_map)
+            return ir.FuncLit(T, dom, *elems, layout=layout)
+        return node.replace(T, dom, lam)

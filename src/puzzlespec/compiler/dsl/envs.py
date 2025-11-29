@@ -12,10 +12,6 @@ class TypeEnv:
     def __contains__(self, sid: int):
         return sid in self.vars
 
-    def copy(self, Ts: tp.Iterable[ir.Type]) -> 'TypeEnv':
-        assert len(Ts) == len(self)
-        return TypeEnv(vars={sid: T for sid, T in zip(self.vars.keys(), Ts)})
-
     def add(self, sid: int, T: ir.Type):
         if sid in self.vars:
             raise ValueError(f"Variable with sid={sid} already defined")

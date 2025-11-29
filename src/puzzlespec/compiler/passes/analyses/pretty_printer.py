@@ -369,6 +369,13 @@ class PrettyPrinterPass(Analysis):
     def _(self, node: ir.EnumLit) -> str:
         return f"{node.T.name}.{node.label}"
 
+    @handles(ir.DomLit)
+    def _(self, node: ir.DomLit) -> str:
+        elements = self.visit_children(node)[1:]  # Skip type at index 0
+        if len(elements) == 0:
+            return "{}"
+        return "{" + ", ".join(elements) + "}"
+
     @handles(ir.Card)
     def _(self, node: ir.Card) -> str:
         _, domain_expr = self.visit_children(node)  # Skip type at index 0
@@ -430,13 +437,12 @@ class PrettyPrinterPass(Analysis):
 
     @handles(ir.Match)
     def _(self, node: ir.Match) -> str:
-        _, scrut_node, branches = node._children
+        _, scrut_node, *branches = node._children
         scrut_expr = self.visit(scrut_node)
-        assert isinstance(branches, ir.TupleLit)
-        assert all(isinstance(branch, (ir.Lambda, ir.LambdaHOAS)) for branch in branches._children[1:])
-        branch_exprs = [self.visit(branch) for branch in branches._children[1:]]
+        assert all(isinstance(branch, (ir.Lambda, ir.LambdaHOAS)) for branch in branches)
+        branch_exprs = [self.visit(branch) for branch in branches]
         branch_argTs = []
-        for branch_lam in branches._children[1:]:
+        for branch_lam in branches:
             argT = self.visit(branch_lam.T.argT)
             branch_argTs.append(argT)
         #branch_exprs_str = ", ".join(f"(λ {var_name}. {body})" for var_name, body in branch_exprs)
@@ -445,24 +451,51 @@ class PrettyPrinterPass(Analysis):
 
     @handles(ir.Restrict)
     def _(self, node: ir.Restrict) -> str:
-        _, domain_expr, (var_name, pred_expr) = self.visit_children(node)  # Skip type at index 0
-        return f"{{{var_name} ∈ {domain_expr} | {pred_expr}}}"
+        T, func_node = node._children
+        # Extract domain and lambda from func (typically a Map node)
+        if isinstance(func_node, ir.Map):
+            funcT, dom, lam = func_node._children
+            domain_expr = self.visit(dom)
+            (var_name, pred_expr) = self.visit(lam)
+            return f"{{{var_name} ∈ {domain_expr} | {pred_expr}}}"
+        else:
+            # Fallback for other func types (FuncLit, VarRef, etc.)
+            func_expr = self.visit(func_node)
+            return f"{{x ∈ dom({func_expr}) | {func_expr}(x)}}"
 
     @handles(ir.Forall)
     def _(self, node: ir.Forall) -> str:
-        _, domain_expr, (var_name, body_expr) = self.visit_children(node)  # Skip type at index 0
-        # Multi-line format: context on first line, body indented on next line
-        # If body_expr is multi-line (e.g., nested Forall/Exists), indent all lines
-        body_formatted = self._indent_expr(body_expr)
-        return f"∀ {var_name} ∈ {domain_expr}:\n{body_formatted}"
+        T, func_node = node._children
+        # Extract domain and lambda from func (typically a Map node)
+        if isinstance(func_node, ir.Map):
+            funcT, dom, lam = func_node._children
+            domain_expr = self.visit(dom)
+            (var_name, body_expr) = self.visit(lam)
+            # Multi-line format: context on first line, body indented on next line
+            # If body_expr is multi-line (e.g., nested Forall/Exists), indent all lines
+            body_formatted = self._indent_expr(body_expr)
+            return f"∀ {var_name} ∈ {domain_expr}:\n{body_formatted}"
+        else:
+            # Fallback for other func types (FuncLit, VarRef, etc.)
+            func_expr = self.visit(func_node)
+            return f"∀ x ∈ dom({func_expr}): {func_expr}(x)"
 
     @handles(ir.Exists)
     def _(self, node: ir.Exists) -> str:
-        _, domain_expr, (var_name, body_expr) = self.visit_children(node)  # Skip type at index 0
-        # Multi-line format: context on first line, body indented on next line
-        # If body_expr is multi-line (e.g., nested Forall/Exists), indent all lines
-        body_formatted = self._indent_expr(body_expr)
-        return f"∃ {var_name} ∈ {domain_expr}:\n{body_formatted}"
+        T, func_node = node._children
+        # Extract domain and lambda from func (typically a Map node)
+        if isinstance(func_node, ir.Map):
+            funcT, dom, lam = func_node._children
+            domain_expr = self.visit(dom)
+            (var_name, body_expr) = self.visit(lam)
+            # Multi-line format: context on first line, body indented on next line
+            # If body_expr is multi-line (e.g., nested Forall/Exists), indent all lines
+            body_formatted = self._indent_expr(body_expr)
+            return f"∃ {var_name} ∈ {domain_expr}:\n{body_formatted}"
+        else:
+            # Fallback for other func types (FuncLit, VarRef, etc.)
+            func_expr = self.visit(func_node)
+            return f"∃ x ∈ dom({func_expr}): {func_expr}(x)"
 
     ## Funcs (i.e., containers)
     @handles(ir.Map)

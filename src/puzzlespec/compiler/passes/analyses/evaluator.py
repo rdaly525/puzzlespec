@@ -364,16 +364,32 @@ class EvalPass(Analysis):
     @handles()
     def _(self, node: ir.Forall) -> tp.Any:
         """Analyze forall nodes."""
-        domain, fun = self.visit_children(node)
-        # fun is a Lambda function
-        return reduce(lambda a, b: a & b, [fun(elem) for elem in domain], True)
+        func, = self.visit_children(node)
+        # func is a FuncT value (e.g., Map, FuncLit, VarRef)
+        # When evaluated, it should be a dict or list
+        if isinstance(func, dict):
+            # For dicts, check all values
+            return all(func.values())
+        elif isinstance(func, list):
+            # For lists, check all elements
+            return all(func)
+        else:
+            raise NotImplementedError(f"Forall evaluation for {type(func)} not implemented")
 
     @handles()
     def _(self, node: ir.Exists) -> tp.Any:
         """Analyze exists nodes."""
-        domain, fun = self.visit_children(node)
-        # fun is a Lambda function
-        return reduce(lambda a, b: a | b, [fun(elem) for elem in domain], False)
+        func, = self.visit_children(node)
+        # func is a FuncT value (e.g., Map, FuncLit, VarRef)
+        # When evaluated, it should be a dict or list
+        if isinstance(func, dict):
+            # For dicts, check any values
+            return any(func.values())
+        elif isinstance(func, list):
+            # For lists, check any elements
+            return any(func)
+        else:
+            raise NotImplementedError(f"Exists evaluation for {type(func)} not implemented")
 
     @handles(ir.AllDistinct)
     def _(self, node: ir.AllDistinct) -> tp.Any:

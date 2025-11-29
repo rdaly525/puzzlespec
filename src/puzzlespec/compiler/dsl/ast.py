@@ -512,7 +512,7 @@ class SumExpr(Expr):
         resT0 = branch_exprs[0].T.resT
         if not all(type(resT0) == type(e.T.resT) for e in branch_exprs):
             raise ValueError(f"Expected all branches to have result type {resT0}, got {', '.join([repr(e.T.resT) for e in branch_exprs])}")
-        match_node = ir.Match(resT0.node, self.node, TupleExpr.make([e.node for e in branch_exprs]).node)
+        match_node = ir.Match(resT0.node, self.node, *[e.node for e in branch_exprs])
         # TODO probably should prove type equality for all result types
         return wrap(match_node)
 
@@ -533,9 +533,9 @@ class LambdaExpr(Expr):
     def argT(self) -> ir.Type:
         return self.T.argT
 
-    @property
-    def resT(self) -> ir.Type:
-        return self.T.resT
+    #@property
+    #def resT(self) -> ir.Type:
+    #    return self.T.resT
 
     def __repr__(self):
         return f"{self.argT} -> {self.resT}"
@@ -568,11 +568,11 @@ class DomainExpr(Expr):
         raise NotImplementedError()
     
     def restrict(self, pred_fun: tp.Callable) -> DomainExpr:
-        lambda_expr = make_lambda(pred_fun, sort=self.T.carT)
-        if not isinstance(lambda_expr.T.resT, BoolType):
-            raise ValueError(f"Restrict predicate must return Bool, got {lambda_expr.T.resT}")
+        func_expr = self.map(pred_fun)
+        if not isinstance(func_expr.T.piT.resT, BoolType):
+            raise ValueError(f"Restrict predicate must return Bool, got {func_expr.T.piT.resT}")
         T = ir.DomT.make(carT=self.T.carT.node, fin=self.T.fin, ord=self.T.ord)
-        node = ir.Restrict(T, self.node, lambda_expr.node)
+        node = ir.Restrict(T, func_expr.node)
         return DomainExpr(node)
 
     def map(self, fn: tp.Callable) -> FuncExpr:
@@ -617,17 +617,17 @@ class DomainExpr(Expr):
         return wrap(coprod_node)
 
     def forall(self, pred_fun: tp.Callable) -> BoolExpr:
-        lambda_expr = make_lambda(pred_fun, sort=self.T.carT)
-        if not isinstance(lambda_expr.T.resT, BoolType):
-            raise ValueError(f"Forall predicate must return Bool, got {lambda_expr.T.resT}")
-        node = ir.Forall(ir.BoolT(), self.node, lambda_expr.node)
+        func_expr = self.map(pred_fun)
+        if not isinstance(func_expr.T.piT.resT, BoolType):
+            raise ValueError(f"Forall predicate must return Bool, got {func_expr.T.piT.resT}")
+        node = ir.Forall(ir.BoolT(), func_expr.node)
         return BoolExpr(node)
 
     def exists(self, pred_fun: tp.Callable) -> BoolExpr:
-        lambda_expr = make_lambda(pred_fun, sort=self.T.carT)
-        if not isinstance(lambda_expr.T.resT, BoolType):
-            raise ValueError(f"Exists predicate must return Bool, got {lambda_expr.T.resT}")
-        node = ir.Exists(ir.BoolT(), self.node, lambda_expr.node)
+        func_expr = self.map(pred_fun)
+        if not isinstance(func_expr.T.piT.resT, BoolType):
+            raise ValueError(f"Exists predicate must return Bool, got {func_expr.T.piT.resT}")
+        node = ir.Exists(ir.BoolT(), func_expr.node)
         return BoolExpr(node)
 
     def dom_proj(self, idx: int) -> DomainExpr:
