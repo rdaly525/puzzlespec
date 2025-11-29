@@ -3,6 +3,7 @@ from ..dsl.envs import SymTable, TypeEnv
 
 # Common Analysis Object
 class EnvsObj(AnalysisObject):
+    persistent = True
     def __init__(self, sym: SymTable, tenv: TypeEnv):
         self.sym = sym
         self.tenv = tenv 
