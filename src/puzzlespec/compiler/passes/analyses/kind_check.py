@@ -614,6 +614,27 @@ class KindCheckingPass(Analysis):
             raise TypeError(f"Map result type {T.lam.resT} does not match function result type {funT.resT}")
         return T
 
+    @handles(ir.FuncLit)
+    def _(self, node: ir.FuncLit):
+        T, domT, *elemsT = self.visit_children(node)
+        # Verify type is PiT
+        if not _is_kind(T, ir.PiT):
+            raise TypeError(f"FuncLit must have PiT type, got {T}")
+        # Verify domain argument is a domain
+        if not _is_kind(domT, ir.DomT):
+            raise TypeError(f"FuncLit expects domain argument, got {domT}")
+        if isinstance(node.layout, ir._DenseLayout):
+            if len(elemsT) != node.layout.num_elems:
+                raise TypeError(f"FuncLit has {len(elemsT)} elements but layout has {node.layout.num_elems} elements")
+            for i, elemT in enumerate(elemsT):
+                if not _is_same_kind(elemT, T.lamT.resT):
+                    raise TypeError(f"FuncLit element {i} type {elemT} does not match function result type {T.lamT.resT}")
+        elif isinstance(node.layout, ir._SparseLayout):
+            raise NotImplementedError("SparseFuncLit not implemented")
+        else:
+            raise NotImplementedError(f"Unsupported FuncLit layout: {node.layout}")
+        return T
+
     @handles(ir.Image)
     def _(self, node: ir.Image):
         raise NotImplementedError("Image not implemented")
@@ -627,16 +648,6 @@ class KindCheckingPass(Analysis):
         if not node.T.eq(funcT.resT):
             raise TypeError(f"Image result type {node.T} does not match function result type {funcT.resT}")
         return node.T
-
-    @handles(ir.Domain)
-    def _(self, node: ir.Domain):
-        T, piT = self.visit_children(node)
-        # Verify type is DomT
-        if not _is_kind(T, ir.DomT):
-            raise TypeError(f"Domain must have DomT type, got {T}")
-        if not _is_kind(piT, ir.PiT):
-            raise TypeError(f"Domain expects PiT argument, got {piT}")
-        return T
 
     @handles(ir.Apply)
     def _(self, node: ir.Apply):
@@ -738,6 +749,20 @@ class KindCheckingPass(Analysis):
     ##############################
     ## Surface-level IR nodes (Used for analysis, but can be collapsed)
     ##############################
+
+    # Should always be root
+    @handles(ir.Spec)
+    def _(self, node: ir.Spec):
+        consT, oblsT, Ts = self.visit_children(node)
+        # Verify cons is a TupleLit
+        for T in (consT, oblsT):
+            if not _is_kind(T, ir.TupleT):
+                raise TypeError(f"Spec cons/obls must be a TupleT, got {type(T)}")
+            if not all(_is_kind(c, ir.BoolT) for c in T._children):
+                raise TypeError(f"Spec cons/obls must have BoolT children, got {T}")
+        if not _is_kind(Ts, ir.TupleT):
+            raise TypeError(f"Spec Ts must be a TupleT, got {type(Ts)}")
+        return None
 
     @handles(ir.And)
     def _(self, node: ir.And):

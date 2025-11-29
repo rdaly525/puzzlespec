@@ -12,15 +12,17 @@ class TypeEnv:
     def __contains__(self, sid: int):
         return sid in self.vars
 
-    def copy(self, sids: tp.Set[int] = None) -> 'TypeEnv':
-        if sids is None:
-            sids = self.vars.keys()
-        return TypeEnv(vars={sid: self.vars[sid] for sid in sids})
+    def copy(self, Ts: tp.Iterable[ir.Type]) -> 'TypeEnv':
+        assert len(Ts) == len(self)
+        return TypeEnv(vars={sid: T for sid, T in zip(self.vars.keys(), Ts)})
 
     def add(self, sid: int, T: ir.Type):
         if sid in self.vars:
             raise ValueError(f"Variable with sid={sid} already defined")
         self.vars[sid] = T
+
+    def __len__(self):
+        return len(self.vars)
 
 
 
@@ -71,7 +73,7 @@ class SymTable:
         self._name_to_sid[name] = sid
   
     def __contains__(self, sid):
-        return sid in self.entries
+        return sid in self.entries and (not self[sid].invalid)
 
     def __getitem__(self, sid):
         return self.entries.get(sid)
@@ -90,13 +92,13 @@ class SymTable:
         return self.entries[sid].role
 
     def get_params(self) -> tp.List[int]:
-        return [sid for sid, e in self.entries.items() if e.role == 'P']
+        return [sid for sid, e in self.entries.items() if e.role == 'P' and not e.invalid]
 
     def get_gen_vars(self) -> tp.List[int]:
-        return [sid for sid, e in self.entries.items() if e.role == 'G']
+        return [sid for sid, e in self.entries.items() if e.role == 'G' and not e.invalid]
 
     def get_decision_vars(self) -> tp.List[int|str]:
-        return [sid for sid, e in self.entries.items() if e.role == 'D']
+        return [sid for sid, e in self.entries.items() if e.role == 'D' and not e.invalid]
 
     def __iter__(self):
         for sid in self.entries:

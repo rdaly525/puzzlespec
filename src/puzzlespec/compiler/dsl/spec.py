@@ -23,19 +23,21 @@ class PuzzleSpec:
         sym: SymTable,
         tenv: TypeEnv,
         rules: ir.TupleLit=None,
-        num_rules: int = None
+        obls: ir.TupleLit=None
     ):
         self.name = name
         self.sym = sym
         self.tenv = tenv
         if rules is None:
-            rules = ir.TupleLit()
-        if num_rules is None:
-            num_rules = rules.num_children
-        if num_rules > rules.num_children:
-            raise ValueError(f"Expected at most {rules.num_children} rules, got {num_rules}")
-        self._rules = rules
-        self._num_rules = num_rules
+            rules = ir.TupleLit(ir.UnitT())
+        else:
+            assert isinstance(rules, ir.TupleLit)
+        if obls is None:
+            obls = ir.TupleLit(ir.TupleT())
+        else:
+            assert isinstance(obls, ir.TupleLit)
+        Ts = ir.TupleT(*self.tenv.vars.values())
+        self._spec = ir.Spec(cons=rules, obls=obls, Ts=Ts)
         self._ph_check()
         self._kind_check()
 
@@ -45,11 +47,7 @@ class PuzzleSpec:
                 raise ValueError(f"Found placeholder node {node} in rules")
             for c in node._children:
                 check(c)
-        check(self._rules)
-
-    @property
-    def rules_T(self) -> ir.Type:
-        return ir.TupleT(*(ir.BoolT() for _ in self._rules._children[1:]))
+        check(self._spec)
 
     @property
     def envs_obj(self) -> EnvsObj:
@@ -59,7 +57,7 @@ class PuzzleSpec:
         if ctx is None:
             ctx = Context()
         if node is None:
-            node = self._rules
+            node = self._spec
         pm = PassManager(*passes)
         pm.run(node, ctx)
         return ctx
@@ -67,31 +65,26 @@ class PuzzleSpec:
     def _kind_check(self):
         ctx = Context(self.envs_obj)
         self.analyze([KindCheckingPass()], ctx=ctx)
-        # Check that the rules are a TupleT of BoolT
-        if not _is_kind(self._rules.T, ir.TupleT):
-            raise TypeError(f"Expected rules to have type {ir.TupleT(*(ir.BoolT() for _ in self._rules))}, got {self._rules.T}")
-        for rule in self._rules._children[1:]:
-            if not _is_kind(rule.T, ir.BoolT):
-                raise TypeError(f"Expected rule to have type BoolT, got {rule.T}")
 
     # applies passes, copies the tenv and sym table, returns a new spec
     def transform(self, *passes: Pass, ctx: Context = None, verbose=True) -> 'PuzzleSpec':
         if ctx is None:
             ctx = Context()
         pm = PassManager(*passes, verbose=verbose, max_iter=10)
-        new_spec_node = pm.run(self._rules, ctx=ctx)
-        if new_spec_node == self._rules:
+        new_spec_node = pm.run(self._spec, ctx=ctx)
+        if new_spec_node == self._spec:
             return self
         pm = PassManager(VarGetter())
         pm.run(new_spec_node, ctx=ctx)
         new_sids = set(v.sid for v in ctx.get(VarSet).vars)
         new_sym = self.sym.copy(new_sids)
-        new_tenv = self.tenv.copy()
+        new_tenv = self.tenv.copy(new_spec_node.Ts._children)
         return PuzzleSpec(
             name=self.name,
             sym=new_sym,
             tenv=new_tenv,
-            rules=new_spec_node
+            rules=new_spec_node.cons,
+            obls=new_spec_node.obls,
         )
 
     def optimize(self) -> 'PuzzleSpec':
@@ -104,17 +97,8 @@ class PuzzleSpec:
             BetaReductionPass(),
             #CSE(),
         ]
-        #spec = self
-        #for op in opt_passes:
-        #    spec.pretty()
-        #    spec.transform(op, ctx=ctx)
 
         opt = self.transform(opt_passes, ctx=ctx)
-        #print("NOBETA")
-        #opt.pretty()
-        #opt = opt.transform(BetaReductionPass(), ctx=ctx)
-        #print("BETA")
-        #opt.pretty()
         return opt
     
     def pretty(self, dag=False) -> str:
@@ -127,69 +111,23 @@ class PuzzleSpec:
             PrettyPrinterPass(),
             verbose=True
         )
-        pm.run(self._rules, ctx)
+        pm.run(self._spec, ctx)
         return ctx.get(PrettyPrintedExpr).text
 
+    # Returns a dict of param names to sid
+    @property
+    def params(self) -> tp.Dict[str, int]:
+        return {self.sym.get_name(sid):sid for sid in self.sym.get_params()}
 
+    # Returns a dict of gen var names to sid
+    @property
+    def gen_vars(self) -> tp.Dict[str, int]:
+        return {self.sym.get_name(sid): sid for sid in self.sym.get_gen_vars()}
 
-    #@property
-    #def rules_node(self) -> ir.TupleLit:
-    #    return self._spec_node._children[0]
-
-    #@property
-    #def obls_node(self) -> ir.TupleLit:
-    #    return self._spec_node._children[1]
-
-    #@property
-    #def domains_node(self) -> ir.TupleLit:
-    #    doms = [self.domenv.get_doms(sid) for sid in self.domenv.entries.keys()]
-    #    return ir.TupleLit(*doms)
-
-    #def make_domenv(self, node: ir.Node) -> DomEnv:
-    #    terms = node._children
-    #    if len(terms) != len(self.domenv.entries):
-    #        raise ValueError(f"Expected {len(self.domenv.entries)} terms, got {len(terms)}")
-    #    domenv = DomEnv()
-    #    for sid, doms_nodes in zip(self.domenv.entries.keys(), terms):
-    #        domenv.add(sid, doms_nodes)
-    #    return domenv
-
-    # Runs inference and returns new penv
-    #def _inference(self, root: ir.Node=None) -> tp.Dict[ir.Node, pf.ProofState]:
-    #    ctx = Context(self.envs_obj)
-    #    ctx = self.analyze([InferencePass()], self._spec_node, ctx)
-    #    penv = ctx.get(ProofResults).penv
-    #    rn, on = self.rules_node, self.obls_node
-    #    rn_T, on_T = penv[rn].T, penv[on].T
-    #    # rn and on must be tuple of bool
-    #    for cn, cn_T in zip((rn, on), (rn_T, on_T)):
-    #        if not (cn_T is irT.UnitType or isinstance(cn_T, irT.TupleT)):
-    #            raise ValueError(f"{cn} must be a tuple, got {type(cn_T)}")
-    #        for cn_c in cn._children:
-    #            if penv[cn_c].T != irT.Bool:
-    #                raise ValueError(f"{cn_c} must be a bool, got {type(penv[cn_c].T)}")
-    #    return penv
-
-
-
-    # TODO
-    #def __repr__(self):
-    #    return f"PuzzleSpec(name={self.name}, desc={self.desc}, topo={self.topo})"
-    
-    ## Returns a dict of param names to param node
-    #@property
-    #def params(self) -> tp.Dict[str, ast.Expr]:
-    #    return {self.sym.get_name(sid): ast.wrap(ir.VarRef(sid), self.tenv[sid]) for sid in self.sym.get_params()}
-
-    ## Returns a dict of gen var names to gen var node
-    #@property
-    #def gen_vars(self) -> tp.Dict[str, ast.Expr]:
-    #    return {self.sym.get_name(sid): ast.wrap(ir.VarRef(sid), self.tenv[sid]) for sid in self.sym.get_gen_vars()}
-
-    ## Returns a dict of decision var names to decision var node
-    #@property
-    #def decision_vars(self) -> tp.Dict[str, ast.Expr]:
-    #    return {self.sym.get_name(sid): ast.wrap(ir.VarRef(sid), self.tenv[sid]) for sid in self.sym.get_decision_vars()}
+    # Returns a dict of decision var names to sid
+    @property
+    def decision_vars(self) -> tp.Dict[str, int]:
+        return {self.sym.get_name(sid): sid for sid in self.sym.get_decision_vars()}
 
     #@property
     #def param_constraints(self) -> ast.BoolExpr:
@@ -236,25 +174,25 @@ class PuzzleSpec:
 
 
     # Returns a new spec with the params set
-    def set_params(self, **kwargs) -> 'PuzzleSpec':
-        # Run parameter substitution and constant propagation
-        ctx = Context()
-        param_sub_mapping = SubMapping()
-        for pname, value in kwargs.items():
-            sid = self.sym.get_sid(pname)
-            if sid is None:
-                raise ValueError(f"Param {pname} not found")
-            if self.sym.get_role(sid) != 'P':
-                raise ValueError(f"Param {pname} with sid {sid} is not a parameter")
-            val = self.tenv[sid].cast_as(value)
-            param_sub_mapping.add(
-                match=lambda node, sid=sid: isinstance(node, ir.VarRef) and node.sid==sid,
-                replace=lambda node, val=val: ir.Lit(val, self.tenv[sid])
-            )
-        ctx.add(
-            param_sub_mapping
-        )
-        return self.transform([SubstitutionPass()], ctx).optimize()
+    #def set_params(self, **kwargs) -> 'PuzzleSpec':
+    #    # Run parameter substitution and constant propagation
+    #    ctx = Context()
+    #    param_sub_mapping = SubMapping()
+    #    for pname, value in kwargs.items():
+    #        sid = self.sym.get_sid(pname)
+    #        if sid is None:
+    #            raise ValueError(f"Param {pname} not found")
+    #        if self.sym.get_role(sid) != 'P':
+    #            raise ValueError(f"Param {pname} with sid {sid} is not a parameter")
+    #        val = self.tenv[sid].cast_as(value)
+    #        param_sub_mapping.add(
+    #            match=lambda node, sid=sid: isinstance(node, ir.VarRef) and node.sid==sid,
+    #            replace=lambda node, val=val: ir.Lit(val, self.tenv[sid])
+    #        )
+    #    ctx.add(
+    #        param_sub_mapping
+    #    )
+    #    return self.transform([SubstitutionPass()], ctx).optimize()
 
     #def concretize_types(self, cellIdxT):
     #    ctx = Context()

@@ -1,7 +1,7 @@
 from __future__ import annotations
 import typing as tp
 # Unified Types and IR
-
+from dataclasses import dataclass
 # Base class for IR
 class Node:
     _fields: tp.Tuple[str, ...] = ()
@@ -576,11 +576,29 @@ class Map(Value):
     def __init__(self, T: Type, dom: Value, fun: Value):
         super().__init__(T, dom, fun)
 
-# Func -> Domain
-class Domain(Value):
-    _numc=2
-    def __init__(self, T: Type, func: Value):
-        super().__init__(T, func)
+class _FuncLitLayout:
+    ...
+class _SparseLayout(_FuncLitLayout):
+    ...
+
+@dataclass(eq=True, frozen=True)
+class _DenseLayout(_FuncLitLayout):
+    num_elems: int
+
+    def __repr__(self):
+        return f"Dense({self.num_elems})"
+
+class FuncLit(Value):
+    _fields= ('layout',)
+    _numc = -1
+    def __init__(self, T: Type, dom: Value, *elems: Value, layout: _FuncLitLayout):
+        assert isinstance(layout, _FuncLitLayout)
+        self.layout = layout
+        super().__init__(T, dom, *elems)
+
+    @property
+    def elems(self):
+        return self._children[2:]
 
 class Image(Value):
     _numc = 2
@@ -627,6 +645,24 @@ class ElemAt(Value):
 ##############################
 ## Surface-level IR nodes (Used for analyis, but can be collapes)
 ##############################
+
+# Special Node for 'spec'
+class Spec(Node):
+    _numc = 3
+    def __init__(self, cons: Value, obls: Value, Ts: TupleT):
+        super().__init__(cons, obls, Ts)
+
+    @property
+    def cons(self):
+        return self._children[0]
+    
+    @property
+    def obls(self):
+        return self._children[1]
+    
+    @property
+    def Ts(self):
+        return self._children[2]
 
 class And(Value):
     _numc = 3
@@ -732,6 +768,7 @@ class _VarPlaceholder(Value):
 # Mapping from Value classes to a priority integer.
 # This is probably way overengineered and there are probably better priorities
 NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
+    Spec: -3,
     UnitT: -2,
     BoolT: -2,
     IntT: -2,
@@ -787,6 +824,7 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     Match: 9,
     Restrict: 9,
     Map: 10,
+    FuncLit: 10,
     Image: 10,
     Apply: 10,
     ListLit: 10,

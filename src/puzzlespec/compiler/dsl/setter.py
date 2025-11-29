@@ -1,32 +1,30 @@
-from multiprocessing import Value
-from . import ir, ir_types as irT
+from __future__ import annotations
+from . import ir, ast
 from .spec import PuzzleSpec
+from ..passes.transforms.substitution import SubMapping, SubstitutionPass
+from ..passes.pass_base import Context
 import typing as tp
 import numpy as np
 from abc import abstractmethod
+import itertools as it
 
-def _make_clue_var(shape: ir.Node, T: irT.Type_, path: tp.Tuple):
-    match (T):
-        case irT.Int | irT.Bool:
-            return SetterVarBase(T, shape, path)
-        case irT.DictT(keyT, valT):
-            if not keyT in (irT.TupleT(irT.Int, irT.Int), irT.Int):
-                raise NotImplementedError(f"Unsupported key type for dict: {keyT}")
-            return SetterVarDict(T, shape, path)
+def _make_var(T: ir.Type, path: tp.Tuple):
+    if isinstance(T, (ir.BoolT, ir.IntT)):
+        return SetterBase(T, path)
+    if isinstance(T, ir.PiT):
+        return SetterFunc(T, path)
+    raise NotImplementedError(f"{type(T)}")
 
-class Setter:
-    def __init__(self, spec: PuzzleSpec, role='G'):
+class VarSetter:
+    def __init__(self, spec: PuzzleSpec):
         self.__dict__['_spec'] = spec
         self.__dict__['_vars'] = {}
-        self.__dict__['_role'] = role
         for sid in spec.sym:
-            if spec.sym.get_role(sid)==self._role:
-                name = spec.sym.get_name(sid)
-                T = spec.tenv[sid]
-                shape = spec.evaluate(spec.shape_env[sid])
-                self.__dict__['_vars'][name] = _make_clue_var(shape, T, (sid,))
+            name = spec.sym.get_name(sid)
+            T = spec.tenv[sid]
+            self.__dict__['_vars'][name] = _make_var(T, (sid,))
 
-    def __getattr__(self, name: str) -> tp.Any:
+    def __getattr__(self, name: str) -> _Setter:
         if name in self.__dict__['_vars']:
             return self.__dict__['_vars'][name]
         else:
@@ -36,35 +34,36 @@ class Setter:
         if k in self.__dict__['_vars']:
             return self.__dict__['_vars'][k].set(v)
         else:
-            raise ValueError(f"{k} is not a variable with role {self.role}")
+            raise ValueError(f"{k} is not a variable")
 
     def build(self) -> PuzzleSpec:
-        from . import ast
-        spec = self.__dict__['_spec']
-        vars = self.__dict__['_vars']
+        spec: PuzzleSpec = self.__dict__['_spec']
+        vars: tp.Mapping[str, _Setter] = self.__dict__['_vars']
         # Add as constraints
-        new_constraints = []
-        for name, var in vars.items():
+        subs: tp.List[tp.Tuple[int, ast.Expr]] = []
+        for name, varSet in vars.items():
+            if not varSet._is_set:
+                continue
             sid = spec.sym.get_sid(name)
-            ast_var = ast.wrap(ir.VarRef(sid), var.T)
-            new_constraints += [e.node for e in var._constraints(ast_var)]
+            subs.append((sid, varSet._get_val()))
         
-        new_rules = ir.List(*spec._rules._children, *new_constraints)
-        ps = PuzzleSpec(
-            name=spec.name,
-            desc=spec.desc,
-            topo=spec.topo,
-            sym=spec.sym,
-            tenv=spec.tenv,
-            shape_env=spec.shape_env,
-            rules=new_rules
-        )
-        return ps.optimize()
+        submap = SubMapping()
+        for sid, e in subs:
+            submap.add(
+                match = lambda node, sid=sid: isinstance(node, ir.VarRef) and node.sid==sid,
+                replace = lambda node, val=e.node: val
+            )
+        if len(subs) > 0:
+            ctx = Context(submap)
+            sub_spec = spec.transform(SubstitutionPass(), ctx=ctx, verbose=True)
+            opt = sub_spec.optimize()
+            return opt
+        print("NOTHING SET")
+        return spec
 
-class SetterVar:
-    def __init__(self, T: irT.Type_, shape: ir.Node, path: tp.Tuple[tp.Any]):
-        self.T = T
-        self.shape = shape
+class _Setter:
+    def __init__(self, T: ir.Type, path: tp.Tuple[tp.Any]):
+        self.T = ast.wrapT(T)
         self.path = path
         self.__post_init__()
 
@@ -73,15 +72,15 @@ class SetterVar:
         ...
     
     @abstractmethod
-    def set(self, val):
+    def _get_val(self) -> ast.Expr:
         ...
-
+    
     @abstractmethod
     def _constraints(self, val: 'ast.Expr'):
         ...
 
 
-class SetterVarBase(SetterVar):
+class SetterBase(_Setter):
     def __post_init__(self):
         self.val = None
 
@@ -90,39 +89,73 @@ class SetterVarBase(SetterVar):
         return self.val is not None
 
     def set(self, val):
-        self.val = self.T.cast_as(val)
-
-    def __setitem__(self, key, val):
-        if key==():
-            self.set(val)
-        else:
-            raise ValueError(f"Wrong key type for {self.path}: {self.__class__}")
+        val = ast.Expr.make(val)
+        if not type(self.T) is type(val.T):
+            raise ValueError(f"Cannot set {self.path} with T={self.T} to be {val}")
+        self.val = val
+    
+    def _get_val(self):
+        return self.val
 
     def _constraints(self, var: 'ast.Expr'):
         if self.val is not None:
             yield var==self.val
 
-class SetterVarDict(SetterVar):
+def iterate(dom: ir.Value):
+    for d in _iterate(dom):
+        if isinstance(d, tuple):
+            yield d
+        else:
+            yield (d,)
+
+def _iterate(dom: ir.Value):
+    if isinstance(dom, ir.Fin):
+        n = dom._children[1]
+        if not isinstance(n, ir.Lit):
+            raise ValueError(f"{n} is not constant")
+        yield from range(n.val)
+    elif isinstance(dom, ir.Range):
+        lo, hi = dom._children[1:]
+        if not isinstance(lo, ir.Lit) or not isinstance(hi, ir.Lit):
+            raise ValueError(f"{lo} or {hi} is not constant")
+        yield from range(lo.val, hi.val)
+    elif isinstance(dom, ir.CartProd):
+        doms = dom._children[1:]
+        yield from it.product(*[_iterate(dom) for dom in doms])
+    else:
+        raise NotImplementedError(f"Unsupported domain type: {type(dom)}")
+
+
+class SetterFunc(_Setter):
     def __post_init__(self):
-        if not self.T.keyT in (irT.TupleT(irT.Int, irT.Int), irT.Int):
-            raise NotImplementedError(f"Unsupported key type for dict: {self.T.keyT}")
-        # check if shape is a concrete List of concrete elements:
-        self.__dict__['_val'] = {k: SetterVarBase(self.T.valT, ir.Unit, self.path + (k,)) for k in self.shape}
+        # Check if it depends on any variable
+        assert isinstance(self.T, ast.PiType)
+        self.val = None
+        ...
 
     @property
     def _is_set(self):
+        return self.val is not None
         return all(val._is_set for val in self._val.values())
 
-    def set(self, val: tp.Any):
-        if isinstance(val, tp.Dict):
-            for k, v in val.items():
-                self[k] = v
-        elif isinstance(val, np.ndarray):
-            # TODO verify shape
-            for k, v in np.ndenumerate(val):
-                self[k] = v
-        else:
-            raise ValueError(f"Unsupported value type for dict: {type(val)}")
+    def _get_val(self):
+        return self.val
+
+    def set(self, val):
+        if not isinstance(val, ast.FuncExpr):
+            raise NotImplementedError()
+        self.val = val
+
+    def set_lam(self, fn: tp.Callable):
+        terms = []
+        assert isinstance(self.T, ast.PiType)
+        for dom_idx in iterate(self.T.domain.node):
+            val = fn(*dom_idx)
+
+            e = ast.Expr.make(val)
+            terms.append(e.node)
+        layout = ir._DenseLayout(num_elems=len(terms))
+        self.set(ast.wrap(ir.FuncLit(self.T.node, self.T.domain.node, *terms, layout=layout)))
     
     def __setitem__(self, k, v):
         if k not in self._val:

@@ -41,7 +41,7 @@ class PrettyPrinterPass(Analysis):
     name = "pretty_printer"
     #_debug=True
 
-    def visit(self, node):
+    def visit(self, node: ir.Node) -> str:
         raise NotImplementedError(f"{node.__class__.__name__} not implemented in PrettyPrinterPass")
         # All node kinds have a custom visit
 
@@ -51,23 +51,33 @@ class PrettyPrinterPass(Analysis):
         self.tenv: TypeEnv = envs.tenv
         self.sym: SymTable = envs.sym
         self.cnt=0
-        self.p_to_T = {}
-        self.g_to_T = {}
-        self.d_to_T = {}
         self.b_names = []
-
-        constraint_text = self.visit(root)
-        s = "Params:\n"        
-        for pname, T in self.p_to_T.items():
-            s += f"    {pname}: {T}\n"
-        s += "Gen vars:\n"
-        for gname, T in self.g_to_T.items():
-            s += f"    {gname}: {T}\n"
-        s += "Decision vars:\n"
-        for dname, T in self.d_to_T.items():
-            s += f"    {dname}: {T}\n"
-        s += "Constraints:\n"
-        s += constraint_text
+        if isinstance(root, ir.Spec):
+            cons_text, obls_text, Ts = self.visit(root)
+            cons_str = self._indent_expr(cons_text)
+            obls_str = self._indent_expr(obls_text)
+            p_to_T = {}
+            g_to_T = {}
+            d_to_T = {}
+            for (sid, e), T_str in zip(self.sym.entries.items(), Ts):
+                if e.role == 'P':
+                    p_to_T[e.name] = T_str
+                elif e.role == 'G':
+                    g_to_T[e.name] = T_str
+                elif e.role == 'D':
+                    d_to_T[e.name] = T_str
+                s = "Params:\n"        
+                for pname, T in p_to_T.items():
+                    s += f"    {pname}: {T}\n"
+                s += "Gen vars:\n"
+                for gname, T in g_to_T.items():
+                    s += f"    {gname}: {T}\n"
+                s += "Decision vars:\n"
+                for dname, T in d_to_T.items():
+                    s += f"    {dname}: {T}\n"
+            s += f"Spec:\n  Constraints:\n{cons_str}\n  Obligations:\n{obls_str}\n"
+        else:
+            s = self.visit(root)
         print("\n"+s+"\n")
         return PrettyPrintedExpr(s)
 
@@ -168,16 +178,7 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.VarRef)
     def _(self, node: ir.VarRef) -> str:
         e = self.sym[node.sid]
-        name, role = e.name, e.role
-        T = self.tenv[node.sid]
-        T_str = self.visit(T)
-        if role=='P':
-            self.p_to_T[name] = T_str
-        elif role=='G':
-            self.g_to_T[name] = T_str
-        elif role=='D':
-            self.d_to_T[name] = T_str
-        return name
+        return e.name
 
     @handles(ir.BoundVar)
     def _(self, node: ir.BoundVar) -> str:
@@ -478,15 +479,15 @@ class PrettyPrinterPass(Analysis):
 
         #return f"[{body_str} | {var_name} ∈ {dom_expr}]"
 
+    @handles(ir.FuncLit)
+    def _(self, node: ir.FuncLit) -> str:
+        T, dom, *elems = node._children
+        return f"FuncLit(layout={node.layout})"
+
     @handles(ir.Image)
     def _(self, node: ir.Image) -> str:
         _, func_expr = self.visit_children(node)  # Skip type at index 0
         return f"{func_expr}[𝕏]"
-
-    @handles(ir.Domain)
-    def _(self, node: ir.Domain) -> str:
-        _, func_expr = self.visit_children(node)  # Skip type at index 0
-        return f"Dom[{func_expr}]"
 
     @handles(ir.Apply)
     def _(self, node: ir.Apply) -> str:
@@ -522,6 +523,14 @@ class PrettyPrinterPass(Analysis):
     ##############################
     ## Surface-level IR nodes (Used for analysis, but can be collapsed)
     ##############################
+
+    @handles(ir.Spec)
+    def _(self, node: ir.Spec) -> str:
+        cons_expr = self.visit(node.cons)
+        obls_expr = self.visit(node.obls)
+        # visit Ts individually
+        Ts = (self.visit(T) for T in node.Ts._children)
+        return cons_expr, obls_expr, Ts
 
     @handles(ir.And)
     def _(self, node: ir.And) -> str:

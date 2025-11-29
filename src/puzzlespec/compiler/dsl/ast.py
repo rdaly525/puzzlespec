@@ -63,6 +63,10 @@ class SumType(TExpr):
         if not isinstance(self.node, ir.SumT):
             raise ValueError(f"Expected SumType, got {self.node}")
 
+    def make_sum(self, val: tp.Any) -> SumExpr:
+        return SumExpr.make(self, val)
+
+
     def elemT(self, i: int) -> TExpr:
         if not isinstance(i, int):
             raise ValueError("Tuple index must be concrete (python) int")
@@ -145,6 +149,10 @@ class PiType(TExpr):
         return wrapT(_applyT(self.node, arg.node))
 
     @property
+    def domain(self) -> DomainExpr:
+        return wrap(self.node.dom)
+
+    @property
     def lamT(self) -> LambdaType:
         return wrapT(self.node.lamT)
 
@@ -187,6 +195,10 @@ class Expr:
             raise ValueError(f"Expr must be an ir.Value, got {self.node}")
 
     @property
+    def T(self) -> TExpr:
+        raise NotImplementedError()
+
+    @property
     def _T(self) -> TExpr:
         return wrapT(self.node.T)
     
@@ -196,6 +208,8 @@ class Expr:
             if type(val)==Expr:
                 raise ValueError("Raw Expr found!!", val)
             return val
+        if val is None:
+            return UnitExpr.make()
         if isinstance(val, ir.Value):
             return wrap(val)
         if isinstance(val, bool):
@@ -241,9 +255,10 @@ class UnitExpr(Expr):
     def T(self) -> UnitType:
         return tp.cast(UnitType, self._T)
     
-    @staticmethod
+    @classmethod
     def make(cls) -> UnitExpr:
-        return UnitExpr(ir.Unit())
+        node = ir.Unit(ir.UnitT())
+        return UnitExpr(node)
 
 class BoolExpr(Expr):
     def __post_init__(self):
@@ -473,6 +488,18 @@ class SumExpr(Expr):
             raise ValueError(f"Expected SumExpr, got {self}")
         if not isinstance(self._T, SumType):
             raise ValueError(f"Expected SumType, got {self._T}")
+
+    @classmethod
+    def make(cls, T: SumType, val: tp.Any):
+        val = Expr.make(val)
+        idx = None
+        for i, eT in enumerate(T.elemTs):
+            if type(val.T)==type(eT):
+                idx = i
+        if idx is None:
+            raise ValueError(f"Cannot make SumExpr from {val} with type {T}")
+        node = ir.Inj(T.node, val.node, idx=idx)
+        return SumExpr(node)
 
     @property
     def T(self) -> SumType:

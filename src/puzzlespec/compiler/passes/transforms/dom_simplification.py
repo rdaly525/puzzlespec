@@ -57,14 +57,6 @@ class DomainSimplificationPass(Transform):
             return ir.Prod(ir.IntT(), *(ir.Card(ir.IntT(), cd) for cd in cartdoms))
         return node.replace(T, dom)
 
-    @handles(ir.Domain)
-    def _(self, node: ir.Domain):
-        #TODO throw in the type map 
-        T, func = self.visit_children(node)
-        if isinstance(func, ir.Value) and isinstance(func.T, ir.PiT):
-            return func.T.dom
-        return node.replace(T, func)
-
     @handles(ir.ElemAt)
     def _(self, node: ir.ElemAt):
         T, dom, idx = self.visit_children(node)
