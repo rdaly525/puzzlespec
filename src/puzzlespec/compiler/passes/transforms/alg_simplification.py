@@ -7,7 +7,7 @@ from ...dsl import ir, utils
 import typing as tp
 
 
-def partition(lst, pred) -> tp.Tuple[tp.List[ir.Node], tp.List[ir.Node]]:
+def _partition(lst, pred) -> tp.Tuple[tp.List[ir.Node], tp.List[ir.Node]]:
     true_lst = []
     false_lst = []
     for item in lst:
@@ -51,14 +51,14 @@ class AlgebraicSimplificationPass(Transform):
         T = children[0]
         children = children[1:]
         # simplify all literals
-        const_children, non_const_children = partition(children, lambda c: isinstance(c, ir.Lit))
+        const_children, non_const_children = _partition(children, lambda c: isinstance(c, ir.Lit))
         const_val = sum([c.val for c in const_children])
         if const_val != 0:
             children = non_const_children + [ir.Lit(T, val=const_val)]
         else:
             children = non_const_children
         # Remove all (..., x, -x, ...)
-        neg_children, non_neg_children = partition(children, lambda c: isinstance(c, ir.Neg))
+        neg_children, non_neg_children = _partition(children, lambda c: isinstance(c, ir.Neg))
         children = non_neg_children
         for neg_child in neg_children:
             if neg_child._children[1] in children:
@@ -76,7 +76,7 @@ class AlgebraicSimplificationPass(Transform):
         T = children[0]
         children = children[1:]
         # simplify all literals
-        const_children, non_const_children = partition(children, lambda c: isinstance(c, ir.Lit))
+        const_children, non_const_children = _partition(children, lambda c: isinstance(c, ir.Lit))
         const_val = math.prod([c.val for c in const_children])
         match const_val:
             case 0:
@@ -97,7 +97,7 @@ class AlgebraicSimplificationPass(Transform):
         T = children[0]
         children = children[1:]
          # simplify all literals
-        const_children, non_const_children = partition(children, lambda c: isinstance(c, ir.Lit))
+        const_children, non_const_children = _partition(children, lambda c: isinstance(c, ir.Lit))
         const_val = all([c.val for c in const_children])
         match const_val:
             case True:
@@ -114,7 +114,7 @@ class AlgebraicSimplificationPass(Transform):
         T = children[0]
         children = children[1:]
          # simplify all literals
-        const_children, non_const_children = partition(children, lambda c: isinstance(c, ir.Lit))
+        const_children, non_const_children = _partition(children, lambda c: isinstance(c, ir.Lit))
         const_val = any([c.val for c in const_children])
         match const_val:
             case True:
@@ -207,7 +207,8 @@ class AlgebraicSimplificationPass(Transform):
     def _(self, node: ir.Map):
         T, dom, lam = self.visit_children(node)
         dom_size = utils._dom_size(dom)
-        if dom_size is not None and dom_size <= self.max_dom_size:
+        lam_has_freevar = utils._has_freevar(lam)
+        if dom_size is not None and dom_size <= self.max_dom_size and not lam_has_freevar:
             # Convert Map to FuncLit by evaluating lambda for each domain element
             elems = []
             val_map = {}

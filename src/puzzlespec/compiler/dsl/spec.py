@@ -102,7 +102,7 @@ class PuzzleSpec:
 
         opt_passes = [
             CanonicalizePass(),
-            AlgebraicSimplificationPass(),
+            AlgebraicSimplificationPass(max_dom_size=max_dom_size),
             ConstFoldPass(max_dom_size=max_dom_size),
             DomainSimplificationPass(),
             BetaReductionPass(),

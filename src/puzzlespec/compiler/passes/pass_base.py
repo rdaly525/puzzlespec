@@ -321,7 +321,9 @@ class PassManager:
             if ctx.try_get(req_analysis) is None:
                 if req_analysis in self.analysis_map:
                     analysis_pass = self.analysis_map[req_analysis]
-                    self._run_pass(root, analysis_pass, ctx)
+                    assert isinstance(analysis_pass, Analysis)
+                    anal_obj= analysis_pass(root, ctx)
+                    ctx.add(anal_obj)
                     assert ctx.try_get(req_analysis) is not None
                 else:
                     raise ValueError(f"Analysis {req_analysis} not found in analysis map")

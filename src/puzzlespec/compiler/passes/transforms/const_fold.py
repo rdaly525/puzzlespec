@@ -22,8 +22,7 @@ class ConstFoldPass(Transform):
 
     def run(self, root: ir.Node, ctx: Context):
         self.Tmap: TypeMap = ctx.get(TypeMap).Tmap
-        self.visit(root)
-        return root
+        return self.visit(root)
 
     _binops = {
         ir.Neg: lambda a: -a,

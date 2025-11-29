@@ -33,6 +33,7 @@ def t0():
 
 #t0()
 def t1():
+    Unruly.pretty()
     cs = setter.VarSetter(Unruly)
     # Set parameters
     cs.nR = 4
