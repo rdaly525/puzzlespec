@@ -4,6 +4,7 @@ from puzzlespec.compiler.dsl import ir, setter, ast
 from puzzlespec.compiler.dsl.libs import std, optional as opt
 from puzzlespec.compiler.passes import Context, PassManager, analyses as A, transforms as T
 import numpy as np
+import typing as tp
 
 #Sudoku = get_puzzle("sudoku")
 Unruly = get_puzzle("unruly")
@@ -67,7 +68,8 @@ def t1():
     BW_dom, BW_enum = std.Enum('B', 'W')
     optBW = opt.Optional(BW_dom)
     optT = optBW.T.carT
-    def _get(r, c):
+    def _get(rc: tp.Tuple[int, int]):
+        r, c = rc
         idx = r*4+c
         v = clues[idx]
         match (v):

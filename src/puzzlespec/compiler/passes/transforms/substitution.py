@@ -1,5 +1,5 @@
 from ..pass_base import Transform, Context, AnalysisObject, handles
-from ...dsl import ir, ast
+from ...dsl import ir
 import typing as tp
 from dataclasses import dataclass
 

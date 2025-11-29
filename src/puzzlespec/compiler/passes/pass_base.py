@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING
 from abc import ABC, abstractmethod
 import inspect
 
-from puzzlespec.compiler.dsl.ir import _LambdaPlaceholder
+from puzzlespec.compiler.dsl.ir import LambdaHOAS
 
 if TYPE_CHECKING:
     from ..dsl import ir
@@ -271,7 +271,7 @@ class Transform(Pass):
                     if self._debug:
                         print(" (cached)")
                     return self._cache[cache_key]
-                if isinstance(node, (ir.Lambda, ir.LambdaT)):
+                if isinstance(node, (ir.Lambda, ir.PiT)):
                     self._bframes.append(node._key)
             if self._debug:
                 print("")
@@ -284,7 +284,7 @@ class Transform(Pass):
                 new_node = node
  
             if self.enable_memoization:
-                if isinstance(node, (ir.Lambda, ir.LambdaT)):
+                if isinstance(node, (ir.Lambda, ir.PiT)):
                     self._bframes.pop()
                 # Add new node to cache
                 assert cache_key not in self._cache

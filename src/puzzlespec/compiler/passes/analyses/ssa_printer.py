@@ -114,6 +114,6 @@ class SSAPrinter(Analysis):
         """Analyze bound variable nodes."""
         return f"#{node.idx}"
     
-    @handles(ir._BoundVarPlaceholder, ir._LambdaPlaceholder, mark_invalid=True)
+    @handles(ir.BoundVarHOAS, ir.LambdaHOAS, mark_invalid=True)
     def _(self, node: ir.Node) -> tp.Any:
         ...

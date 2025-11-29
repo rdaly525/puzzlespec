@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from ..pass_base import Transform, Context, handles
-from ...dsl import ir
+from ...dsl import ir, utils, ast
 import math
 import typing as tp
 
@@ -16,6 +16,8 @@ class ConstFoldPass(Transform):
     produces: tp.Tuple[type, ...] = ()
     name = "const_prop"
 
+    def __init__(self, max_dom_size=100):
+        self.max_dom_size=max_dom_size
 
     _binops = {
         ir.Neg: lambda a: -a,
@@ -67,19 +69,70 @@ class ConstFoldPass(Transform):
             return ir.Lit(T, self._variadic_ops[type(node)](*vals))
         return node.replace(T, *new_children)
     
-
-    @handles(ir.Apply)
-    def _(self, node: ir.Apply):
+    @handles(ir.ApplyFunc)
+    def _(self, node: ir.ApplyFunc):
         T, func, arg = self.visit_children(node)
         # Index into a ListLit
-        if isinstance(func, ir.ListLit):
-            T, vals = func._children
-            match (arg):
-                case ir.Lit(val=idx):
-                    assert isinstance(idx, int) and 0 <= idx < len(vals)
-                    return vals[idx]
+        if utils._is_concrete(arg):
+            if isinstance(func, ir.FuncLit):
+                T, dom, *vals = func._children
+                idx = func.layout.index(arg)
+                assert idx is not None
+                assert isinstance(idx, int) and 0 <= idx < len(vals)
+                return vals[idx]
         return node.replace(*self.visit_children(node))
 
+    @handles(ir.IsMember)
+    def _(self, node: ir.IsMember):
+        T, domain, val = self.visit_children(node)
+        # Only can simplify if both val and domain are concrete
+        # dom_size returns None if domain is not concrete
+        if utils._is_concrete(val):
+            dom_size = utils._dom_size(domain)
+            if dom_size is not None and dom_size <= self.max_dom_size:
+                for v in utils._iterate(domain):
+                    assert v is not None
+                    if v.eq(val):
+                        return ir.Lit(ir.BoolT(), val=True)
+                return ir.Lit(ir.BoolT(), val=False)
+        return node.replace(T, domain, val)
+        
+
+    # should check for free vars/outer bound vars in pred
+    # but semantically should work regardless
+    #@handles(ir.Forall)
+    #def _(self, node: ir.Forall):
+    #    T, dom, pred = self.visit_children(node)
+    #    dom_size = utils._dom_size(dom)
+    #    if dom_size is not None and dom_size <= self.max_dom_size:
+    #        apps = []
+    #        m = ir.Map(
+    #            ir.FuncT(dom, pred.T),
+    #            dom,
+    #            pred
+    #        )
+    #        for v in utils._iterate(dom):
+    #            assert v is not None
+    #            apps.append(ir.ApplyFunc(T, m, v.node))
+    #        return ir.Conj(T, *apps)
+    #    return node.replace(T, dom, pred)
+
+    @handles(ir.Exists)
+    def _(self, node: ir.Exists):
+        T, dom, pred = self.visit_children(node)
+        dom_size = utils._dom_size(dom)
+        if dom_size is not None and dom_size <= self.max_dom_size:
+            apps = []
+            m = ir.Map(
+                ir.FuncT(dom, pred.T),
+                dom,
+                pred
+            )
+            for v in utils._iterate(dom):
+                assert v is not None
+                apps.append(ir.ApplyFunc(T, m, v))
+            return ir.Disj(T, *apps)
+        return node.replace(T, dom, pred)
 
     # Higher order ops
     #@handles(ir.SumReduce)

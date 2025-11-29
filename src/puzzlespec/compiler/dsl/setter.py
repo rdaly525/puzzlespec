@@ -1,17 +1,16 @@
 from __future__ import annotations
-from . import ir, ast
+from . import ir, ast, utils
 from .spec import PuzzleSpec
 from ..passes.transforms.substitution import SubMapping, SubstitutionPass
 from ..passes.pass_base import Context
 import typing as tp
 import numpy as np
 from abc import abstractmethod
-import itertools as it
 
 def _make_var(T: ir.Type, path: tp.Tuple):
     if isinstance(T, (ir.BoolT, ir.IntT)):
         return SetterBase(T, path)
-    if isinstance(T, ir.PiT):
+    if isinstance(T, ir.FuncT):
         return SetterFunc(T, path)
     raise NotImplementedError(f"{type(T)}")
 
@@ -101,60 +100,40 @@ class SetterBase(_Setter):
         if self.val is not None:
             yield var==self.val
 
-def iterate(dom: ir.Value):
-    for d in _iterate(dom):
-        if isinstance(d, tuple):
-            yield d
-        else:
-            yield (d,)
-
-def _iterate(dom: ir.Value):
-    if isinstance(dom, ir.Fin):
-        n = dom._children[1]
-        if not isinstance(n, ir.Lit):
-            raise ValueError(f"{n} is not constant")
-        yield from range(n.val)
-    elif isinstance(dom, ir.Range):
-        lo, hi = dom._children[1:]
-        if not isinstance(lo, ir.Lit) or not isinstance(hi, ir.Lit):
-            raise ValueError(f"{lo} or {hi} is not constant")
-        yield from range(lo.val, hi.val)
-    elif isinstance(dom, ir.CartProd):
-        doms = dom._children[1:]
-        yield from it.product(*[_iterate(dom) for dom in doms])
-    else:
-        raise NotImplementedError(f"Unsupported domain type: {type(dom)}")
-
 
 class SetterFunc(_Setter):
     def __post_init__(self):
         # Check if it depends on any variable
-        assert isinstance(self.T, ast.PiType)
+        assert isinstance(self.T, ast.FuncType)
+        self.concrete = utils._is_concrete(self.T.domain.node)
         self.val = None
         ...
 
     @property
     def _is_set(self):
         return self.val is not None
-        return all(val._is_set for val in self._val.values())
 
     def _get_val(self):
         return self.val
 
     def set(self, val):
+        if not self.concrete:
+            raise ValueError("Cannot only set concrete vars")
         if not isinstance(val, ast.FuncExpr):
             raise NotImplementedError()
         self.val = val
 
     def set_lam(self, fn: tp.Callable):
         terms = []
-        assert isinstance(self.T, ast.PiType)
-        for dom_idx in iterate(self.T.domain.node):
-            val = fn(*dom_idx)
+        assert isinstance(self.T, ast.FuncType)
 
+        val_map = {}
+        for i, elem in enumerate(utils._iterate(self.T.domain.node)):
+            val = fn(utils._unpack(elem))
             e = ast.Expr.make(val)
             terms.append(e.node)
-        layout = ir._DenseLayout(num_elems=len(terms))
+            val_map[elem._key] = i
+        layout = ir._DenseLayout(val_map=val_map)
         self.set(ast.wrap(ir.FuncLit(self.T.node, self.T.domain.node, *terms, layout=layout)))
     
     def __setitem__(self, k, v):

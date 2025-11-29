@@ -145,10 +145,10 @@ class PrettyPrinterPass(Analysis):
         k = sum(1 for n in self.b_names if n.startswith("X"))
         return f"X{k}"
     
-    @handles(ir.LambdaT)
-    def _(self, node: ir.LambdaT) -> str:
+    @handles(ir.PiT)
+    def _(self, node: ir.PiT) -> str:
         argT, resT = node._children
-        is_col = isinstance(argT, (ir.PiT, ir.DomT))
+        is_col = isinstance(argT, (ir.FuncT, ir.DomT))
         if is_col:
             bv_name = self._new_col_name(True)
         else:
@@ -160,16 +160,16 @@ class PrettyPrinterPass(Analysis):
         assert name == bv_name
         return bv_name, resT_str
 
-    @handles(ir._LambdaTPlaceholder)
-    def _(self, node: ir._LambdaTPlaceholder) -> str:
+    @handles(ir.PiTHOAS)
+    def _(self, node: ir.PiTHOAS) -> str:
         assert 0
         bv, resT = self.visit_children(node)
         return (bv, resT)
 
-    @handles(ir.PiT)
-    def _(self, node: ir.PiT):
+    @handles(ir.FuncT)
+    def _(self, node: ir.FuncT):
         dom_str, (bv_name, resT_str) = self.visit_children(node)
-        return f"Pi[{dom_str} -> {bv_name}: {resT_str}]"
+        return f"Func[{dom_str} -> {bv_name}: {resT_str}]"
     
     ##############################
     ## Core-level IR Value nodes (Used throughout entire compiler flow)
@@ -191,7 +191,7 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.Lambda)
     def _(self, node: ir.Lambda) -> str:
         paramT = node.T.argT
-        is_col = isinstance(paramT, (ir.PiT, ir.DomT))
+        is_col = isinstance(paramT, (ir.FuncT, ir.DomT))
         if is_col:
             bv_name = self._new_col_name()
         else:
@@ -433,7 +433,7 @@ class PrettyPrinterPass(Analysis):
         _, scrut_node, branches = node._children
         scrut_expr = self.visit(scrut_node)
         assert isinstance(branches, ir.TupleLit)
-        assert all(isinstance(branch, (ir.Lambda, ir._LambdaPlaceholder)) for branch in branches._children[1:])
+        assert all(isinstance(branch, (ir.Lambda, ir.LambdaHOAS)) for branch in branches._children[1:])
         branch_exprs = [self.visit(branch) for branch in branches._children[1:]]
         branch_argTs = []
         for branch_lam in branches._children[1:]:
@@ -468,11 +468,11 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.Map)
     def _(self, node: ir.Map) -> str:
         # TODO MAke this look more like forall
-        piT, dom, lam = node._children
+        funcT, dom, lam = node._children
         dom_expr = self.visit(dom)
         (var_name, body_str) = self.visit(lam)
 
-        #piT_str, dom_expr, (var_name, body_str) = self.visit_children(node)  # Skip type at index 0
+        #funcT_str, dom_expr, (var_name, body_str) = self.visit_children(node)  # Skip type at index 0
         # Lambda returns (var_name, body_str) tuple
         body_formatted = self._indent_expr(body_str)
         return f"Map {var_name} ∈ {dom_expr}: [\n{body_formatted}\n]"
@@ -482,25 +482,20 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.FuncLit)
     def _(self, node: ir.FuncLit) -> str:
         T, dom, *elems = node._children
-        return f"FuncLit(layout={node.layout})"
+        return f"[...]"
 
     @handles(ir.Image)
     def _(self, node: ir.Image) -> str:
         _, func_expr = self.visit_children(node)  # Skip type at index 0
         return f"{func_expr}[𝕏]"
 
-    @handles(ir.Apply)
-    def _(self, node: ir.Apply) -> str:
+    @handles(ir.ApplyFunc)
+    def _(self, node: ir.ApplyFunc) -> str:
         _, func_expr, arg_expr = self.visit_children(node)  # Skip type at index 0
         #func_expr = self._indent_expr(func_expr)
         #arg_expr = self._indent_expr(arg_expr)
         #return f"App(\n{func_expr},\n{arg_expr}\n)"
         return f"{func_expr}({arg_expr})"
-
-    @handles(ir.ListLit)
-    def _(self, node: ir.ListLit) -> str:
-        children = self.visit_children(node)[1:]  # Skip type at index 0
-        return f"[{', '.join(children)}]"
 
     @handles(ir.Fold)
     def _(self, node: ir.Fold) -> str:
@@ -601,18 +596,18 @@ class PrettyPrinterPass(Analysis):
     ## Constructor-level IR nodes (Used for construction but immediately gets transformed for spec)
     ##############################
 
-    @handles(ir._BoundVarPlaceholder)
-    def _(self, node: ir._BoundVarPlaceholder) -> str:
+    @handles(ir.BoundVarHOAS)
+    def _(self, node: ir.BoundVarHOAS) -> str:
         T, = self.visit_children(node)
         return f"b{id(node)}"
 
-    @handles(ir._LambdaPlaceholder)
-    def _(self, node: ir._LambdaPlaceholder) -> str:
+    @handles(ir.LambdaHOAS)
+    def _(self, node: ir.LambdaHOAS) -> str:
         T, bv, body = self.visit_children(node)
         return bv, body
 
-    @handles(ir._VarPlaceholder)
-    def _(self, node: ir._VarPlaceholder) -> str:
+    @handles(ir.VarHOAS)
+    def _(self, node: ir.VarHOAS) -> str:
         T, = self.visit_children(node)
         return f"v{node.sid}"
 

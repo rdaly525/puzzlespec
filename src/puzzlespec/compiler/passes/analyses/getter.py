@@ -36,12 +36,12 @@ class VarPHGetter(Analysis):
 
     def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
         vars = self.visit(root)
-        var_map = {v:vs for v, vs in self._cache.items() if isinstance(v, ir._VarPlaceholder)}
+        var_map = {v:vs for v, vs in self._cache.items() if isinstance(v, ir.VarHOAS)}
         return VarSet(var_map)
 
     def visit(self, node: ir.Node):
         vars: tp.List[tp.Set[ir.Node]] = self.visit_children(node)
-        if isinstance(node, ir._VarPlaceholder):
+        if isinstance(node, ir.VarHOAS):
             val = set([node])
         else:
             val = set()
