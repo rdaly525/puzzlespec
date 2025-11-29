@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from ..pass_base import Transform, Context, handles
 from ...dsl import ir, utils, ast
+from ..analyses.kind_check import TypeMap
 import math
 import typing as tp
 
@@ -12,12 +13,16 @@ class ConstFoldPass(Transform):
     Leaves non-constant structures intact.
     """
 
-    requires: tp.Tuple[type, ...] = ()
+    requires: tp.Tuple[type, ...] = (TypeMap,)
     produces: tp.Tuple[type, ...] = ()
     name = "const_prop"
 
     def __init__(self, max_dom_size=100):
         self.max_dom_size=max_dom_size
+
+    def run(self, root: ir.Node, ctx: Context):
+        self.Tmap: TypeMap = ctx.get(TypeMap).Tmap
+        return self.visit(root)
 
     _binops = {
         ir.Neg: lambda a: -a,
@@ -84,9 +89,16 @@ class ConstFoldPass(Transform):
 
     @handles(ir.IsMember)
     def _(self, node: ir.IsMember):
+        T, domain, val = node._children
+        if isinstance(domain, ir.Universe) and domain.T.fin:
+            assert val in self.Tmap
+            assert domain in self.Tmap
+            valT = self.Tmap[val]
+            domT = self.Tmap[domain]
+            if valT.eq(domT.carT):
+                return ir.Lit(ir.BoolT(), val=True)
+
         T, domain, val = self.visit_children(node)
-        # Only can simplify if both val and domain are concrete
-        # dom_size returns None if domain is not concrete
         if utils._is_concrete(val):
             dom_size = utils._dom_size(domain)
             if dom_size is not None and dom_size <= self.max_dom_size:

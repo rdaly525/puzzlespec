@@ -54,6 +54,11 @@ def _is_concrete(node: ir.Node):
         return False
     return all(_is_concrete(c) for c in node._children)
 
+def _has_freevar(node: ir.Node):
+    if isinstance(node, ir.VarRef):
+        return True
+    return any(_has_freevar(c) for c in node._children)
+
 def _unpack(node: ir.Node):
     if isinstance(node, ir.TupleLit):
         return tuple(_unpack(c) for c in node._children[1:])

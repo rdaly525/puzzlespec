@@ -11,7 +11,8 @@ from puzzlespec.compiler.dsl.ir import LambdaHOAS
 if TYPE_CHECKING:
     from ..dsl import ir
 
-class AnalysisObject(ABC): ...
+class AnalysisObject(ABC):
+    persistent = False
 
 class Context:
     def __init__(self, *args):
@@ -40,7 +41,11 @@ class Context:
         return self._store[cls]
     
     def invalidate(self):
-        self._store = {}
+        new_store = {}
+        for cls, aobj in self._store.items():
+            if cls.persistent:
+                new_store[cls] = aobj
+        self._store = new_store
 
     
 class Pass(ABC):
@@ -296,7 +301,8 @@ class Transform(Pass):
         setattr(cls, "visit", visit)
 
 class PassManager:
-    def __init__(self, *passes: Pass, verbose=False, max_iter=5):
+    def __init__(self, *passes: Pass, verbose=False, max_iter=5, analysis_map: tp.Mapping[tp.Type[AnalysisObject], Analysis] = {}):
+        self.analysis_map = analysis_map
         self.passes = passes
         self.verbose = verbose
         self.max_iter = max_iter
@@ -311,6 +317,17 @@ class PassManager:
     def _run_pass(self, root: ir.Node, p: Pass, ctx: Context) -> ir.Node:
         if self.verbose:
             print(f"P: {id(root)} {p.__class__.__name__}")
+        for req_analysis in p.requires:
+            if ctx.try_get(req_analysis) is None:
+                if req_analysis in self.analysis_map:
+                    analysis_pass = self.analysis_map[req_analysis]
+                    assert isinstance(analysis_pass, Analysis)
+                    anal_obj= analysis_pass(root, ctx)
+                    ctx.add(anal_obj)
+                    assert ctx.try_get(req_analysis) is not None
+                else:
+                    raise ValueError(f"Analysis {req_analysis} not found in analysis map")
+
         if isinstance(p, Transform):
             new_root, aobjs = p(root, ctx)
             if not new_root.eq(root):

@@ -11,8 +11,9 @@ from ..passes.transforms import CanonicalizePass, ConstFoldPass, AlgebraicSimpli
 from ..passes.transforms.cse import CSE
 #from ..passes.analyses.constraint_categorizer import ConstraintCategorizer, ConstraintCategorizerVals
 from ..passes.analyses.getter import VarGetter, VarSet
-from ..passes.analyses.kind_check import KindCheckingPass
+from ..passes.analyses.kind_check import KindCheckingPass, TypeMap 
 #from ..passes.analyses.ast_printer import AstPrinterPass, PrintedAST
+from ..passes.pass_base import AnalysisObject, Analysis
 class PuzzleSpec:
 
     def __init__(self,
@@ -69,10 +70,10 @@ class PuzzleSpec:
         self.analyze([KindCheckingPass()], ctx=ctx)
 
     # applies passes, copies the tenv and sym table, returns a new spec
-    def transform(self, *passes: Pass, ctx: Context = None, verbose=True) -> 'PuzzleSpec':
+    def transform(self, *passes: Pass, ctx: Context = None, verbose=True, analysis_map: tp.Mapping[tp.Type[AnalysisObject], Analysis] = {}) -> 'PuzzleSpec':
         if ctx is None:
             ctx = Context()
-        pm = PassManager(*passes, verbose=verbose, max_iter=10)
+        pm = PassManager(*passes, verbose=verbose, max_iter=10, analysis_map=analysis_map)
         new_spec_node = pm.run(self._spec, ctx=ctx)
         if new_spec_node == self._spec:
             return self
@@ -94,22 +95,24 @@ class PuzzleSpec:
         )
 
     def optimize(self, max_dom_size=20) -> 'PuzzleSpec':
-        ctx = Context()
+        ctx = Context(self.envs_obj)
+        analysis_map = {
+            TypeMap: KindCheckingPass()
+        }
+
         opt_passes = [
             CanonicalizePass(),
-            AlgebraicSimplificationPass(),
+            AlgebraicSimplificationPass(max_dom_size=max_dom_size),
             ConstFoldPass(max_dom_size=max_dom_size),
             DomainSimplificationPass(),
             BetaReductionPass(),
             #CSE(),
         ]
 
-        opt = self.transform(opt_passes, ctx=ctx)
+        opt = self.transform(opt_passes, ctx=ctx, analysis_map=analysis_map)
         return opt
     
-    def pretty(self, dag=False) -> str:
-        if dag:
-            raise NotImplementedError()
+    def pretty(self) -> str:
         ctx = Context(self.envs_obj)
         pm = PassManager(
             #AstPrinterPass(),
