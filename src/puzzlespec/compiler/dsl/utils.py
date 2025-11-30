@@ -86,7 +86,11 @@ def _dom_size(dom: ir.dom):
                 return len(carT.labels)
             else:
                 return None
- 
+    if isinstance(dom, ir.RestrictEq):
+        _, _, v = dom._children
+        if _lit_val(v) is not None:
+            return 1
+        return None
     if isinstance(dom, ir.Fin):
         return _lit_val(dom._children[1])
     if isinstance(dom, ir.Range):
@@ -105,6 +109,8 @@ def _dom_size(dom: ir.dom):
         if any(s is None for s in sizes):
             return None
         return sum(sizes)
+    if isinstance(dom, ir.DomLit):
+        return len(dom._children[1:])
     return None
 
 # Yields doms or None
@@ -125,6 +131,12 @@ def _iterate(dom: ir.Value):
                     yield ir.EnumLit(carT, label)
             else:
                 yield None
+    elif isinstance(dom, ir.RestrictEq):
+        _, _, v = dom._children
+        if isinstance(v, ir.Lit):
+            yield v
+        else:
+            yield None
     elif isinstance(dom, ir.Fin):
         n = dom._children[1]
         if not isinstance(n, ir.Lit):
@@ -135,17 +147,19 @@ def _iterate(dom: ir.Value):
         lo, hi = dom._children[1:]
         if not isinstance(lo, ir.Lit) or not isinstance(hi, ir.Lit):
             yield None
+            return
         for i in range(lo.val, hi.val):
             yield ir.Lit(intT, val=i)
     elif isinstance(dom, ir.CartProd):
         doms = dom._children[1:]
         tupT = None
         for vals in it.product(*[_iterate(edom) for edom in doms]):
-            if tupT is None:
-                tupT = ir.TupleT(*(v.T for v in vals))
+
             if any(v is None for v in vals):
                 yield None
                 return
+            if tupT is None:
+                tupT = ir.TupleT(*(v.T for v in vals))
             yield ir.TupleLit(tupT, *vals)
     elif isinstance(dom, ir.DisjUnion):
         doms = dom._children[1:]
@@ -156,6 +170,9 @@ def _iterate(dom: ir.Value):
                     yield None
                     return
                 yield ir.Inj(T.carT, v, i)
+    elif isinstance(dom, ir.DomLit):
+        for elem in dom._children[1:]:
+            yield elem
     else:
         yield None
 

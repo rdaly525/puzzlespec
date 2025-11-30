@@ -166,6 +166,16 @@ class ConstFoldPass(Transform):
                 return ir.DomLit(T, *restricted_elems)
         return node.replace(T, func)
 
+    @handles(ir.SumLit)
+    def _(self, node: ir.SumLit):
+        T, tag, *elems = self.visit_children(node)
+        # If tag is a literal IntT, convert to Inj
+        if isinstance(tag, ir.Lit) and isinstance(tag.T, ir.IntT):
+            tag_val = tag.val
+            assert isinstance(tag_val, int) and 0 <= tag_val < len(elems)
+            return ir.Inj(T, elems[tag_val], idx=tag_val)
+        return node.replace(T, tag, *elems)
+
     # Higher order ops
     #@handles(ir.SumReduce)
     #def _(self, node: ir.SumReduce) -> ir.Node:

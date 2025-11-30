@@ -18,6 +18,11 @@ class BetaReductionPass(Transform):
     name = "beta_reduction"
 
 
+def beta_reduce(node: ir.Node):
+    p = BetaReductionPass()
+    ctx = Context()
+    return p.run(node, ctx)
+
 class BetaReductionPass(Transform):
     enable_memoization = False
     requires: tp.Tuple[type, ...] = ()
@@ -25,8 +30,6 @@ class BetaReductionPass(Transform):
     name = "beta_reduction"
 
     def run(self, root: ir.Node, ctx: Context):
-        #self.cur_lam_depth = 0
-        #self.lambda_depth = {}   # map: ir.Lambda -> int
         return self.visit(root)
 
     # ---------- helpers ----------
@@ -92,24 +95,27 @@ class BetaReductionPass(Transform):
 
     # ---------- visitors ----------
 
-    
-    #@handles(ir.Lambda, ir.PiT)
-    #def _(self, node: ir.Node):
-    #    # record depth at definition site
-    #    self.lambda_depth[node] = self.cur_lam_depth
-
-    #    # enter this lambda's body
-    #    self.cur_lam_depth += 1
-    #    new_children = self.visit_children(node)
-    #    self.cur_lam_depth -= 1
-
-    #    return node.replace(*new_children)
-
-   
     @handles(ir.BoundVar)
     def _(self, node: ir.BoundVar):
         # no change outside of β-redexes
         return node
+
+    @handles(ir.ApplyT)
+    def _(self, node: ir.ApplyT):
+        piT, arg = node._children
+        assert isinstance(piT, ir.PiT)
+        assert isinstance(arg, ir.Value)
+        _, resT = piT._children
+        # 1. shift argument up by 1 for the binder we’re eliminating
+        arg_p1 = self.shift(arg, +1, cutoff=0)
+
+        # 2. substitute for "0" (j=0) in body
+        resT_sub = self.subst(resT, 0, arg_p1, depth=0)
+
+        # 3. shift everything down by 1 (remove the binder)
+        resT_m1 = self.shift(resT_sub, -1, cutoff=0)
+        return resT_m1
+
 
     @handles(ir.Apply)
     def _(self, node: ir.Apply):

@@ -4,7 +4,7 @@ import typing as tp
 
 
 from ..pass_base import Analysis, AnalysisObject, Context, handles
-from ...dsl import ir
+from ...dsl import ir, utils
 from ..envobj import EnvsObj, TypeEnv, SymTable
 
 class PrettyPrintedExpr(AnalysisObject):
@@ -60,12 +60,16 @@ class PrettyPrinterPass(Analysis):
             g_to_T = {}
             d_to_T = {}
             for (sid, e), T_str in zip(self.sym.entries.items(), Ts):
+                if e.invalid:
+                    i_str = " (OLD)"
+                else:
+                    i_str = ""
                 if e.role == 'P':
-                    p_to_T[e.name] = T_str
+                    p_to_T[e.name] = T_str + i_str
                 elif e.role == 'G':
-                    g_to_T[e.name] = T_str
+                    g_to_T[e.name] = T_str + i_str
                 elif e.role == 'D':
-                    d_to_T[e.name] = T_str
+                    d_to_T[e.name] = T_str + i_str
                 s = "Params:\n"        
                 for pname, T in p_to_T.items():
                     s += f"    {pname}: {T}\n"
@@ -182,7 +186,8 @@ class PrettyPrinterPass(Analysis):
 
     @handles(ir.BoundVar)
     def _(self, node: ir.BoundVar) -> str:
-        return f"{self.b_names[-(node.idx+1)]}_#{node.idx}"
+        #return f"{self.b_names[-(node.idx+1)]}_#{node.idx}"
+        return f"{self.b_names[-(node.idx+1)]}"
 
     @handles(ir.Unit)
     def _(self, node: ir.Unit) -> str:
@@ -376,6 +381,11 @@ class PrettyPrinterPass(Analysis):
             return "{}"
         return "{" + ", ".join(elements) + "}"
 
+    @handles(ir.SumLit)
+    def _(self, node: ir.SumLit) -> str:
+        _, tag_expr, *elem_exprs = self.visit_children(node)  # Skip type at index 0
+        return f"SumLit(tag={tag_expr}, [{', '.join(elem_exprs)}])"
+
     @handles(ir.Card)
     def _(self, node: ir.Card) -> str:
         _, domain_expr = self.visit_children(node)  # Skip type at index 0
@@ -407,6 +417,8 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.TupleLit)
     def _(self, node: ir.TupleLit) -> str:
         elements = self.visit_children(node)[1:]  # Skip type at index 0
+        if utils._is_concrete(node):
+            return "(" + ", ".join(es for es in elements) + ")"
         return self._format_variadic_multiline(
             elements, 
             prefix="(", 
@@ -461,7 +473,7 @@ class PrettyPrinterPass(Analysis):
         else:
             # Fallback for other func types (FuncLit, VarRef, etc.)
             func_expr = self.visit(func_node)
-            return f"{{x ∈ dom({func_expr}) | {func_expr}(x)}}"
+            return f"{{{func_expr}}}"
 
     @handles(ir.Forall)
     def _(self, node: ir.Forall) -> str:
@@ -478,7 +490,7 @@ class PrettyPrinterPass(Analysis):
         else:
             # Fallback for other func types (FuncLit, VarRef, etc.)
             func_expr = self.visit(func_node)
-            return f"∀ x ∈ dom({func_expr}): {func_expr}(x)"
+            return f"∀ {func_expr}"
 
     @handles(ir.Exists)
     def _(self, node: ir.Exists) -> str:
@@ -495,27 +507,27 @@ class PrettyPrinterPass(Analysis):
         else:
             # Fallback for other func types (FuncLit, VarRef, etc.)
             func_expr = self.visit(func_node)
-            return f"∃ x ∈ dom({func_expr}): {func_expr}(x)"
+            return f"∃ {func_expr}"
 
     ## Funcs (i.e., containers)
     @handles(ir.Map)
     def _(self, node: ir.Map) -> str:
-        # TODO MAke this look more like forall
         funcT, dom, lam = node._children
         dom_expr = self.visit(dom)
         (var_name, body_str) = self.visit(lam)
 
-        #funcT_str, dom_expr, (var_name, body_str) = self.visit_children(node)  # Skip type at index 0
         # Lambda returns (var_name, body_str) tuple
         body_formatted = self._indent_expr(body_str)
         return f"Map {var_name} ∈ {dom_expr}: [\n{body_formatted}\n]"
-
         #return f"[{body_str} | {var_name} ∈ {dom_expr}]"
 
     @handles(ir.FuncLit)
     def _(self, node: ir.FuncLit) -> str:
-        T, dom, *elems = node._children
-        return f"[...]"
+        _, _, *elem_strs = self.visit_children(node)
+        if len(elem_strs) < 5:
+            return f"[{', '.join(elem_strs)}]"
+        else:
+            return f"[{elem_strs[0]}, …, {elem_strs[-1]}]"
 
     @handles(ir.Image)
     def _(self, node: ir.Image) -> str:

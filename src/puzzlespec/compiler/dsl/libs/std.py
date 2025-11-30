@@ -39,7 +39,8 @@ def all_same(func) -> ast.BoolExpr:
 
 def count(func: ast.FuncExpr, pred: tp.Callable) -> ast.IntExpr:
     assert isinstance(func, ast.FuncExpr)
-    return func.map(lambda v: pred(v).to_int()).sum()
+    return func.domain.restrict(lambda i: pred(func(i))).size
+    #return func.map(lambda v: pred(v).to_int()).sum()
 
 def combinations(dom: ast.DomainExpr, r: int) -> ast.DomainExpr:
     ...

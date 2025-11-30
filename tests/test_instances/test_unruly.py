@@ -1,6 +1,6 @@
 from puzzlespec import PuzzleSpec, get_puzzle
 #from puzzlespec import set_clues
-from puzzlespec.compiler.dsl import ir, setter, ast
+from puzzlespec.compiler.dsl import ir, setter, ast, smt_backend as bk
 from puzzlespec.compiler.dsl.libs import std, optional as opt
 from puzzlespec.compiler.passes import Context, PassManager, analyses as A, transforms as T
 import numpy as np
@@ -34,6 +34,9 @@ def t0():
 #t0()
 def t1():
     Unruly.pretty()
+    #Sudoku.pretty()
+
+    print("SETTING PARAMETERS")
     cs = setter.VarSetter(Unruly)
     # Set parameters
     cs.nR = 4
@@ -54,7 +57,7 @@ def t1():
     # 0 X 0 X
     # 0 X X X
     # X X X X
-    print("CLUE SETTER MODE")
+    print("SETTING CLUES")
     cs = setter.VarSetter(unruly44)
     clues = "11..0.0.0......."
     # clue setter mode has access to all the gen_var variables as attributes
@@ -77,5 +80,8 @@ def t1():
         return v
     cs.givens.set_lam(_get)
     instance = cs.build()
-    print(instance.pretty())
+    instance.pretty()
+    print("GENERATING SMT")
+    backend = bk.SMTBackend(instance)
+    smt = backend.generate()
 t1()

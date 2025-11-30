@@ -1,5 +1,4 @@
 from __future__ import annotations
-from hmac import new
 import math
 
 from ..pass_base import Transform, Context, handles
@@ -30,8 +29,9 @@ class AlgebraicSimplificationPass(Transform):
     produces: tp.Tuple[type, ...] = ()
     name = "alg_simplification"
 
-    def __init__(self, max_dom_size=20):
+    def __init__(self, max_dom_size=20, aggressive=False):
         self.max_dom_size=max_dom_size
+        self.aggressive = aggressive
         super().__init__()
 
     # Arithmetic
@@ -192,6 +192,31 @@ class AlgebraicSimplificationPass(Transform):
             _, val = scrut._children
             assert idx < len(cases)
             return ir.Apply(T, cases[idx], val)
+        if isinstance(scrut, ir.SumLit):
+            # Match(SumLit(tag, *elems), *branch_lams) -> ApplyFunc(FuncLit(...), tag)
+            _, tag, *elems = scrut._children
+            # Create Fin domain for indices
+            n = len(elems)
+            fin_domT = ir.DomT.make(carT=ir.IntT(), fin=True, ord=True)
+            fin_dom = ir.Fin(fin_domT, ir.Lit(ir.IntT(), val=n))
+            # Apply each branch lambda to its corresponding element
+            func_elems = []
+            val_map = {}
+            for i in range(n):
+                # Apply branch_lams[i] to elems[i]
+                applied = ir.Apply(T, cases[i], elems[i])
+                applied = self.visit(applied)  # Simplify the application
+                func_elems.append(applied)
+                # Map index i to position i in FuncLit
+                idx_lit = ir.Lit(ir.IntT(), val=i)
+                val_map[idx_lit._key] = i
+            # Create FuncLit with Fin domain
+            layout = ir._DenseLayout(val_map=val_map)
+            piT = ir.PiT(ir.IntT(), T)
+            funcT = ir.FuncT(fin_dom, piT)
+            func_lit = ir.FuncLit(funcT, fin_dom, *func_elems, layout=layout)
+            # Apply the function to tag
+            return ir.ApplyFunc(T, func_lit, tag)
         return node.replace(T, scrut, *cases)
 
     @handles(ir.ApplyFunc)
@@ -207,8 +232,8 @@ class AlgebraicSimplificationPass(Transform):
     def _(self, node: ir.Map):
         T, dom, lam = self.visit_children(node)
         dom_size = utils._dom_size(dom)
-        lam_has_freevar = utils._has_freevar(lam)
-        if dom_size is not None and dom_size <= self.max_dom_size and not lam_has_freevar:
+        doit = self.aggressive or not utils._has_freevar(lam)
+        if dom_size is not None and dom_size <= self.max_dom_size and doit:
             # Convert Map to FuncLit by evaluating lambda for each domain element
             elems = []
             val_map = {}
@@ -222,3 +247,43 @@ class AlgebraicSimplificationPass(Transform):
             layout = ir._DenseLayout(val_map=val_map)
             return ir.FuncLit(T, dom, *elems, layout=layout)
         return node.replace(T, dom, lam)
+
+    @handles(ir.Slice)
+    def _(self, node: ir.Slice):
+        T, dom, lo, hi = self.visit_children(node)
+        if isinstance(lo, ir.Lit) and isinstance(hi, ir.Lit):
+            lo_val, hi_val = lo.val, hi.val
+            assert lo_val < hi_val
+            elems = [ir.ElemAt(T.carT, dom, ir.Lit(ir.IntT(), val=i)) for i in range(lo_val, hi_val)]
+            return ir.DomLit(T, *elems)
+        return node.replace(T, dom, lo, hi)
+
+    @handles(ir.ElemAt)
+    def _(self, node: ir.ElemAt):
+        T, dom, idx = self.visit_children(node)
+        if isinstance(idx, ir.Lit):
+            idx_val = idx.val
+            if isinstance(dom, ir.Fin):
+                return idx
+            if isinstance(dom, ir.Range):
+                _, lo, hi = dom._children
+                return ir.Add(ir.IntT(), lo, idx)
+            if isinstance(dom, ir.Slice):
+                _, slice_dom, lo, hi = dom._children
+                return ir.ElemAt(T, slice_dom, ir.Add(ir.IntT(), lo, idx))
+            if isinstance(dom, ir.DomLit):
+                _, *elems = dom._children
+                return elems[idx_val]
+            if isinstance(dom, ir.RestrictEq):
+                assert idx.val==0
+                _, _, v = dom._children
+                return v
+            if isinstance(dom, ir.CartProd):
+                cart_doms = dom._children[1:]
+                sizes = [ir.Card(ir.IntT(), d) for d in cart_doms]
+                strides = [ir.Prod(ir.IntT(), *sizes[j+1:]) for j in range(len(sizes))]
+                indices = [ir.Mod(ir.IntT(), ir.Div(ir.IntT(), idx, stride), size) for stride, size in zip(strides, sizes)]
+                return ir.TupleLit(dom.T.carT, *[ir.ElemAt(d.T.carT, d, i) for d, i in zip(cart_doms, indices)])
+            if isinstance(dom, ir.DisjUnion):
+                raise NotImplementedError("ElemAt of disj union not implemented")
+        return node.replace(T, dom, idx)
