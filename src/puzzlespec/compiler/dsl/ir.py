@@ -420,9 +420,6 @@ class Ite(Value):
 class Not(Value):
     _numc = 2
     def __init__(self, T: Type, a: Value):
-        assert isinstance(T, BoolT)
-        if not isinstance(a.T, BoolT):
-            raise TypeError(f"Not expects Bool operand, got {a}")
         super().__init__(T, a)
 
 class Neg(Value):

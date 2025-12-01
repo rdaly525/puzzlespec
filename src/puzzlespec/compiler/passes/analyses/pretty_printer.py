@@ -473,7 +473,8 @@ class PrettyPrinterPass(Analysis):
         else:
             # Fallback for other func types (FuncLit, VarRef, etc.)
             func_expr = self.visit(func_node)
-            return f"{{{func_expr}}}"
+            dom_expr = self.visit(func_node.T.dom)
+            return f"{{{dom_expr} | {func_expr}}}"
 
     @handles(ir.Forall)
     def _(self, node: ir.Forall) -> str:
