@@ -422,13 +422,25 @@ class KindCheckingPass(Analysis):
             # Verify element type matches domain carrier type
             if not _is_same_kind(first_elemT, T.carT):
                 raise TypeError(f"DomLit element type {first_elemT} does not match domain carrier type {T.carT}")
-        # Verify domain attributes: fins=(True,), ords=(True,), axes=()
-        if T.fins != (True,):
-            raise TypeError(f"DomLit domain must have fins=(True,), got {T.fins}")
-        if T.ords != (True,):
-            raise TypeError(f"DomLit domain must have ords=(True,), got {T.ords}")
-        if T.axes != ():
-            raise TypeError(f"DomLit domain must have axes=(), got {T.axes}")
+        self.Tmap[node] = T
+        return T
+
+    @handles(ir.SumLit)
+    def _(self, node: ir.SumLit):
+        T, tagT, *elemTs = self.visit_children(node)
+        # Verify type is SumT
+        if not _is_kind(T, ir.SumT):
+            raise TypeError(f"SumLit must have SumT type, got {T}")
+        # Verify tag is IntT
+        if not _is_kind(tagT, ir.IntT):
+            raise TypeError(f"SumLit tag must be IntT, got {tagT}")
+        # Verify number of elements matches SumT
+        if len(elemTs) != len(T.elemTs):
+            raise TypeError(f"SumLit has {len(elemTs)} elements but SumT has {len(T.elemTs)} variants")
+        # Verify each element type matches corresponding SumT element type
+        for i, (elemT, sumElemT) in enumerate(zip(elemTs, T.elemTs)):
+            if not _is_same_kind(elemT, sumElemT):
+                raise TypeError(f"SumLit element {i} type {elemT} does not match SumT element type {sumElemT}")
         self.Tmap[node] = T
         return T
 

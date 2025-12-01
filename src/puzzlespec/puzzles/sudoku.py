@@ -16,26 +16,27 @@ def build_sudoku_spec(gw=False) -> PuzzleSpec:
     # Generator parameters
     num_clues = p.gen_var(sort=Int, name='num_clues')
     givens = p.func_var(role='G', dom=grid.cells(), codom=opt.Optional(digits), name="givens")
+
     # clue constraints
-    #p += opt.count_some(givens)==num_clues
+    p += opt.count_some(givens)==num_clues
     
     # Decision variables
     cell_vals = p.func_var(role='D', dom=grid.cells(), codom=digits, name="cell_vals")
 
-    ## Puzzle Rules
+    # Puzzle Rules
     
     # Given vals must be consistent with cell_vals
-    #p += grid.cells().forall(
-    #    lambda c: opt.fold(givens(c), on_none=True, on_some=lambda v: cell_vals(c)==v)
-    #)
+    p += grid.cells().forall(
+        lambda c: opt.fold(givens(c), on_none=True, on_some=lambda v: cell_vals(c)==v)
+    )
     
-    ## All values in each row, column, and tile are distinct
-    #for rct in (
-    #    cell_vals.rows(),
-    #    cell_vals.cols(),
-    #    cell_vals.tiles(size=[3,3], stride=[3,3]),
-    #):
-    #    p += rct.forall(lambda region: std.distinct(region))
+    # All values in each row, column, and tile are distinct
+    for rct in (
+        cell_vals.rows(),
+        cell_vals.cols(),
+        cell_vals.tiles(size=[3,3], stride=[3,3]),
+    ):
+        p += rct.forall(lambda region: std.distinct(region))
 
     gw = True
     # german whispers

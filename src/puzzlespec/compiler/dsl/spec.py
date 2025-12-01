@@ -1,12 +1,12 @@
 import typing as tp
 
-from puzzlespec.compiler.passes.analyses.ast_printer import AstPrinterPass
-from puzzlespec.compiler.passes.envobj import EnvsObj
+from ..passes.analyses.ast_printer import AstPrinterPass
+from ..passes.envobj import EnvsObj, OblsObj
 from . import ir
 from ..passes.analyses.pretty_printer import PrettyPrinterPass, PrettyPrintedExpr
 from .envs import SymTable, TypeEnv
 from ..passes.pass_base import PassManager, Context, Pass
-from puzzlespec.compiler.passes.transforms.beta_reduction import BetaReductionPass
+from ..passes.transforms.beta_reduction import BetaReductionPass
 from ..passes.transforms import CanonicalizePass, ConstFoldPass, AlgebraicSimplificationPass, DomainSimplificationPass
 from ..passes.transforms.cse import CSE
 #from ..passes.analyses.constraint_categorizer import ConstraintCategorizer, ConstraintCategorizerVals
@@ -70,31 +70,60 @@ class PuzzleSpec:
         self.analyze([KindCheckingPass()], ctx=ctx)
 
     # applies passes, copies the tenv and sym table, returns a new spec
-    def transform(self, *passes: Pass, ctx: Context = None, verbose=True, analysis_map: tp.Mapping[tp.Type[AnalysisObject], Analysis] = {}) -> 'PuzzleSpec':
+    def transform(
+        self,
+        *passes: Pass,
+        ctx: Context = None,
+        verbose=True,
+        analysis_map: tp.Mapping[tp.Type[AnalysisObject], Analysis] = {},
+        creates_vars: bool = False,
+    ) -> 'PuzzleSpec':
         if ctx is None:
             ctx = Context()
         pm = PassManager(*passes, verbose=verbose, max_iter=10, analysis_map=analysis_map)
         new_spec_node = pm.run(self._spec, ctx=ctx)
         if new_spec_node == self._spec:
             return self
+        tmap = {sid: T for sid, T in zip(new_spec_node.sids, new_spec_node.Ts._children)}
+        _tenv = None
+        if creates_vars:
+            envs = ctx.try_get(EnvsObj)
+            if envs is None:
+                raise ValueError("No envs object in context")
+            # contains the new vars
+            envs = ctx.get(EnvsObj)
+            sym = envs.sym
+            # contains the new vars, but not the new types of the old vars
+            _tenv = envs.tenv
+        else:
+            sym = self.sym
         pm = PassManager(VarGetter())
         pm.run(new_spec_node, ctx=ctx)
         new_sids = set(v.sid for v in ctx.get(VarSet).vars)
-        new_sym = self.sym.copy(new_sids)
-
-        tmap = {sid: T for sid, T in zip(new_spec_node.sids, new_spec_node.Ts._children)}
+        new_sym = sym.copy(new_sids)
         new_tenv = TypeEnv()
-        for sid, T in tmap.items():
-            new_tenv.add(sid, T)
+        for sid in new_sym:
+            if sid in tmap:
+                new_tenv.add(sid, tmap[sid])
+            else:
+                assert _tenv is not None and sid in _tenv
+                new_tenv.add(sid, _tenv[sid])
+        obls = ctx.try_get(OblsObj)
+        if obls is None:
+            new_obls = new_spec_node.obls
+        else:
+            obls = obls.obls
+            raw_obls = new_spec_node.obls._children[1:] + tuple(obls.values())
+            new_obls = ir.TupleLit(ir.TupleT(*(ir.BoolT() for _ in raw_obls)), *raw_obls)
         return PuzzleSpec(
             name=self.name,
             sym=new_sym,
             tenv=new_tenv,
             rules=new_spec_node.cons,
-            obls=new_spec_node.obls,
+            obls=new_obls,
         )
 
-    def optimize(self, max_dom_size=20) -> 'PuzzleSpec':
+    def optimize(self, max_dom_size=20, aggressive=False) -> 'PuzzleSpec':
         ctx = Context(self.envs_obj)
         analysis_map = {
             TypeMap: KindCheckingPass()
@@ -102,7 +131,7 @@ class PuzzleSpec:
 
         opt_passes = [
             CanonicalizePass(),
-            AlgebraicSimplificationPass(max_dom_size=max_dom_size),
+            AlgebraicSimplificationPass(max_dom_size=max_dom_size, aggressive=aggressive),
             ConstFoldPass(max_dom_size=max_dom_size),
             DomainSimplificationPass(),
             BetaReductionPass(),

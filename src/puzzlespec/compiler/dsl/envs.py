@@ -1,3 +1,4 @@
+from __future__ import annotations
 from dataclasses import dataclass
 from . import ir
 import typing as tp
@@ -11,6 +12,9 @@ class TypeEnv:
 
     def __contains__(self, sid: int):
         return sid in self.vars
+
+    def copy(self) -> TypeEnv:
+        return TypeEnv(vars={sid: T for sid, T in self.vars.items()})
 
     def add(self, sid: int, T: ir.Type):
         if sid in self.vars:
@@ -96,7 +100,7 @@ class SymTable:
     def get_decision_vars(self) -> tp.List[int|str]:
         return [sid for sid, e in self.entries.items() if e.role == 'D' and not e.invalid]
 
-    def __iter__(self):
+    def __iter__(self) -> tp.Iterator[int]:
         for sid in self.entries:
             yield sid
 

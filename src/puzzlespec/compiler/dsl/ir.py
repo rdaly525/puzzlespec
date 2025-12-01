@@ -146,6 +146,9 @@ class EnumT(Type):
         return isinstance(other, EnumT) and self.name==other.name and self.labels ==other.labels
 
 
+    def __len__(self):
+        return len(self.labels)
+
 class TupleT(Type):
     _numc = -1
     def __init__(self, *ts: Type):
@@ -317,27 +320,28 @@ class FuncT(Type):
     def eq(self, other):
         return isinstance(other, FuncT) and self.dom.eq(other.dom) and self.piT.eq(other.piT)
 
+
 def _is_value(v: Node) -> bool:
     return isinstance(v, (Value, BoundVar, VarRef))
 
-#class ApplyT(Type):
-#    _numc = 2
-#    def __init__(self, funcT: FuncT, arg: Value):
-#        assert _is_value(arg)
-#        if not isinstance(funcT._raw_T, FuncT):
-#            raise ValueError(f"ApplyT funcT must be a FuncT, got {funcT._raw_T}")
-#        super().__init__(funcT, arg)
-#
-#    def __repr__(self):
-#        return f"AppT({self.funcT}, {self.arg})"
-#
-#    @property
-#    def funcT(self) -> FuncT:
-#        return self._children[0]
-#
-#    @property
-#    def arg(self) -> Value:
-#        return self._children[1]
+class ApplyT(Type):
+    _numc = 2
+    def __init__(self, piT: PiT, arg: Value):
+        assert _is_value(arg)
+        if not isinstance(piT, PiT):
+            raise ValueError(f"ApplyT must be a PiT, got {piT}")
+        super().__init__(piT, arg)
+
+    def __repr__(self):
+        return f"AppT({self.piT}, {self.arg})"
+
+    @property
+    def piT(self) -> PiT:
+        return self._children[0]
+
+    @property
+    def arg(self) -> Value:
+        return self._children[1]
 
 
 ##############################
@@ -416,9 +420,6 @@ class Ite(Value):
 class Not(Value):
     _numc = 2
     def __init__(self, T: Type, a: Value):
-        assert isinstance(T, BoolT)
-        if not isinstance(a.T, BoolT):
-            raise TypeError(f"Not expects Bool operand, got {a}")
         super().__init__(T, a)
 
 class Neg(Value):
@@ -555,6 +556,16 @@ class Inj(Value):
         self.idx = idx
         super().__init__(T, val)
 
+# Literal for sum types
+class SumLit(Value):
+    _numc = -1
+    def __init__(self, T: Type, tag: Value, *elems: Value):
+        if not isinstance(tag, Value):
+            raise ValueError("SumLit tag must be a Value")
+        if not all(isinstance(elem, Value) for elem in elems):
+            raise ValueError("SumLit children must be Values")
+        super().__init__(T, tag, *elems)
+
 # (A|B|...) -> (A->T, B->T,...) -> T
 class Match(Value):
     _numc = -1
@@ -608,6 +619,10 @@ class _DenseLayout(_FuncLitLayout):
 
     def __eq__(self, other):
         return isinstance(other, _DenseLayout) and self.val_map==other.val_map
+
+    def __lt__(self, other):
+        return len(self.val_map) < len(other.val_map)
+
 
 class FuncLit(Value):
     _fields= ('layout',)
@@ -802,6 +817,7 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     FuncT: -2,
     PiTHOAS: -2,
     PiT: -2,
+    ApplyT: -2,
     Unit: -1,
     Lit: 0,
     VarRef: 1,
@@ -844,6 +860,7 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     DisjUnion: 9,
     DomInj: 9,
     Inj: 9,
+    SumLit: 9,
     Match: 9,
     Restrict: 9,
     Map: 10,
