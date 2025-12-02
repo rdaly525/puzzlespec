@@ -50,7 +50,7 @@ def _applyT(funcT: ir.FuncT, arg: ir.Value):
 
 # Checks for any bound/free vars
 def _is_concrete(node: ir.Node):
-    if isinstance(node, (ir.VarRef, ir.BoundVar)):
+    if isinstance(node, (ir.VarRef, ir.BoundVar, ir.VarHOAS, ir.BoundVarHOAS)):
         return False
     return all(_is_concrete(c) for c in node._children)
 

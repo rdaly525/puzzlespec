@@ -26,7 +26,7 @@ class Node:
         child_keys = tuple(c._key for c in self._children)
         assert None not in child_keys
         fields = tuple(getattr(self, field, None) for field in self._fields)
-        assert None not in fields
+        #assert None not in fields
         priority = NODE_PRIORITY[(type(self))]
         key = (priority, self.__class__.__name__, fields, child_keys)
         return key
@@ -797,10 +797,10 @@ class LambdaHOAS(Value):
         super().__init__(T, bound_var, body)
 
 class VarHOAS(Value):
-    _fields = ('sid',)
+    _fields = ('name', 'metadata')
     _numc = 1
-    def __init__(self, T: Type, sid: int):
-        self.sid = sid
+    def __init__(self, T: Type, name: str, metadata: tp.Dict[str, tp.Any]):
+        self.name = name
         super().__init__(T)
 
 # Mapping from Value classes to a priority integer.

@@ -7,6 +7,11 @@ from ..pass_base import Analysis, AnalysisObject, Context, handles
 from ...dsl import ir, utils
 from ..envobj import EnvsObj, TypeEnv, SymTable
 
+def pretty(node: ir.Node) -> str:
+    ctx = Context()
+    pexpr = PrettyPrinterPass().run(node, ctx)
+    return pexpr.text
+
 class PrettyPrintedExpr(AnalysisObject):
     def __init__(self, text: str):
         self.text = text
@@ -36,7 +41,7 @@ class PrettyPrinterPass(Analysis):
     The result is stored in the context as a `PrettyPrintedExpr` object.
     """
     enable_memoization=False
-    requires = (EnvsObj,)
+    requires = ()
     produces = (PrettyPrintedExpr,)
     name = "pretty_printer"
     #_debug=True
@@ -47,11 +52,13 @@ class PrettyPrinterPass(Analysis):
 
     def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
         # Get analysis results
-        envs = ctx.get(EnvsObj)
-        self.tenv: TypeEnv = envs.tenv
-        self.sym: SymTable = envs.sym
+        envs = ctx.try_get(EnvsObj)
+        if envs is not None:
+            self.tenv: TypeEnv = envs.tenv
+            self.sym: SymTable = envs.sym
         self.cnt=0
         self.b_names = []
+        self.bvhoas_names = {}
         if isinstance(root, ir.Spec):
             cons_text, obls_text, Ts = self.visit(root)
             cons_str = self._indent_expr(cons_text)
@@ -82,7 +89,7 @@ class PrettyPrinterPass(Analysis):
             s += f"Spec:\n  Constraints:\n{cons_str}\n  Obligations:\n{obls_str}\n"
         else:
             s = self.visit(root)
-        print("\n"+s+"\n")
+        #print("\n"+s+"\n")
         return PrettyPrintedExpr(s)
 
     ##############################
@@ -166,9 +173,8 @@ class PrettyPrinterPass(Analysis):
 
     @handles(ir.PiTHOAS)
     def _(self, node: ir.PiTHOAS) -> str:
-        assert 0
-        bv, resT = self.visit_children(node)
-        return (bv, resT)
+        bv_name, resT_str = self.visit_children(node)
+        return (bv_name, resT_str)
 
     @handles(ir.FuncT)
     def _(self, node: ir.FuncT):
@@ -645,7 +651,11 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.BoundVarHOAS)
     def _(self, node: ir.BoundVarHOAS) -> str:
         T, = self.visit_children(node)
-        return f"b{id(node)}"
+        if node in self.bvhoas_names:
+            return self.bvhoas_names[node]
+        bv_name = self._new_elem_name()
+        self.bvhoas_names[node] = bv_name
+        return bv_name
 
     @handles(ir.LambdaHOAS)
     def _(self, node: ir.LambdaHOAS) -> str:
@@ -655,7 +665,7 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.VarHOAS)
     def _(self, node: ir.VarHOAS) -> str:
         T, = self.visit_children(node)
-        return f"v{node.sid}"
+        return f"{node.name}"
 
 #"⊎" disjoint union
 #"×"cartesian product

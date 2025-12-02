@@ -2,6 +2,11 @@ from ..pass_base import Transform, Context, AnalysisObject, handles
 from ...dsl import ir, ast
 import typing as tp
 
+def resolve_bound_vars(root: ir.Node) -> ir.Node:
+    ctx = Context()
+    new_root = ResolveBoundVars().run(root, ctx)
+    return new_root
+
 class ResolveBoundVars(Transform):
     #_debug=True
     enable_memoization = False
@@ -16,17 +21,26 @@ class ResolveBoundVars(Transform):
         self._check_no_placeholders(new_root)
         return new_root
 
-    def _check_no_placeholders(self, node):
+    def _check_no_hoas(self, node):
         if isinstance(node, (ir.BoundVarHOAS, ir.LambdaHOAS, ir.PiTHOAS)):
             raise ValueError(f"Failed resolve bound, found {node}")
         for c in node._children:
-            self._check_no_placeholders(c)
+            self._check_no_hoas(c)
 
     @handles(ir.LambdaHOAS)
     def _(self, node):
         T, bv, body = node._children
         new_T = self.visit(T)
         self.stack.append(bv)
+        new_body = self.visit(body)
+        self.stack.pop()
+        return ir.Lambda(new_T, new_body)
+
+    @handles(ir.Lambda)
+    def _(self, node):
+        T, body = node._children
+        new_T = self.visit(T)
+        self.stack.append(None)
         new_body = self.visit(body)
         self.stack.pop()
         return ir.Lambda(new_T, new_body)
@@ -39,6 +53,15 @@ class ResolveBoundVars(Transform):
         new_bodyT = self.visit(bodyT)
         self.stack.pop()
         return ir.PiT(bv_T, new_bodyT)
+
+    @handles(ir.PiT)
+    def _(self, node):
+        argT, bodyT = node._children
+        new_argT = self.visit(argT)
+        self.stack.append(None)
+        new_bodyT = self.visit(bodyT)
+        self.stack.pop()
+        return ir.PiT(new_argT, new_bodyT)
 
     @handles(ir.BoundVarHOAS)
     def _(self, use):

@@ -4,13 +4,16 @@ from . import ir
 from dataclasses import dataclass
 from enum import Enum as _Enum
 from .utils import _is_kind, _is_same_kind, _applyT
+from ..passes.analyses.pretty_printer import pretty
 
 @dataclass
 class TExpr:
     node: ir.Type
-
     def __post_init__(self):
         assert isinstance(self.node, ir.Type)
+
+    def __repr__(self):
+        return pretty(self.node)
 
 class UnitType(TExpr):
     def __post_init__(self):
@@ -224,8 +227,8 @@ class Expr:
             return EnumDomainExpr.make(val)
         raise ExprMakeError(f"Cannot make Expr from {val}")
 
-    def __repr__(self):
-        return f"<{type(self).__name__} {self.node}>"
+    #def __repr__(self):
+    #    return f"<{type(self).__name__} {self.node}>"
 
     # "Hack" to construct variables within a map
     def _set_map_dom(self, dom: DomainExpr):
@@ -242,6 +245,10 @@ class Expr:
         
     def __ne__(self, other):
         return ~(self == other)
+
+    def __repr__(self):
+        return pretty(self.node)
+
 
 class UnitExpr(Expr):
     def __post_init__(self):

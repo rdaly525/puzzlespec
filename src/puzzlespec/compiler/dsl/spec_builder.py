@@ -55,16 +55,18 @@ class PuzzleSpecBuilder:
         ))
 
     def var(self, 
-        role: str, 
+        role: str='D', 
         sort: ast.TExpr=None,
         dom: tp.Optional[ast.DomainExpr]=None,
         name: tp.Optional[str]=None, 
         indices: tp.Optional[tp.Tuple[ast.Expr, ...]]=None
     ) -> ast.Expr:
-        public = True
-        if name is None:
-            name = self._new_var_name()
-            public = False
+        metadata = dict(role=role)
+
+        #public = True
+        #if name is None:
+        #    name = self._new_var_name()
+        #    public = False
         err_prefix=f"ERROR In var {name}: "
         if sort is not None and not isinstance(sort, ast.TExpr):
             raise ValueError(f"{err_prefix}sort must be a TExpr, got {type(sort)}")
@@ -98,11 +100,11 @@ class PuzzleSpecBuilder:
                 if _has_bv(bv.node, cur_bv._map_dom.node):
                     raise ValueError(f"Dom[indices[{i}]] depends on indices[{i+j}]")
        
-        public = True
-        if name is None:
-            name = self._new_var_name()
-            public = False
-        sid = self.sym.new_var(name, role, public)
+        #public = True
+        #if name is None:
+        #    name = self._new_var_name()
+        #    public = False
+        #sid = self.sym.new_var(name, role, public)
         def _any_bv(n: ir.Node):
             if isinstance(n, ir.BoundVarHOAS):
                 return True
@@ -135,7 +137,7 @@ class PuzzleSpecBuilder:
             )
             return T
         full_sort = make_sort(bv_exprs)
-        var = ir.VarHOAS(full_sort, sid)
+        var = ir.VarHOAS(full_sort, name=name, metadata=metadata)
         var = ast.wrap(var)
         # add dom constraint
 
@@ -190,6 +192,10 @@ class PuzzleSpecBuilder:
         self._add_rules(*constraints)
         return self
 
+    @property
+    def constraints(self) -> ast.TupleExpr:
+        return ast.TupleExpr.make(tuple(self._rules))
+
     # Freezes the spec and makes it immutable 
     def build(self, name: str) -> PuzzleSpec:
         # 1: Resolve Placeholders (for bound bars/lambdas)
@@ -220,11 +226,11 @@ class PuzzleSpecBuilder:
         spec_opt = spec.optimize()
         return spec_opt
 
-    def print(self, rules_node=None):
-        if rules_node is None:
-            rules_node = ir.TupleLit(ir.TupleT(*(ir.BoolT() for _ in self._rules)), *self._rules)
-        ctx = Context()
-        pm = PassManager([AstPrinterPass()], verbose=True)
-        pm.run(rules_node, ctx)
-        a = ctx.get(PrintedAST)
-        print(a.text)
+    #def print(self, rules_node=None):
+    #    if rules_node is None:
+    #        rules_node = ir.TupleLit(ir.TupleT(*(ir.BoolT() for _ in self._rules)), *self._rules)
+    #    ctx = Context()
+    #    pm = PassManager([AstPrinterPass()], verbose=True)
+    #    pm.run(rules_node, ctx)
+    #    a = ctx.get(PrintedAST)
+    #    print(a.text)

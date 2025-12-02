@@ -1,14 +1,17 @@
-from ..compiler.dsl.spec_builder import PuzzleSpecBuilder
-from ..compiler.dsl.spec import PuzzleSpec
-from ..compiler.dsl.libs import std, optional as opt, topo
-from ..compiler.dsl import ir, Int
+from typing import Optional
+from ..compiler.dsl import ast, ir
+from ..compiler.dsl.spec_builder import PuzzleSpecBuilder, PuzzleSpec
+from ..libs import std, topology as topo, optional as opt, std
+from ..compiler.dsl import ir
 
 
 def build_sudoku_spec(gw=False) -> PuzzleSpec:
+    Int = ast.IntType(ir.IntT())
+    Bool = ast.BoolType(ir.BoolT())
     # Grid and Puzzle
     p: PuzzleSpecBuilder = PuzzleSpecBuilder()
     # Value domain (1..9)
-    digits = std.Range(1, 10)
+    digits = std.range(1, 10)
 
     # Underlying grid
     grid = topo.Grid2D(9, 9)

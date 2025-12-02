@@ -1,11 +1,8 @@
-from puzzlespec import PuzzleSpec, get_puzzle
-#from puzzlespec import set_clues
-from puzzlespec.compiler.dsl import ir, setter, ast, smt_backend as bk
-from puzzlespec.compiler.dsl.libs import std, optional as opt
-from puzzlespec.compiler.passes import Context, PassManager, analyses as A, transforms as T
-import numpy as np
+import puzzlespec as ps
+from puzzlespec.puzzles import get_puzzle
+from puzzlespec.libs import optional as opt
+from puzzlespec.backends import SMTBackend
 import typing as tp
-
 #Sudoku = get_puzzle("sudoku")
 Unruly = get_puzzle("unruly")
 
@@ -37,7 +34,7 @@ def t1():
     #Sudoku.pretty()
 
     print("SETTING PARAMETERS")
-    cs = setter.VarSetter(Unruly)
+    cs = ps.VarSetter(Unruly)
     # Set parameters
     cs.nR = 4
     cs.nC = 4
@@ -58,13 +55,13 @@ def t1():
     # 0 X X X
     # X X X X
     print("SETTING CLUES")
-    cs = setter.VarSetter(unruly44)
-    clues = "11..0.0.0......."
+    cs = ps.VarSetter(unruly44)
+    clues = "WW..B.B.B......."
     # clue setter mode has access to all the gen_var variables as attributes
     # initialize all the given_vals to be 0 and given_mask to be false
     cs.num_clues = 5
-    BW_dom, BW_enum = std.Enum('B', 'W')
-    optBW = opt.Optional(BW_dom)
+    BW_dom, BW = ps.enum('B', 'W')
+    optBW = opt.optional_dom(BW_dom)
     optT = optBW.T.carT
     def _get(rc: tp.Tuple[int, int]):
         r, c = rc
@@ -73,10 +70,10 @@ def t1():
         match (v):
             case '.':
                 return optT.make_sum(None)
-            case '1':
-                return optT.make_sum(BW_enum.B)
-            case '0':
-                return optT.make_sum(BW_enum.W)
+            case 'B':
+                return optT.make_sum(BW.B)
+            case 'W':
+                return optT.make_sum(BW.W)
         return v
     cs.givens.set_lam(_get)
     instance = cs.build()
