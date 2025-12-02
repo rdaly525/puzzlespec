@@ -1,6 +1,6 @@
 from .spec import PuzzleSpec
 from ..passes.pass_base import Pass, Context, PassManager
-from ..passes.transforms.scalarize_vars import ScalarizeVars
+from ..passes.transforms.scalarize import Scalarize
 from ..passes.transforms.encode_enums import EncodeEnums
 # Strategy
 # Phase 1: Prep spec to be encodable using SMT
@@ -15,9 +15,10 @@ class SMTBackend:
         # PromoteDomainsToUniverse (TODO)
         # ExpandFiniteUniverses (TODO)
         
+        print(self.spec.pretty())
         # ScalarizeVars
         print("Before ScalarizeVars:")
-        spec = self.spec.transform(ScalarizeVars(), ctx=Context(self.spec.envs_obj), creates_vars=True)
+        spec = self.spec.transform(Scalarize(), ctx=Context(self.spec.envs_obj), creates_vars=True)
         spec = spec.optimize(aggressive=True)
         spec.pretty()
 

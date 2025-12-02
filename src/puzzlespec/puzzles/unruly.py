@@ -1,7 +1,7 @@
 from typing import Optional
 from ..compiler.dsl import ast, ir
 from ..compiler.dsl.spec_builder import PuzzleSpecBuilder, PuzzleSpec
-from ..libs import std, topology as topo, optional as opt, std
+from ..libs import std, topology as topo, optional as opt, std, var_def as v
 from ..compiler.dsl import ir
 
 
@@ -11,7 +11,7 @@ def build_unruly_spec() -> PuzzleSpec:
     p = PuzzleSpecBuilder()
     
     # Structural parameters
-    nR, nC = ps.param(sort=Int, name='nR'), ps.param(sort=Int, name='nC')
+    nR, nC = v.param(sort=Int, name='nR'), v.param(sort=Int, name='nC')
 
     # Structural constraints
     p += [nR % 2 == 0, nC % 2 == 0]
@@ -22,14 +22,14 @@ def build_unruly_spec() -> PuzzleSpec:
     BW_dom, BW_enum = std.enum('B', 'W')
 
     # Generator variables, i.e., the 'clues' of the puzzle
-    num_clues = p.gen_var(sort=Int, name='num_clues')
-    givens = p.func_var(role='G', dom=grid.cells(), codom=opt.optional_dom(BW_dom), name='givens') # Cell -> Optional[BW_enum]
+    num_clues = v.gen_var(sort=Int, name='num_clues')
+    givens = v.func_var(role='G', dom=grid.cells(), codom=opt.optional_dom(BW_dom), name='givens') # Cell -> Optional[BW_enum]
 
     # clue constraints
     p += opt.count_some(givens)==num_clues
 
     ## Decision variables, i.e., what the end user will solve for
-    color = p.func_var(role='D', dom=grid.cells(), codom=BW_dom, name='color') # Cell -> BW_enum
+    color = v.func_var(role='D', dom=grid.cells(), codom=BW_dom, name='color') # Cell -> BW_enum
 
     ### Puzzle Rules
     ## Handle the givens

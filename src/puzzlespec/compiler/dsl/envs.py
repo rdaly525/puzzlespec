@@ -28,13 +28,14 @@ class TypeEnv:
 
 # Symbol table that stores params/vars and their role. 
 # There is an annoying circular dependency with params, so these have sid as their name
-@dataclass
 class SymEntry:
-    name: str
-    role: str
-    public: bool
-    src: str = ""
-    invalid: bool = False
+    def __init__(self, name: str, invalid: bool = False, **kwargs):
+        self.name = name
+        self.invalid = invalid
+        self._metadata = kwargs
+    
+    def get(self, key: str) -> tp.Any:
+        return self._metadata.get(key, None)
 
 class SymTable:
     def __init__(self, entries: tp.Dict[int, SymEntry] =None, sid: int = 0):
@@ -50,25 +51,29 @@ class SymTable:
             if sid in sids:
                 entries[sid] = e
             else:
-                entries[sid] = SymEntry(e.name, e.role, e.public, invalid=True)
+                entries[sid] = SymEntry(
+                    name=e.name,
+                    invalid=True,
+                    **e._metadata
+                )
         return SymTable(
             entries=entries,
             sid=self._sid
         )
 
-    def new_var(self, name: str, role: str, public: bool):
+    def new_var(self, name: str, metadata: tp.FrozenSet[tp.Tuple[str, tp.Any]]):
         sid = self._sid
         self._sid += 1
-        self.add_var(sid, name, role, public)
+        self.add_var(sid, name, metadata)
         return sid
 
-    def add_var(self, sid: int, name: str, role: str, public: bool):
+    def add_var(self, sid: int, name: str, metadata: tp.FrozenSet[tp.Tuple[str, tp.Any]]):
         if name in self._name_to_sid:
             raise ValueError(f"Var, {name}, already exists")
-        assert role in ('P', 'G', 'D')
         if sid in self.entries:
             raise ValueError(f"Cannot add var {name} to sid {sid} because it already exists")
-        entry = SymEntry(name, role, public)
+        mdict = dict(metadata)
+        entry = SymEntry(name, **mdict)
         self.entries[sid] = entry
         self._name_to_sid[name] = sid
   
@@ -89,16 +94,16 @@ class SymTable:
     def get_role(self, sid: int):
         if sid not in self.entries:
             raise ValueError(f"Variable {sid} not found")
-        return self.entries[sid].role
+        return self.entries[sid].get('role')
 
     def get_params(self) -> tp.List[int]:
-        return [sid for sid, e in self.entries.items() if e.role == 'P' and not e.invalid]
+        return [sid for sid, e in self.entries.items() if e.get('role') == 'P' and not e.invalid]
 
     def get_gen_vars(self) -> tp.List[int]:
-        return [sid for sid, e in self.entries.items() if e.role == 'G' and not e.invalid]
+        return [sid for sid, e in self.entries.items() if e.get('role') == 'G' and not e.invalid]
 
     def get_decision_vars(self) -> tp.List[int|str]:
-        return [sid for sid, e in self.entries.items() if e.role == 'D' and not e.invalid]
+        return [sid for sid, e in self.entries.items() if e.get('role') == 'D' and not e.invalid]
 
     def __iter__(self) -> tp.Iterator[int]:
         for sid in self.entries:

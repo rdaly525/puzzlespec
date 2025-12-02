@@ -8,9 +8,15 @@ def _is_type(T: ir.Type) -> bool:
     return isinstance(T, ir.Type)
 
 def _is_kind(T: ir.Type, kind: tp.Type[ir.Type]) -> bool:
+    if isinstance(T, ir.RefT):
+        return _is_kind(T.T, kind)
     return isinstance(T, kind)
 
 def _is_same_kind(T1: ir.Type, T2: ir.Type) -> bool:
+    if isinstance(T1, ir.RefT):
+        return _is_same_kind(T1.T, T2)
+    if isinstance(T2, ir.RefT):
+        return _is_same_kind(T1, T2.T)
     return type(T1) is type(T2)
 
 def _is_value(V: ir.Value) -> bool:
@@ -24,6 +30,13 @@ def _has_bv(bv: ir.BoundVarHOAS, node: ir.Node):
         return True
     return any(_has_bv(bv, c) for c in node._children)
     
+def _get_bvs(node: ir.Node) -> set[ir.BoundVarHOAS]:
+    if isinstance(node, ir.BoundVarHOAS):
+        return set((node,))
+    if len(node._children) == 0:
+        return set()
+    return set.union(*(_get_bvs(c) for c in node._children))
+
 def _substitute(node: ir.Node, bv: ir.BoundVarHOAS, arg: ir.Value):
     if isinstance(node, ir.PiTHOAS):
         lam_bv, lam_resT = node._children
@@ -44,7 +57,9 @@ def _applyT(funcT: ir.FuncT, arg: ir.Value):
     dom, piT = funcT._children
     assert isinstance(piT, ir.PiTHOAS)
     bv, resT = piT._children
-    assert not _has_bv(bv, arg)
+    #print(f"Applying {arg} to {piT}")
+    if bv is arg:
+        return resT
     new_resT = _substitute(resT, bv, arg)
     return new_resT
 

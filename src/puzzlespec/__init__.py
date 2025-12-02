@@ -13,8 +13,12 @@ _other_types = ['TupleType', 'SumType', 'PiType', 'DomainType', 'FuncType']
 
 
 # constructors
-from .libs.std import var, fin, interval, sum, distinct, all_same, count, enum
-_constructors = ['var', 'fin', 'interval', 'sum', 'distinct', 'all_same', 'count', 'enum']
+from .libs.std import fin, interval, sum, distinct, all_same, count, enum
+_constructors = ['fin', 'interval', 'sum', 'distinct', 'all_same', 'count', 'enum']
+
+# vars
+from .libs.var_def import param, gen_var, decision_var, var, func_var
+_vars = ['param', 'gen_var', 'decision_var', 'var', 'func_var']
 
 # helper classes
 from .compiler.dsl.spec_builder import PuzzleSpecBuilder
@@ -24,5 +28,6 @@ __all__ = [
     *_base_types,
     *_other_types,
     *_constructors,
+    *_vars,
     *_helpers,
 ]

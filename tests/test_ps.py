@@ -25,6 +25,7 @@ nR, nC = ps.var(sort=ps.Int, name='nR'), ps.var(sort=ps.Int, name='nC')
 
 # Can define domains in terms of variables
 fin_nR = ps.fin(nR)
+fin_nC = ps.fin(nC)
 
 # can define quantified constraints over domains
 e_con = fin_nR.exists(lambda i: i % 2 == 3)
@@ -41,11 +42,17 @@ print(func2)
 func_con = func.forall(lambda dom: dom.forall(lambda i: i < nC))
 print(func_con)
 
-spec = ps.PuzzleSpecBuilder()
+refv = ps.var(dom=fin_nR, name='refv')
+print(refv.T)
 
-# Can add constraints to the spec
-spec += [nR % 2 == 0, nC % 2 == 0, nR > 3, nC > 3]
-
-# can print rules
-print(spec.constraints)
+refv2 = fin_nR.map(lambda i: ps.var(dom=fin_nC[i].fin(), indices=(i,), name='refv2'))
+print(refv2.T)
+print(refv2)
+#spec = ps.PuzzleSpecBuilder()
+#
+## Can add constraints to the spec
+#spec += [nR % 2 == 0, nC % 2 == 0, nR > 3, nC > 3]
+#
+## can print rules
+#print(spec.constraints)
 

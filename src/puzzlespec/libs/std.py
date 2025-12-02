@@ -1,20 +1,6 @@
 from ..compiler.dsl import ast, ir
 import typing as tp
 
-def var(sort: ast.TExpr, name=None, **kwargs):
-    metadata = frozenset(kwargs.items())
-    var_node = ir.VarHOAS(sort.node, name, metadata=metadata)
-    return ast.wrap(var_node)
-
-def param(sort: ast.TExpr, name=None):
-    return var(sort, name, role='P')
-
-def gen_var(sort: ast.TExpr, name=None):
-    return var(sort, name, role='G')
-
-def decision_var(sort: ast.TExpr, name=None):
-    return var(sort, name, role='D')
-
 def enum(*labels: str, name: str=None) -> tp.Tuple[ast.EnumDomainExpr, ast._EnumAttrs]:
     expr = ast.EnumDomainExpr.make_from_labels(*labels, name=name)
     return expr, expr.members

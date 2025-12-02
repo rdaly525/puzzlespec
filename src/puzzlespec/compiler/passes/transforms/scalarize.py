@@ -8,10 +8,10 @@ from ...dsl import ir, utils
 from ..envobj import EnvsObj, TypeEnv, SymTable, OblsObj
 from ...dsl.envs import SymEntry
 
-class ScalarizeVars(Transform):
-    """Scalarize vars
+class Scalarize(Transform):
+    """Scalarize everything
     """
-    name = "scalarize_vars"
+    name = "scalarize"
 
     requires: tp.Tuple[type, ...] = (EnvsObj,)
     produces: tp.Tuple[type, ...] = (EnvsObj, OblsObj)

@@ -8,12 +8,31 @@ from ..passes.analyses.pretty_printer import pretty
 
 @dataclass
 class TExpr:
-    node: ir.Type
+    _node: ir.Type
     def __post_init__(self):
-        assert isinstance(self.node, ir.Type)
+        assert isinstance(self._node, ir.Type)
 
     def __repr__(self):
-        return pretty(self.node)
+        return pretty(self._node)
+
+    @property
+    def node(self):
+        if self.is_ref:
+            return self._node.T
+        return self._node
+
+    @property
+    def is_ref(self):
+        return isinstance(self._node, ir.RefT)
+    
+    @property
+    def ref_dom(self):
+        assert self.is_ref
+        return wrap(self.node.dom)
+
+    def __str__(self):
+        return pretty(self._node)
+
 
 class UnitType(TExpr):
     def __post_init__(self):
@@ -162,7 +181,11 @@ class FuncType(TExpr):
 
 def wrapT(T: ir.Type):
     assert isinstance(T, ir.Type)
-    match type(T):
+    if isinstance(T, ir.RefT):
+        _T = T.T
+    else:
+        _T = T
+    match type(_T):
         case ir.UnitT:
             return UnitType(T)
         case ir.BoolT:
@@ -515,7 +538,7 @@ class SumExpr(Expr):
     def match(self, *branches) -> Expr:
         if len(branches) != len(self.T):
             raise ValueError(f"Need a branch for each element of the sum type, got {len(branches)} branches for {len(self.T)} elements")
-        branch_exprs = [make_lambda(lam_expr, sort=T) for lam_expr, T in zip(branches, self.T.elemTs)]
+        branch_exprs = [make_lambda(lam_expr, sort=T.node) for lam_expr, T in zip(branches, self.T.elemTs)]
         resT0 = branch_exprs[0].T.resT
         if not all(type(resT0) == type(e.T.resT) for e in branch_exprs):
             raise ValueError(f"Expected all branches to have result type {resT0}, got {', '.join([repr(e.T.resT) for e in branch_exprs])}")
@@ -547,14 +570,13 @@ class LambdaExpr(Expr):
     def __repr__(self):
         return f"{self.argT} -> {self.resT}"
 
-def make_lambda(fn: tp.Callable, sort: TExpr, map_dom: DomainExpr=None) -> LambdaExpr:
-    bv_node = ir.BoundVarHOAS(sort.node)
+def make_lambda(fn: tp.Callable, sort: ir.Type) -> LambdaExpr:
+    bv_node = ir.BoundVarHOAS(sort)
+    #print(bv_node)
     bv_expr = wrap(bv_node)
-    # 'Hack' to get fancy var constructors working
-    bv_expr._set_map_dom(map_dom)
     ret_expr = fn(bv_expr)
     ret_expr = Expr.make(ret_expr)
-    piT = ir.PiTHOAS(bv_node, ret_expr._T.node)
+    piT = ir.PiTHOAS(bv_node, ret_expr.T.node)
     lambda_node = ir.LambdaHOAS(piT, bv_node, ret_expr.node)
     return LambdaExpr(lambda_node)
 
@@ -583,11 +605,14 @@ class DomainExpr(Expr):
         return DomainExpr(node)
 
     def map(self, fn: tp.Callable) -> FuncExpr:
-        lambda_expr = make_lambda(fn, sort=self.T.carT, map_dom=self)
+        # make sort refinement on self
+        carT_ref = ir.RefT(self.T.carT.node, self.node)
+        lambda_expr = make_lambda(fn, sort=carT_ref)
         piT = lambda_expr.T
         T = ir.FuncT(self.node, piT.node)
         node = ir.Map(T, self.node, lambda_expr.node)
-        return wrap(node)
+        e = wrap(node)
+        return e
 
     @classmethod
     def cartprod(cls, *doms: 'DomainExpr') -> 'DomainExpr':

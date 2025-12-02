@@ -71,11 +71,11 @@ class PrettyPrinterPass(Analysis):
                     i_str = " (OLD)"
                 else:
                     i_str = ""
-                if e.role == 'P':
+                if e.get('role') == 'P':
                     p_to_T[e.name] = T_str + i_str
-                elif e.role == 'G':
+                elif e.get('role') == 'G':
                     g_to_T[e.name] = T_str + i_str
-                elif e.role == 'D':
+                elif e.get('role') == 'D':
                     d_to_T[e.name] = T_str + i_str
                 s = "Params:\n"        
                 for pname, T in p_to_T.items():
@@ -181,6 +181,11 @@ class PrettyPrinterPass(Analysis):
         dom_str, (bv_name, resT_str) = self.visit_children(node)
         return f"Func[{dom_str} -> {bv_name}: {resT_str}]"
     
+    @handles(ir.RefT)
+    def _(self, node: ir.RefT):
+        T_str, dom_str = self.visit_children(node)
+        return f"Ref[{T_str} | {dom_str}]"
+
     ##############################
     ## Core-level IR Value nodes (Used throughout entire compiler flow)
     ##############################

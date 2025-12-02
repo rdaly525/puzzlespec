@@ -3,7 +3,7 @@ from puzzlespec.puzzles import get_puzzle
 from puzzlespec.libs import optional as opt
 from puzzlespec.backends import SMTBackend
 import typing as tp
-#Sudoku = get_puzzle("sudoku")
+
 Unruly = get_puzzle("unruly")
 
 def t0():
@@ -79,6 +79,6 @@ def t1():
     instance = cs.build()
     instance.pretty()
     print("GENERATING SMT")
-    backend = bk.SMTBackend(instance)
+    backend = SMTBackend(instance)
     smt = backend.generate()
 t1()
