@@ -18,10 +18,9 @@ class VarSetter:
     def __init__(self, spec: PuzzleSpec):
         self.__dict__['_spec'] = spec
         self.__dict__['_vars'] = {}
-        for sid in spec.sym:
-            name = spec.sym.get_name(sid)
-            T = spec.tenv[sid]
-            self.__dict__['_vars'][name] = _make_var(T, (sid,))
+        for v in spec.free_vars:
+            name = spec.sym.get_name(v.sid)
+            self.__dict__['_vars'][name] = _make_var(v.T, (v.sid,))
 
     def __getattr__(self, name: str) -> _Setter:
         if name in self.__dict__['_vars']:

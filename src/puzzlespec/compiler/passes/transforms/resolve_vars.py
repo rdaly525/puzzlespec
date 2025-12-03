@@ -1,5 +1,5 @@
 from ..pass_base import Transform, Context, AnalysisObject, handles
-from ..envobj import EnvsObj, SymTable, TypeEnv
+from ..envobj import EnvsObj, SymTable
 from ...dsl import ir, ast
 import typing as tp
 
@@ -87,13 +87,11 @@ class ResolveFreeVars(Transform):
     
     def run(self, root: ir.Node, ctx: Context):
         self.sym: SymTable = ctx.get(EnvsObj).sym
-        self.tenv: TypeEnv = ctx.get(EnvsObj).tenv
         new_root = self.visit(root)
-        return new_root, EnvsObj(self.sym, self.tenv)
+        return new_root, EnvsObj(self.sym)
 
     @handles(ir.VarHOAS)
     def _(self, v: ir.VarHOAS):
         new_T, = self.visit_children(v)
         sid = self.sym.new_var(v.name, v.metadata)
-        self.tenv.add(sid, new_T)
-        return ir.VarRef(sid)
+        return ir.VarRef(new_T, sid)

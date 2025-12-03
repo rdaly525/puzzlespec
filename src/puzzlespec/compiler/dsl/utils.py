@@ -17,7 +17,7 @@ def _is_same_kind(T1: ir.Type, T2: ir.Type) -> bool:
         return _is_same_kind(T1.T, T2)
     if isinstance(T2, ir.RefT):
         return _is_same_kind(T1, T2.T)
-    return type(T1) is type(T2)
+    return T1.eq(T2)
 
 def _is_value(V: ir.Value) -> bool:
     return isinstance(V, ir.Value)

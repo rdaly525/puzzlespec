@@ -15,7 +15,7 @@ def build_sudoku_spec(gw=False) -> PuzzleSpec:
     # Underlying grid
     grid = topo.Grid2D(9, 9)
 
-    # Generator parameters
+    # Generator parameters (i.e., the 'clues' of the puzzle)
     num_clues = v.gen_var(sort=Int, name='num_clues')
     givens = v.func_var(role='G', dom=grid.cells(), codom=opt.optional_dom(digits), name="givens")
 

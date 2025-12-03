@@ -100,7 +100,7 @@ class Type(Node):
     
     @property
     def rawT(self):
-        self
+        return self
 
 ## Base types
 class UnitT(Type):
@@ -329,7 +329,7 @@ class FuncT(Type):
 class RefT(Type):
     _numc = 2
     def __init__(self, T: Type, dom: Value):
-        assert not isinstance(T, RefT)
+        #assert not isinstance(T, RefT)
         super().__init__(T, dom)
 
     @property
@@ -339,6 +339,9 @@ class RefT(Type):
     @property
     def dom(self) -> Value:
         return self._children[1]
+
+    def cast_as(self, val: tp.Any):
+        return self.T.cast_as(val)
 
 
 def _is_value(v: Node) -> bool:
@@ -369,28 +372,6 @@ class ApplyT(Type):
 ## Core-level IR Value nodes (Used throughout entire compiler flow)
 ##############################
 
-class VarRef(Node):
-    _fields = ("sid",)
-    _numc = 0
-    def __init__(self, sid: int):
-        self.sid = sid
-        super().__init__()
-
-#class FreeVar(Node):
-#    _fields = ("sid",)
-#    _numc = 0
-#    def __init__(self, T: Type, sid: int):
-#        self.sid = sid
-#        super().__init__(T)
-
-
-class BoundVar(Node):
-    _fields = ('idx',) # De Bruijn index
-    _numc = 0
-    def __init__(self, idx: int):
-        self.idx = idx
-        super().__init__()
-
 # Base class for Nodes that store their Type (not meant to be instantiated directly)
 class Value(Node):
     def __init__(self, T: Type, *children: Node):
@@ -403,6 +384,22 @@ class Value(Node):
     @property
     def T(self):
         return self._children[0]
+
+class VarRef(Value):
+    _fields = ("sid",)
+    _numc = 1
+    def __init__(self, T: Type, sid: int):
+        self.sid = sid
+        super().__init__(T)
+
+
+class BoundVar(Node):
+    _fields = ('idx',) # De Bruijn index
+    _numc = 0
+    def __init__(self, idx: int):
+        self.idx = idx
+        super().__init__()
+
 
 class Unit(Value):
     _numc = 1
@@ -712,12 +709,9 @@ class ElemAt(Value):
 
 # Special Node for 'spec'
 class Spec(Node):
-    _fields = ('sids',)
-    _numc = 3
-    def __init__(self, cons: Value, obls: Value, Ts: TupleT, sids: tp.Tuple[int]):
-        self.sids = sids
-        assert len(sids) == len(Ts._children)
-        super().__init__(cons, obls, Ts)
+    _numc = 2
+    def __init__(self, cons: Value, obls: Value):
+        super().__init__(cons, obls)
 
     @property
     def cons(self):

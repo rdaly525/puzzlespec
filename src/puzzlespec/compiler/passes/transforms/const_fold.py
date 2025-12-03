@@ -17,9 +17,6 @@ class ConstFoldPass(Transform):
     produces: tp.Tuple[type, ...] = ()
     name = "const_prop"
 
-    def __init__(self, max_dom_size=100):
-        self.max_dom_size=max_dom_size
-
     def run(self, root: ir.Node, ctx: Context):
         self.Tmap: TypeMap = ctx.get(TypeMap).Tmap
         return self.visit(root)
@@ -89,7 +86,7 @@ class ConstFoldPass(Transform):
 
     @handles(ir.IsMember)
     def _(self, node: ir.IsMember):
-        T, domain, val = node._children
+        T, domain, val = self.visit_children(node)
         if isinstance(domain, ir.Universe) and domain.T.fin:
             assert val in self.Tmap
             assert domain in self.Tmap
@@ -98,112 +95,14 @@ class ConstFoldPass(Transform):
             if valT.eq(domT.carT):
                 return ir.Lit(ir.BoolT(), val=True)
 
-        T, domain, val = self.visit_children(node)
-        if utils._is_concrete(val):
-            dom_size = utils._dom_size(domain)
-            if dom_size is not None and dom_size <= self.max_dom_size:
-                for v in utils._iterate(domain):
-                    assert v is not None
-                    if v.eq(val):
-                        return ir.Lit(ir.BoolT(), val=True)
-                return ir.Lit(ir.BoolT(), val=False)
+        #T, domain, val = self.visit_children(node)
+        #if utils._is_concrete(val):
+        #    dom_size = utils._dom_size(domain)
+        #    if dom_size is not None and dom_size <= self.max_dom_size:
+        #        for v in utils._iterate(domain):
+        #            assert v is not None
+        #            if v.eq(val):
+        #                return ir.Lit(ir.BoolT(), val=True)
+        #        return ir.Lit(ir.BoolT(), val=False)
         return node.replace(T, domain, val)
         
-    @handles(ir.Forall)
-    def _(self, node: ir.Forall):
-        T, func = self.visit_children(node)
-        # Extract domain and lambda from func if it's a Map
-        if isinstance(func, ir.FuncLit):
-            _, dom, *vals = func._children
-            dom_size = utils._dom_size(dom)
-            if dom_size is not None and dom_size <= self.max_dom_size:
-                conj_vals = []
-                for v in utils._iterate(dom):
-                    assert v is not None
-                    i = func.layout.index(v)
-                    assert i is not None and 0 <= i < len(vals)
-                    conj_vals.append(vals[i])
-                return ir.Conj(T, *conj_vals)
-
-        return node.replace(T, func)
-
-    @handles(ir.Exists)
-    def _(self, node: ir.Exists):
-        T, func = self.visit_children(node)
-        # Extract domain and lambda from func if it's a Map
-        if isinstance(func, ir.FuncLit):
-            _, dom, *vals = func._children
-            disj_vals = []
-            for v in utils._iterate(dom):
-                assert v is not None
-                i = func.layout.index(v)
-                assert i is not None and 0 <= i < len(vals)
-                disj_vals.append(vals[i])
-            return ir.Disj(T, *disj_vals)
-        return node.replace(T, func)
-
-    @handles(ir.Restrict)
-    def _(self, node: ir.Restrict):
-        T, func = self.visit_children(node)
-        # Extract domain and predicate values from func if it's a FuncLit
-        if isinstance(func, ir.FuncLit):
-            _, dom, *vals = func._children
-            dom_size = utils._dom_size(dom)
-            if dom_size is not None and dom_size <= self.max_dom_size:
-                # Early out: check that all predicate values are literals
-                if not all(isinstance(v, ir.Lit) for v in vals):
-                    return node.replace(T, func)
-                restricted_elems = []
-                for v in utils._iterate(dom):
-                    assert v is not None
-                    i = func.layout.index(v)
-                    assert i is not None and 0 <= i < len(vals)
-                    pred_val = vals[i]
-                    # Only include elements where predicate is True
-                    if isinstance(pred_val.T, ir.BoolT) and pred_val.val is True:
-                        restricted_elems.append(v)
-                # Create DomLit with the restricted elements
-                return ir.DomLit(T, *restricted_elems)
-        return node.replace(T, func)
-
-    @handles(ir.SumLit)
-    def _(self, node: ir.SumLit):
-        T, tag, *elems = self.visit_children(node)
-        # If tag is a literal IntT, convert to Inj
-        if isinstance(tag, ir.Lit) and isinstance(tag.T, ir.IntT):
-            tag_val = tag.val
-            assert isinstance(tag_val, int) and 0 <= tag_val < len(elems)
-            return ir.Inj(T, elems[tag_val], idx=tag_val)
-        return node.replace(T, tag, *elems)
-
-    # Higher order ops
-    #@handles(ir.SumReduce)
-    #def _(self, node: ir.SumReduce) -> ir.Node:
-    #    lst, = self.visit_children(node)
-    #    match (lst):
-    #        case ir.List(elems):
-    #            if all(isinstance(e, ir.Lit) for e in elems):
-    #                vals = [e.val for e in elems]
-    #                return ir.Lit(self._variadic_ops[ir.Sum](*vals), irT.Int)
-    #    return node
-
-    #@handles(ir.ProdReduce)
-    #def _(self, node: ir.ProdReduce) -> ir.Node:
-    #    lst, = self.visit_children(node)
-    #    match (lst):
-    #        case ir.List(elems):
-    #            if all(isinstance(e, ir.Lit) for e in elems):
-    #                vals = [e.val for e in elems]
-    #                return ir.Lit(self._variadic_ops[ir.Prod](*vals), irT.Int)
-    #    return node.replace(lst)
-
-    #@handles(ir.AllDistinct)
-    #def _(self, node: ir.AllDistinct) -> ir.Node:
-    #    lst, = self.visit_children(node)
-    #    match (lst):
-    #        case ir.List(elems):
-    #            if all(isinstance(e, ir.Lit) for e in elems):
-    #                vals = [e.val for e in elems]
-    #                distinct = len(set(vals)) == len(vals)
-    #                return ir.Lit(distinct, irT.Bool)
-    #    return node.replace(lst)

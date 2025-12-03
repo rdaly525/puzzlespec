@@ -1,16 +1,50 @@
 from __future__ import annotations
-
-import typing as tp
-
-
 from ..pass_base import Analysis, AnalysisObject, Context, handles
 from ...dsl import ir, utils
-from ..envobj import EnvsObj, TypeEnv, SymTable
+from ..envobj import EnvsObj, SymTable
+from .getter import get_vars
 
 def pretty(node: ir.Node) -> str:
     ctx = Context()
     pexpr = PrettyPrinterPass().run(node, ctx)
     return pexpr.text
+
+def pretty_spec(spec: ir.Spec, sym: SymTable) -> str:
+    ctx = Context(EnvsObj(sym))
+    free_vars = get_vars(spec)
+    cons_text = pretty(spec.cons)
+    obls_text = pretty(spec.obls)
+    p_to_T = {}
+    g_to_T = {}
+    d_to_T = {}
+    for (sid, e) in sym.entries.items():
+        if e.invalid:
+            i_str = " (OLD)"
+        else:
+            i_str = ""
+        T_str = ""
+        for v in free_vars:
+            if isinstance(v, ir.VarHOAS):
+                raise NotImplementedError()
+            if v.sid == sid:
+                T_str = pretty(v.T)
+        if e.get('role') == 'P':
+            p_to_T[e.name] = T_str + i_str
+        elif e.get('role') == 'G':
+            g_to_T[e.name] = T_str + i_str
+        elif e.get('role') == 'D':
+            d_to_T[e.name] = T_str + i_str
+    s = "Params:\n"        
+    for pname, T in p_to_T.items():
+        s += f"    {pname}: {T}\n"
+    s += "Gen vars:\n"
+    for gname, T in g_to_T.items():
+        s += f"    {gname}: {T}\n"
+    s += "Decision vars:\n"
+    for dname, T in d_to_T.items():
+        s += f"    {dname}: {T}\n"
+    s += f"Spec:\n  Constraints:\n{cons_text}\n  Obligations:\n{obls_text}\n"
+    return s
 
 class PrettyPrintedExpr(AnalysisObject):
     def __init__(self, text: str):
@@ -54,41 +88,11 @@ class PrettyPrinterPass(Analysis):
         # Get analysis results
         envs = ctx.try_get(EnvsObj)
         if envs is not None:
-            self.tenv: TypeEnv = envs.tenv
             self.sym: SymTable = envs.sym
         self.cnt=0
         self.b_names = []
         self.bvhoas_names = {}
-        if isinstance(root, ir.Spec):
-            cons_text, obls_text, Ts = self.visit(root)
-            cons_str = self._indent_expr(cons_text)
-            obls_str = self._indent_expr(obls_text)
-            p_to_T = {}
-            g_to_T = {}
-            d_to_T = {}
-            for (sid, e), T_str in zip(self.sym.entries.items(), Ts):
-                if e.invalid:
-                    i_str = " (OLD)"
-                else:
-                    i_str = ""
-                if e.get('role') == 'P':
-                    p_to_T[e.name] = T_str + i_str
-                elif e.get('role') == 'G':
-                    g_to_T[e.name] = T_str + i_str
-                elif e.get('role') == 'D':
-                    d_to_T[e.name] = T_str + i_str
-                s = "Params:\n"        
-                for pname, T in p_to_T.items():
-                    s += f"    {pname}: {T}\n"
-                s += "Gen vars:\n"
-                for gname, T in g_to_T.items():
-                    s += f"    {gname}: {T}\n"
-                s += "Decision vars:\n"
-                for dname, T in d_to_T.items():
-                    s += f"    {dname}: {T}\n"
-            s += f"Spec:\n  Constraints:\n{cons_str}\n  Obligations:\n{obls_str}\n"
-        else:
-            s = self.visit(root)
+        s = self.visit(root)
         #print("\n"+s+"\n")
         return PrettyPrintedExpr(s)
 
@@ -192,8 +196,9 @@ class PrettyPrinterPass(Analysis):
 
     @handles(ir.VarRef)
     def _(self, node: ir.VarRef) -> str:
-        e = self.sym[node.sid]
-        return e.name
+        if hasattr(self, 'sym'):
+            return self.sym.get_name(node.sid)
+        return f"v{node.sid}"
 
     @handles(ir.BoundVar)
     def _(self, node: ir.BoundVar) -> str:
@@ -580,9 +585,7 @@ class PrettyPrinterPass(Analysis):
     def _(self, node: ir.Spec) -> str:
         cons_expr = self.visit(node.cons)
         obls_expr = self.visit(node.obls)
-        # visit Ts individually
-        Ts = (self.visit(T) for T in node.Ts._children)
-        return cons_expr, obls_expr, Ts
+        return cons_expr, obls_expr
 
     @handles(ir.And)
     def _(self, node: ir.And) -> str:

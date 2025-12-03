@@ -12,22 +12,24 @@ class SMTBackend:
         self.spec = spec
 
     def generate(self) -> str:
+        spec = self.spec
         # PromoteDomainsToUniverse (TODO)
         # ExpandFiniteUniverses (TODO)
-        
+        # EncodeEnums
+        print("Before EncodeEnums:")
+        spec = spec.transform(EncodeEnums(), ctx=Context(spec.envs_obj))
+        spec.pretty_print()
+        #spec = spec.optimize()
+        #spec.pretty_print()
+        assert 0
+
+       
         print(self.spec.pretty())
         # ScalarizeVars
         print("Before ScalarizeVars:")
-        spec = self.spec.transform(Scalarize(), ctx=Context(self.spec.envs_obj), creates_vars=True)
+        spec = self.spec.transform(Scalarize(), ctx=Context(self.spec.envs_obj))
         spec = spec.optimize(aggressive=True)
         spec.pretty()
-
-        # EncodeEnums
-        print("Before EncodeEnums:")
-        spec = spec.transform(EncodeEnums(), ctx=Context(spec.envs_obj), creates_vars=True)
-        spec = spec.optimize(aggressive=True)
-        spec.pretty()
-        assert 0
 
         # IntToBV
         #   - Interval analysis for Ints

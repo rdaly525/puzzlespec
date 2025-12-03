@@ -2,7 +2,7 @@ from __future__ import annotations
 import math
 
 from ..pass_base import Transform, Context, handles
-from ...dsl import ir, utils
+from ...dsl import ir
 import typing as tp
 
 
@@ -28,11 +28,6 @@ class AlgebraicSimplificationPass(Transform):
     requires: tp.Tuple[type, ...] = ()
     produces: tp.Tuple[type, ...] = ()
     name = "alg_simplification"
-
-    def __init__(self, max_dom_size=20, aggressive=False):
-        self.max_dom_size=max_dom_size
-        self.aggressive = aggressive
-        super().__init__()
 
     # Arithmetic
 
@@ -227,26 +222,6 @@ class AlgebraicSimplificationPass(Transform):
             _, _, lam = func._children
             return ir.Apply(T, lam, arg)
         return node.replace(T, func, arg)
-
-    @handles(ir.Map)
-    def _(self, node: ir.Map):
-        T, dom, lam = self.visit_children(node)
-        dom_size = utils._dom_size(dom)
-        doit = self.aggressive or not utils._has_freevar(lam)
-        if dom_size is not None and dom_size <= self.max_dom_size and doit:
-            # Convert Map to FuncLit by evaluating lambda for each domain element
-            elems = []
-            val_map = {}
-            for i, v in enumerate(utils._iterate(dom)):
-                assert v is not None
-                # Apply lambda and visit to simplify
-                val = ir.Apply(T.piT.resT, lam, v)
-                val = self.visit(val)
-                elems.append(val)
-                val_map[v._key] = i
-            layout = ir._DenseLayout(val_map=val_map)
-            return ir.FuncLit(T, dom, *elems, layout=layout)
-        return node.replace(T, dom, lam)
 
     @handles(ir.Slice)
     def _(self, node: ir.Slice):

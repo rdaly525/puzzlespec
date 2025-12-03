@@ -262,7 +262,7 @@ class Expr:
 
     def __eq__(self, other):
         other = Expr.make(other)
-        if not _is_same_kind(self.T, other.T):
+        if not _is_same_kind(self.T.node, other.T.node):
             raise ValueError(f"Cannot compare {self.T} and {other.T}")
         return wrap(ir.Eq(ir.BoolT(), self.node, other.node))
         
@@ -737,6 +737,8 @@ class EnumDomainExpr(DomainExpr):
     def make_from_labels(cls, *labels: str, name: str=None) -> EnumDomainExpr:
         if len(labels) == 0:
             raise NotImplementedError("cannot have a 0-label Enum")
+        if len(set(labels)) != len(labels):
+            raise ValueError("Labels must be unique")
         if name is None:
             name = "".join(labels)
         enumT = ir.EnumT(name, tuple(labels))
