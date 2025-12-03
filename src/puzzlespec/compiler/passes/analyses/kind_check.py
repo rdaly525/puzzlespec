@@ -96,19 +96,19 @@ class KindCheckingPass(Analysis):
         self.Tmap[node] = T
         return T
 
-    @handles(ir.PiT)
-    def _(self, node: ir.PiT):
+    @handles(ir.LambdaT)
+    def _(self, node: ir.LambdaT):
         # Verify type is ArrowT
         argT, bodyT = node._children
         # Verify T is a type
         if not _is_type(argT):
-            raise TypeError(f"PiT argT must be a type, got {argT}")
+            raise TypeError(f"LambdaT argT must be a type, got {argT}")
         new_argT = self.visit(argT)
         self.bctx.append(new_argT.T)
         # Visit body and get its type
         new_bodyT = self.visit(bodyT)
         if not _is_type(new_bodyT):
-            raise TypeError(f"PiT body must be a type, got {new_bodyT}")
+            raise TypeError(f"LambdaT body must be a type, got {new_bodyT}")
         # Pop bound context
         self.bctx.pop()
         T = node
@@ -117,14 +117,14 @@ class KindCheckingPass(Analysis):
 
     @handles(ir.FuncT)
     def _(self, node: ir.FuncT):
-        domT, piT = self.visit_children(node)
+        domT, lamT = self.visit_children(node)
         if not _is_kind(domT, ir.DomT):
             raise TypeError(f"FuncT domain must be a domain, got {domT}")
-        if not _is_kind(piT, (ir.PiT, ir.PiTHOAS)):
-            raise TypeError(f"FuncT lambda must be a lambda, got {piT}")
-        # Verify funcT domain carrier type matches piT argument type
-        if not _is_same_kind(piT.argT, domT.carT):
-            raise TypeError(f"PiT argument type {piT.argT} does not match FuncT domain carrier type {domT.carT}")
+        if not _is_kind(lamT, (ir.LambdaT, ir.LambdaTHOAS)):
+            raise TypeError(f"FuncT lambda must be a lambda, got {lamT}")
+        # Verify funcT domain carrier type matches lamT argument type
+        if not _is_same_kind(lamT.argT, domT.carT):
+            raise TypeError(f"LambdaT argument type {lamT.argT} does not match FuncT domain carrier type {domT.carT}")
         T = node
         self.Tmap[node] = T
         return T
@@ -178,24 +178,24 @@ class KindCheckingPass(Analysis):
 
     @handles(ir.Lambda)
     def _(self, node: ir.Lambda):
-        # Verify type is PiT
-        piT, body = node._children
-        piT = self.visit(piT)
-        if not _is_kind(piT, (ir.PiT, ir.PiTHOAS)):
-            raise TypeError(f"Lambda must have PiT type, got {node.T}")
+        # Verify type is LambdaT
+        lamT, body = node._children
+        lamT = self.visit(lamT)
+        if not _is_kind(lamT, (ir.LambdaT, ir.LambdaTHOAS)):
+            raise TypeError(f"Lambda must have LambdaT type, got {node.T}")
         # Verify body is a Value
         if not _is_value(body):
             raise TypeError(f"Lambda body must be a Value, got {body}")
         # Push parameter type onto bound context for body checking
-        self.bctx.append(piT.argT.T)
+        self.bctx.append(lamT.argT.T)
         # Visit body and get its type
         bodyT = self.visit(body)
         # Pop bound context
         self.bctx.pop()
-        # Verify body type matches PiT result type
-        if not _is_same_kind(bodyT, piT.resT):
-            raise TypeError(f"Lambda body type {bodyT} does not match PiT result type {piT.resT}")
-        T = piT
+        # Verify body type matches LambdaT result type
+        if not _is_same_kind(bodyT, lamT.resT):
+            raise TypeError(f"Lambda body type {bodyT} does not match LambdaT result type {lamT.resT}")
+        T = lamT
         self.Tmap[node] = T
         return T
 
@@ -625,7 +625,7 @@ class KindCheckingPass(Analysis):
         if len(branchesT) != len(scrutT.elemTs):
             raise TypeError(f"Match branches count {len(branchesT)} does not match sum type count {len(scrutT.elemTs)}")
         for i, (sum_elem_T, branch_T) in enumerate(zip(scrutT.elemTs, branchesT)):
-            if not _is_kind(branch_T, (ir.PiT, ir.PiTHOAS)):
+            if not _is_kind(branch_T, (ir.LambdaT, ir.LambdaTHOAS)):
                 raise TypeError(f"Match branch {i} must be lambdaT matching sum component {sum_elem_T} to match result type {T}. Got {branch_T}")
             # Verify branch argument type matches sum component
             if not _is_same_kind(branch_T.argT, sum_elem_T):
@@ -697,9 +697,9 @@ class KindCheckingPass(Analysis):
         # Verify domain argument is a domain
         if not _is_kind(domT, ir.DomT):
             raise TypeError(f"Map expects domain argument, got {domT}")
-        # Verify function is a PiT
-        if not _is_kind(funT, (ir.PiT, ir.PiTHOAS)):
-            raise TypeError(f"Map expects PiT function, got {funT}")
+        # Verify function is a LambdaT
+        if not _is_kind(funT, (ir.LambdaT, ir.LambdaTHOAS)):
+            raise TypeError(f"Map expects LambdaT function, got {funT}")
         if not _is_same_kind(funT.argT, domT.carT):
             raise TypeError(f"Map function argument type {funT.argT} does not match domain carrier type {domT.carT}")
         if not _is_same_kind(T.piT.resT, funT.resT):
@@ -763,9 +763,9 @@ class KindCheckingPass(Analysis):
     @handles(ir.Apply)
     def _(self, node: ir.Apply):
         T, lamT, argT = self.visit_children(node)
-        # Verify lambda has PiT type
-        if not _is_kind(lamT, (ir.PiT, ir.PiTHOAS)):
-            raise TypeError(f"Apply expects Lambda with PiT type, got {lamT}")
+        # Verify lambda has LambdaT type
+        if not _is_kind(lamT, (ir.LambdaT, ir.LambdaTHOAS)):
+            raise TypeError(f"Apply expects Lambda with LambdaT type, got {lamT}")
         # Verify argument type matches lambda argument type
         if not _is_same_kind(argT, lamT.argT):
             raise TypeError(f"Apply argument type {argT} does not match lambda argument type {lamT.argT}")
@@ -781,9 +781,9 @@ class KindCheckingPass(Analysis):
         # Verify function argument is a FuncT
         if not _is_kind(funcT, ir.FuncT):
             raise TypeError(f"Fold expects FuncT function, got {funcT}")
-        # Verify fun argument is a Lambda with PiT type
-        if not _is_kind(funT, (ir.PiT, ir.PiTHOAS)):
-            raise TypeError(f"Fold expects Lambda with PiT type, got {funT}")
+        # Verify fun argument is a Lambda with LambdaT type
+        if not _is_kind(funT, (ir.LambdaT, ir.LambdaTHOAS)):
+            raise TypeError(f"Fold expects Lambda with LambdaT type, got {funT}")
         # Fold signature: Func(Dom(A)->B) -> ((A,B) -> B) -> B -> B
         # So fun should be (elemT, resT) -> resT where elemT = funcT.piT.resT
         elemT = funcT.piT.resT
@@ -1054,23 +1054,23 @@ class KindCheckingPass(Analysis):
     @handles(ir.LambdaHOAS)
     def _(self, node: ir.LambdaHOAS):
         T, boundVarT, bodyT = self.visit_children(node)
-        # Verify type is PiT
-        if not _is_kind(T, (ir.PiT, ir.PiTHOAS)):
-            raise TypeError(f"LambdaHOAS must have PiT type, got {T}")
+        # Verify type is LambdaT
+        if not _is_kind(T, (ir.LambdaT, ir.LambdaTHOAS)):
+            raise TypeError(f"LambdaHOAS must have LambdaT type, got {T}")
         if not _is_same_kind(boundVarT, T.argT):
-            raise TypeError(f"LambdaHOAS bound variable type {boundVarT} does not match PiT argument type {T.argT}")
+            raise TypeError(f"LambdaHOAS bound variable type {boundVarT} does not match LambdaT argument type {T.argT}")
         if not _is_same_kind(bodyT, T.resT):
-            raise TypeError(f"LambdaHOAS body type {bodyT} does not match PiT result type {T.resT}")
+            raise TypeError(f"LambdaHOAS body type {bodyT} does not match LambdaT result type {T.resT}")
         self.Tmap[node] = T
         return T
     
-    @handles(ir.PiTHOAS)
-    def _(self, node: ir.PiTHOAS):
+    @handles(ir.LambdaTHOAS)
+    def _(self, node: ir.LambdaTHOAS):
         bv_T, resT = self.visit_children(node)
         if not _is_type(resT):
-            raise TypeError(f"PiTHOAS return type {resT} must be a type")
+            raise TypeError(f"LambdaTHOAS return type {resT} must be a type")
         if not _is_type(bv_T):
-            raise TypeError(f"PiTHOAS bound variable type {bv_T} must be a type")
+            raise TypeError(f"LambdaTHOAS bound variable type {bv_T} must be a type")
         T = node
         self.Tmap[node] = T
         return T

@@ -74,7 +74,7 @@ def var(
         bv_dom = bv0.T.dom
         T = ir.FuncT(
             bv_dom,
-            ir.PiTHOAS(
+            ir.LambdaTHOAS(
                 bv0,
                 make_sort(bvs[1:])
             )

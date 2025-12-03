@@ -275,7 +275,7 @@ class DomT(Type):
     def eq(self, other):
         return isinstance(other, DomT) and self.carT.eq(other.carT) and self.fins==other.fins and self.ords==other.ords and self.axes==other.axes
 
-class PiTHOAS(Type):
+class LambdaTHOAS(Type):
     _numc = 2
     def __init__(self, bound_var: Value, resT: Type):
         super().__init__(bound_var, resT)
@@ -291,7 +291,7 @@ class PiTHOAS(Type):
     def __repr__(self):
         return f"(\{self._children[0]}. {self.resT})"
 
-class PiT(Type):
+class LambdaT(Type):
     _numc = 2
     def __init__(self, argT: Type, resT: Type):
         super().__init__(argT, resT)
@@ -307,16 +307,16 @@ class PiT(Type):
 
 class FuncT(Type):
     _numc = 2
-    def __init__(self, dom: Value, piT: Type):
-        assert isinstance(piT, (PiT, PiTHOAS))
-        super().__init__(dom, piT)
+    def __init__(self, dom: Value, lamT: Type):
+        assert isinstance(lamT, (LambdaT, LambdaTHOAS))
+        super().__init__(dom, lamT)
 
     @property
     def dom(self) -> Value:
         return self._children[0]
     
     @property
-    def piT(self) -> PiT:
+    def piT(self) -> LambdaT:
         return self._children[1]
 
     def __repr__(self):
@@ -349,17 +349,17 @@ def _is_value(v: Node) -> bool:
 
 class ApplyT(Type):
     _numc = 2
-    def __init__(self, piT: PiT, arg: Value):
+    def __init__(self, lamT: LambdaT, arg: Value):
         assert _is_value(arg)
-        if not isinstance(piT, PiT):
-            raise ValueError(f"ApplyT must be a PiT, got {piT}")
-        super().__init__(piT, arg)
+        if not isinstance(lamT, LambdaT):
+            raise ValueError(f"ApplyT must be a LambdaT, got {lamT}")
+        super().__init__(lamT, arg)
 
     def __repr__(self):
         return f"AppT({self.piT}, {self.arg})"
 
     @property
-    def piT(self) -> PiT:
+    def piT(self) -> LambdaT:
         return self._children[0]
 
     @property
@@ -410,7 +410,7 @@ class Unit(Value):
 class Lambda(Value):
     _numc = 2
     def __init__(self, T: Type, body: Value):
-        assert isinstance(T, PiT)
+        assert isinstance(T, LambdaT)
         super().__init__(T, body)
 
 ### Int/Bool 
@@ -844,8 +844,8 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     SumT: -2,
     DomT: -2,
     FuncT: -2,
-    PiTHOAS: -2,
-    PiT: -2,
+    LambdaTHOAS: -2,
+    LambdaT: -2,
     RefT: -2,
     ApplyT: -2,
     Unit: -1,

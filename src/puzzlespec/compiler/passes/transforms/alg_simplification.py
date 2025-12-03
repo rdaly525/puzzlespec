@@ -207,8 +207,8 @@ class AlgebraicSimplificationPass(Transform):
                 val_map[idx_lit._key] = i
             # Create FuncLit with Fin domain
             layout = ir._DenseLayout(val_map=val_map)
-            piT = ir.PiT(ir.IntT(), T)
-            funcT = ir.FuncT(fin_dom, piT)
+            lamT = ir.LambdaT(ir.IntT(), T)
+            funcT = ir.FuncT(fin_dom, lamT)
             func_lit = ir.FuncLit(funcT, fin_dom, *func_elems, layout=layout)
             # Apply the function to tag
             return ir.ApplyFunc(T, func_lit, tag)

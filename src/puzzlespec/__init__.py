@@ -8,8 +8,8 @@ Int = IntType(_ir.IntT())
 _base_types = ['Unit', 'Bool', 'Int', 'EnumType']
 
 # Other Types
-from .compiler.dsl.ast import TupleType, SumType, PiType, DomainType, FuncType
-_other_types = ['TupleType', 'SumType', 'PiType', 'DomainType', 'FuncType']
+from .compiler.dsl.ast import TupleType, SumType, LambdaType, DomainType, FuncType
+_other_types = ['TupleType', 'SumType', 'LambdaType', 'DomainType', 'FuncType']
 
 
 # constructors

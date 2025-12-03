@@ -23,7 +23,7 @@ class ResolveBoundVars(Transform):
         return new_root
 
     def _check_no_hoas(self, node):
-        if isinstance(node, (ir.BoundVarHOAS, ir.LambdaHOAS, ir.PiTHOAS)):
+        if isinstance(node, (ir.BoundVarHOAS, ir.LambdaHOAS, ir.LambdaTHOAS)):
             raise ValueError(f"Failed resolve bound, found {node}")
         for c in node._children:
             self._check_no_hoas(c)
@@ -46,23 +46,23 @@ class ResolveBoundVars(Transform):
         self.stack.pop()
         return ir.Lambda(new_T, new_body)
 
-    @handles(ir.PiTHOAS)
+    @handles(ir.LambdaTHOAS)
     def _(self, node):
         bv, bodyT = node._children
         bv_T = self.visit(bv.T)
         self.stack.append(bv)
         new_bodyT = self.visit(bodyT)
         self.stack.pop()
-        return ir.PiT(bv_T, new_bodyT)
+        return ir.LambdaT(bv_T, new_bodyT)
 
-    @handles(ir.PiT)
+    @handles(ir.LambdaT)
     def _(self, node):
         argT, bodyT = node._children
         new_argT = self.visit(argT)
         self.stack.append(None)
         new_bodyT = self.visit(bodyT)
         self.stack.pop()
-        return ir.PiT(new_argT, new_bodyT)
+        return ir.LambdaT(new_argT, new_bodyT)
 
     @handles(ir.BoundVarHOAS)
     def _(self, use):

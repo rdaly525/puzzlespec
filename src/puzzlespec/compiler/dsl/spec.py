@@ -39,7 +39,7 @@ class PuzzleSpec:
 
     def _ph_check(self):
         def check(node: ir.Node):
-            if isinstance(node, (ir.BoundVarHOAS, ir.LambdaHOAS, ir.PiTHOAS, ir.VarHOAS)):
+            if isinstance(node, (ir.BoundVarHOAS, ir.LambdaHOAS, ir.LambdaTHOAS, ir.VarHOAS)):
                 raise ValueError(f"Found placeholder node {node} in rules")
             for c in node._children:
                 check(c)

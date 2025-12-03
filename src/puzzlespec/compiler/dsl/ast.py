@@ -104,11 +104,11 @@ class SumType(TExpr):
         return self.elemT(i)
 
 
-class PiType(TExpr):
+class LambdaType(TExpr):
     def __post_init__(self):
         super().__post_init__()
-        if not isinstance(self.node, ir.PiTHOAS):
-            raise ValueError(f"Expected PiType, got {self.node}")
+        if not isinstance(self.node, ir.LambdaTHOAS):
+            raise ValueError(f"Expected LambdaType, got {self.node}")
 
     @property
     def argT(self) -> TExpr:
@@ -175,7 +175,7 @@ class FuncType(TExpr):
         return wrap(self.node.dom)
 
     @property
-    def piT(self) -> PiType:
+    def piT(self) -> LambdaType:
         return wrapT(self.node.piT)
 
 
@@ -198,8 +198,8 @@ def wrapT(T: ir.Type):
             return TupleType(T)
         case ir.SumT:
             return SumType(T)
-        case ir.PiTHOAS:
-            return PiType(T)
+        case ir.LambdaTHOAS:
+            return LambdaType(T)
         case ir.DomT:
             return DomainType(T)
         case ir.FuncT:
@@ -552,12 +552,12 @@ class LambdaExpr(Expr):
         super().__post_init__()
         if not is_LambdaExpr(self.node):
             raise ValueError(f"Expected LambdaExpr, got {self}")
-        if not isinstance(self._T, PiType):
-            raise ValueError(f"Expected PiType, got {self._T}")
+        if not isinstance(self._T, LambdaType):
+            raise ValueError(f"Expected LambdaType, got {self._T}")
 
     @property
-    def T(self) -> PiType:
-        return tp.cast(PiType, self._T)
+    def T(self) -> LambdaType:
+        return tp.cast(LambdaType, self._T)
  
     @property
     def argT(self) -> ir.Type:
@@ -576,8 +576,8 @@ def make_lambda(fn: tp.Callable, sort: ir.Type) -> LambdaExpr:
     bv_expr = wrap(bv_node)
     ret_expr = fn(bv_expr)
     ret_expr = Expr.make(ret_expr)
-    piT = ir.PiTHOAS(bv_node, ret_expr.T.node)
-    lambda_node = ir.LambdaHOAS(piT, bv_node, ret_expr.node)
+    lamT = ir.LambdaTHOAS(bv_node, ret_expr.T.node)
+    lambda_node = ir.LambdaHOAS(lamT, bv_node, ret_expr.node)
     return LambdaExpr(lambda_node)
 
 class DomainExpr(Expr):
@@ -608,8 +608,8 @@ class DomainExpr(Expr):
         # make sort refinement on self
         carT_ref = ir.RefT(self.T.carT.node, self.node)
         lambda_expr = make_lambda(fn, sort=carT_ref)
-        piT = lambda_expr.T
-        T = ir.FuncT(self.node, piT.node)
+        lamT = lambda_expr.T
+        T = ir.FuncT(self.node, lamT.node)
         node = ir.Map(T, self.node, lambda_expr.node)
         e = wrap(node)
         return e
@@ -991,7 +991,7 @@ def is_SumExpr(node: ir.Node) -> bool:
     return isinstance(node, ir.Value) and _is_kind(node.T, ir.SumT)
 
 def is_LambdaExpr(node: ir.Node) -> bool:
-    return isinstance(node, ir.Value) and _is_kind(node.T, ir.PiTHOAS)
+    return isinstance(node, ir.Value) and _is_kind(node.T, ir.LambdaTHOAS)
 
 def is_DomainExpr(node: ir.Node) -> bool:
     return isinstance(node, ir.Value) and _is_kind(node.T, ir.DomT)

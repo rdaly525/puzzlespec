@@ -53,7 +53,7 @@ class BetaReductionPass(Transform):
             body2 = self.shift(body, d, cutoff + 1)
             return t.replace(argT2, body2)
 
-        if isinstance(t, ir.PiT):
+        if isinstance(t, ir.LambdaT):
             argT, body = t._children
             # binder does *not* apply inside argT
             argT2 = self.shift(argT, d, cutoff)
@@ -84,7 +84,7 @@ class BetaReductionPass(Transform):
             body2 = self.subst(body, j, s, depth + 1)    # binder in body
             return t.replace(argT2, body2)
 
-        if isinstance(t, ir.PiT):
+        if isinstance(t, ir.LambdaT):
             argT, body = t._children
             argT2 = self.subst(argT, j, s, depth)        # no new binder in argT
             body2 = self.subst(body, j, s, depth + 1)
@@ -102,10 +102,10 @@ class BetaReductionPass(Transform):
 
     @handles(ir.ApplyT)
     def _(self, node: ir.ApplyT):
-        piT, arg = node._children
-        assert isinstance(piT, ir.PiT)
+        lamT, arg = node._children
+        assert isinstance(lamT, ir.LambdaT)
         assert isinstance(arg, ir.Value)
-        _, resT = piT._children
+        _, resT = lamT._children
         # 1. shift argument up by 1 for the binder we’re eliminating
         arg_p1 = self.shift(arg, +1, cutoff=0)
 
@@ -122,7 +122,7 @@ class BetaReductionPass(Transform):
         # first recursively reduce inside
         T, lam, arg = self.visit_children(node)
         assert isinstance(lam, ir.Lambda)
-        piT, body = lam._children
+        lamT, body = lam._children
 
         # (Lam(body) arg)
 

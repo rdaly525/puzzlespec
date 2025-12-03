@@ -38,7 +38,7 @@ def _get_bvs(node: ir.Node) -> set[ir.BoundVarHOAS]:
     return set.union(*(_get_bvs(c) for c in node._children))
 
 def _substitute(node: ir.Node, bv: ir.BoundVarHOAS, arg: ir.Value):
-    if isinstance(node, ir.PiTHOAS):
+    if isinstance(node, ir.LambdaTHOAS):
         lam_bv, lam_resT = node._children
         if lam_bv is bv:
             raise ValueError(f"Cannot substitute into lambda type {node}")
@@ -54,10 +54,10 @@ def _substitute(node: ir.Node, bv: ir.BoundVarHOAS, arg: ir.Value):
 def _applyT(funcT: ir.FuncT, arg: ir.Value):
     assert isinstance(funcT, ir.FuncT)
     assert isinstance(arg, ir.Value)
-    dom, piT = funcT._children
-    assert isinstance(piT, ir.PiTHOAS)
-    bv, resT = piT._children
-    #print(f"Applying {arg} to {piT}")
+    dom, lamT = funcT._children
+    assert isinstance(lamT, ir.LambdaTHOAS)
+    bv, resT = lamT._children
+    #print(f"Applying {arg} to {lamT}")
     if bv is arg:
         return resT
     new_resT = _substitute(resT, bv, arg)

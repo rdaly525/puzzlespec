@@ -160,8 +160,8 @@ class PrettyPrinterPass(Analysis):
         k = sum(1 for n in self.b_names if n.startswith("X"))
         return f"X{k}"
     
-    @handles(ir.PiT)
-    def _(self, node: ir.PiT) -> str:
+    @handles(ir.LambdaT)
+    def _(self, node: ir.LambdaT) -> str:
         argT, resT = node._children
         is_col = isinstance(argT, (ir.FuncT, ir.DomT))
         if is_col:
@@ -175,8 +175,8 @@ class PrettyPrinterPass(Analysis):
         assert name == bv_name
         return bv_name, resT_str
 
-    @handles(ir.PiTHOAS)
-    def _(self, node: ir.PiTHOAS) -> str:
+    @handles(ir.LambdaTHOAS)
+    def _(self, node: ir.LambdaTHOAS) -> str:
         bv_name, resT_str = self.visit_children(node)
         return (bv_name, resT_str)
 
