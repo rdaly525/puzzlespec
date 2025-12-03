@@ -26,7 +26,7 @@ class Node:
         child_keys = tuple(c._key for c in self._children)
         assert None not in child_keys
         fields = tuple(getattr(self, field, None) for field in self._fields)
-        assert None not in fields
+        #assert None not in fields
         priority = NODE_PRIORITY[(type(self))]
         key = (priority, self.__class__.__name__, fields, child_keys)
         return key
@@ -94,7 +94,13 @@ class Node:
 ##############################
 
 class Type(Node):
-    ...   
+    @property
+    def T(self):
+        return self
+    
+    @property
+    def rawT(self):
+        return self
 
 ## Base types
 class UnitT(Type):
@@ -144,7 +150,6 @@ class EnumT(Type):
 
     def eq(self, other):
         return isinstance(other, EnumT) and self.name==other.name and self.labels ==other.labels
-
 
     def __len__(self):
         return len(self.labels)
@@ -321,6 +326,24 @@ class FuncT(Type):
         return isinstance(other, FuncT) and self.dom.eq(other.dom) and self.piT.eq(other.piT)
 
 
+class RefT(Type):
+    _numc = 2
+    def __init__(self, T: Type, dom: Value):
+        #assert not isinstance(T, RefT)
+        super().__init__(T, dom)
+
+    @property
+    def T(self) -> Type:
+        return self._children[0]
+
+    @property
+    def dom(self) -> Value:
+        return self._children[1]
+
+    def cast_as(self, val: tp.Any):
+        return self.T.cast_as(val)
+
+
 def _is_value(v: Node) -> bool:
     return isinstance(v, (Value, BoundVar, VarRef))
 
@@ -344,23 +367,10 @@ class ApplyT(Type):
         return self._children[1]
 
 
+
 ##############################
 ## Core-level IR Value nodes (Used throughout entire compiler flow)
 ##############################
-
-class VarRef(Node):
-    _fields = ("sid",)
-    _numc = 0
-    def __init__(self, sid: int):
-        self.sid = sid
-        super().__init__()
-
-class BoundVar(Node):
-    _fields = ('idx',) # De Bruijn index
-    _numc = 0
-    def __init__(self, idx: int):
-        self.idx = idx
-        super().__init__()
 
 # Base class for Nodes that store their Type (not meant to be instantiated directly)
 class Value(Node):
@@ -374,6 +384,22 @@ class Value(Node):
     @property
     def T(self):
         return self._children[0]
+
+class VarRef(Value):
+    _fields = ("sid",)
+    _numc = 1
+    def __init__(self, T: Type, sid: int):
+        self.sid = sid
+        super().__init__(T)
+
+
+class BoundVar(Node):
+    _fields = ('idx',) # De Bruijn index
+    _numc = 0
+    def __init__(self, idx: int):
+        self.idx = idx
+        super().__init__()
+
 
 class Unit(Value):
     _numc = 1
@@ -683,12 +709,9 @@ class ElemAt(Value):
 
 # Special Node for 'spec'
 class Spec(Node):
-    _fields = ('sids',)
-    _numc = 3
-    def __init__(self, cons: Value, obls: Value, Ts: TupleT, sids: tp.Tuple[int]):
-        self.sids = sids
-        assert len(sids) == len(Ts._children)
-        super().__init__(cons, obls, Ts)
+    _numc = 2
+    def __init__(self, cons: Value, obls: Value):
+        super().__init__(cons, obls)
 
     @property
     def cons(self):
@@ -783,10 +806,12 @@ class AllSame(Value):
 class BoundVarHOAS(Value):
     #_fields = ('_map_dom', '_is_map')
     _numc = 1
-    def __init__(self, T: Type):#, _map_dom: Value, _is_map: bool=False):
-        #self._map_dom = _map_dom
-        #self._is_map = _is_map
+    def __init__(self, T: RefT):
         super().__init__(T)
+
+    @property
+    def T(self) -> RefT:
+        return self._children[0]
 
     def __str__(self):
         return f"BV[{str(id(self))[-5:]}]"
@@ -797,11 +822,15 @@ class LambdaHOAS(Value):
         super().__init__(T, bound_var, body)
 
 class VarHOAS(Value):
-    _fields = ('sid',)
+    _fields = ('name', 'metadata')
     _numc = 1
-    def __init__(self, T: Type, sid: int):
-        self.sid = sid
+    def __init__(self, T: Type, name: str, metadata: tp.Dict[str, tp.Any]):
+        self.name = name
+        self.metadata = metadata
         super().__init__(T)
+
+    def __repr__(self):
+        return f"VarHOAS[{self.name}]"
 
 # Mapping from Value classes to a priority integer.
 # This is probably way overengineered and there are probably better priorities
@@ -817,6 +846,7 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     FuncT: -2,
     PiTHOAS: -2,
     PiT: -2,
+    RefT: -2,
     ApplyT: -2,
     Unit: -1,
     Lit: 0,

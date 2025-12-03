@@ -1,4 +1,3 @@
-from puzzlespec.compiler.dsl.spec_builder import PuzzleSpecBuilder
 from .unruly import build_unruly_spec
 from .sudoku import build_sudoku_spec
 import sys

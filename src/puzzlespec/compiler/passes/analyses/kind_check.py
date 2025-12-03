@@ -1,10 +1,19 @@
 from __future__ import annotations
 
 from ..pass_base import Context, AnalysisObject, Analysis, handles
-from ..envobj import EnvsObj, TypeEnv
 from ...dsl import ir
 import typing as tp
 from ...dsl.utils import _is_type, _is_kind, _is_same_kind, _is_value
+
+class _Map:
+    def __init__(self):
+        self.Tmap = {}
+    def __getitem__(self, key: ir.Node) -> ir.Type:
+        return self.Tmap[key]
+    def __setitem__(self, key: ir.Node, value: ir.Type):
+        if isinstance(value, ir.RefT):
+            raise ValueError(f"RefT cannot be set in TypeMap, got {value}")
+        self.Tmap[key] = value
 
 class TypeMap(AnalysisObject):
     def __init__(self, Tmap: tp.Dict[ir.Node, ir.Type]):
@@ -12,14 +21,13 @@ class TypeMap(AnalysisObject):
 
 # This class Verifies that the IR is well-typed. This includes the Types themselves
 class KindCheckingPass(Analysis):
-    requires = (EnvsObj,)
+    requires = ()
     produces = (TypeMap,)
     name = "kind_checking"
     
     def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
-        self.tenv: TypeEnv = ctx.get(EnvsObj).tenv
         self.bctx: tp.List[ir.Type] = []
-        self.Tmap = {}
+        self.Tmap = _Map()
         self.visit(root)
         return TypeMap(self.Tmap)
 
@@ -96,7 +104,7 @@ class KindCheckingPass(Analysis):
         if not _is_type(argT):
             raise TypeError(f"PiT argT must be a type, got {argT}")
         new_argT = self.visit(argT)
-        self.bctx.append(new_argT)
+        self.bctx.append(new_argT.T)
         # Visit body and get its type
         new_bodyT = self.visit(bodyT)
         if not _is_type(new_bodyT):
@@ -121,6 +129,19 @@ class KindCheckingPass(Analysis):
         self.Tmap[node] = T
         return T
 
+    @handles(ir.RefT)
+    def _(self, node: ir.RefT):
+        T, domT = self.visit_children(node)
+        if not _is_kind(T, ir.Type):
+            raise TypeError(f"RefT's underlying type must be a type, got {T}")
+        if not _is_kind(domT, ir.DomT):
+            raise TypeError(f"RefT's domain must be a domain, got {domT}")
+        # dom.T.carT must be T
+        if not _is_same_kind(domT.carT, T):
+            raise TypeError(f"Refinement Type's T, {T}, does not match domain carrier type {domT.carT}")
+        self.Tmap[node] = T
+        return T
+
     
     ##############################
     ## Core-level IR Value nodes (Used throughout entire compiler flow)
@@ -128,9 +149,7 @@ class KindCheckingPass(Analysis):
 
     @handles(ir.VarRef)
     def _(self, node: ir.VarRef):
-        if node.sid not in self.tenv:
-            raise TypeError(f"Variable with sid={node.sid} not found in type environment")
-        T = self.tenv[node.sid]
+        T, = self.visit_children(node)
         if not _is_type(T):
             raise TypeError(f"Variable with sid={node.sid} has non-type type {T}")
         self.Tmap[node] = T
@@ -168,7 +187,7 @@ class KindCheckingPass(Analysis):
         if not _is_value(body):
             raise TypeError(f"Lambda body must be a Value, got {body}")
         # Push parameter type onto bound context for body checking
-        self.bctx.append(piT.argT)
+        self.bctx.append(piT.argT.T)
         # Visit body and get its type
         bodyT = self.visit(body)
         # Pop bound context
@@ -835,16 +854,14 @@ class KindCheckingPass(Analysis):
     # Should always be root
     @handles(ir.Spec)
     def _(self, node: ir.Spec):
-        consT, oblsT, Ts = self.visit_children(node)
+        consT, oblsT = self.visit_children(node)
         # Verify cons is a TupleLit
         for T in (consT, oblsT):
             if not _is_kind(T, ir.TupleT):
                 raise TypeError(f"Spec cons/obls must be a TupleT, got {type(T)}")
             if not all(_is_kind(c, ir.BoolT) for c in T._children):
                 raise TypeError(f"Spec cons/obls must have BoolT children, got {T}")
-        if not _is_kind(Ts, ir.TupleT):
-            raise TypeError(f"Spec Ts must be a TupleT, got {type(Ts)}")
-        T = None
+        T = ir.BoolT()
         self.Tmap[node] = T
         return T
 

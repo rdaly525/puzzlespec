@@ -1,4 +1,4 @@
-from .. import ast, ir
+from ..compiler.dsl import ast, ir
 import typing as tp
 from abc import abstractmethod
 

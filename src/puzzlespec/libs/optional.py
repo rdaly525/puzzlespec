@@ -1,16 +1,15 @@
-from .. import ir, ast
+from ..compiler.dsl import ast, ir, utils
 import typing as tp
-from .. import utils
 
-def OptT(T: ast.TExpr) -> ast.TExpr:
+def optional(T: ast.TExpr) -> ast.TExpr:
     sumT = ir.SumT(ir.UnitT(), T.node)
     return ast.SumType(sumT)
 
-def Optional(dom: ast.DomainExpr) -> ast.DomainExpr:
+def optional_dom(dom: ast.DomainExpr) -> ast.DomainExpr:
     if not isinstance(dom, ast.DomainExpr):
         raise ValueError(f"Expected DomainExpr, got {type(dom)}")
     # domT = Universe(Unit) | dom
-    T = ir.DomT.make(carT=OptT(dom.T.carT).node, fin=dom.T.fin, ord=dom.T.ord)
+    T = ir.DomT.make(carT=optional(dom.T.carT).node, fin=dom.T.fin, ord=dom.T.ord)
     unitDom = ir.Universe(ir.DomT.make(carT=ir.UnitT(), fin=True, ord=True))
     node = ir.DisjUnion(T, unitDom, dom.node)
     expr = ast.wrap(node)

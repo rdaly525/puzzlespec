@@ -1,27 +1,29 @@
-from ..compiler.dsl.spec_builder import PuzzleSpecBuilder
-from ..compiler.dsl.spec import PuzzleSpec
-from ..compiler.dsl.libs import std, optional as opt, topo
-from ..compiler.dsl import ir, Int
+from typing import Optional
+from ..compiler.dsl import ast, ir
+from ..compiler.dsl.spec_builder import PuzzleSpecBuilder, PuzzleSpec
+from ..libs import std, topology as topo, optional as opt, std, var_def as v
+from ..compiler.dsl import ir
 
 
 def build_sudoku_spec(gw=False) -> PuzzleSpec:
+    Int = ast.IntType(ir.IntT())
     # Grid and Puzzle
     p: PuzzleSpecBuilder = PuzzleSpecBuilder()
     # Value domain (1..9)
-    digits = std.Range(1, 10)
+    digits = std.range(1, 10)
 
     # Underlying grid
     grid = topo.Grid2D(9, 9)
 
-    # Generator parameters
-    num_clues = p.gen_var(sort=Int, name='num_clues')
-    givens = p.func_var(role='G', dom=grid.cells(), codom=opt.Optional(digits), name="givens")
+    # Generator parameters (i.e., the 'clues' of the puzzle)
+    num_clues = v.gen_var(sort=Int, name='num_clues')
+    givens = v.func_var(role='G', dom=grid.cells(), codom=opt.optional_dom(digits), name="givens")
 
     # clue constraints
     p += opt.count_some(givens)==num_clues
     
     # Decision variables
-    cell_vals = p.func_var(role='D', dom=grid.cells(), codom=digits, name="cell_vals")
+    cell_vals = v.func_var(role='D', dom=grid.cells(), codom=digits, name="cell_vals")
 
     # Puzzle Rules
     
@@ -38,7 +40,7 @@ def build_sudoku_spec(gw=False) -> PuzzleSpec:
     ):
         p += rct.forall(lambda region: std.distinct(region))
 
-    gw = True
+    gw = False
     # german whispers
     if gw:
         # german whisper 'megavar'

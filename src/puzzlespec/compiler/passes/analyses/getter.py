@@ -6,6 +6,12 @@ from ..pass_base import Analysis, AnalysisObject, Context, handles
 from ...dsl import ir
 from ..envobj import EnvsObj
 
+
+def get_vars(node: ir.Node) -> tp.Set[ir.VarRef | ir.VarHOAS]:
+    ctx = Context()
+    varget = VarGetter()(node, ctx)
+    return varget.vars
+
 class VarSet(AnalysisObject):
     def __init__(self, vars: tp.Set[ir.Node]):
         self.vars = vars

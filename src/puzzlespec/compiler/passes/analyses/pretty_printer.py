@@ -1,11 +1,50 @@
 from __future__ import annotations
-
-import typing as tp
-
-
 from ..pass_base import Analysis, AnalysisObject, Context, handles
 from ...dsl import ir, utils
-from ..envobj import EnvsObj, TypeEnv, SymTable
+from ..envobj import EnvsObj, SymTable
+from .getter import get_vars
+
+def pretty(node: ir.Node) -> str:
+    ctx = Context()
+    pexpr = PrettyPrinterPass().run(node, ctx)
+    return pexpr.text
+
+def pretty_spec(spec: ir.Spec, sym: SymTable) -> str:
+    ctx = Context(EnvsObj(sym))
+    free_vars = get_vars(spec)
+    cons_text = pretty(spec.cons)
+    obls_text = pretty(spec.obls)
+    p_to_T = {}
+    g_to_T = {}
+    d_to_T = {}
+    for (sid, e) in sym.entries.items():
+        if e.invalid:
+            i_str = " (OLD)"
+        else:
+            i_str = ""
+        T_str = ""
+        for v in free_vars:
+            if isinstance(v, ir.VarHOAS):
+                raise NotImplementedError()
+            if v.sid == sid:
+                T_str = pretty(v.T)
+        if e.get('role') == 'P':
+            p_to_T[e.name] = T_str + i_str
+        elif e.get('role') == 'G':
+            g_to_T[e.name] = T_str + i_str
+        elif e.get('role') == 'D':
+            d_to_T[e.name] = T_str + i_str
+    s = "Params:\n"        
+    for pname, T in p_to_T.items():
+        s += f"    {pname}: {T}\n"
+    s += "Gen vars:\n"
+    for gname, T in g_to_T.items():
+        s += f"    {gname}: {T}\n"
+    s += "Decision vars:\n"
+    for dname, T in d_to_T.items():
+        s += f"    {dname}: {T}\n"
+    s += f"Spec:\n  Constraints:\n{cons_text}\n  Obligations:\n{obls_text}\n"
+    return s
 
 class PrettyPrintedExpr(AnalysisObject):
     def __init__(self, text: str):
@@ -36,7 +75,7 @@ class PrettyPrinterPass(Analysis):
     The result is stored in the context as a `PrettyPrintedExpr` object.
     """
     enable_memoization=False
-    requires = (EnvsObj,)
+    requires = ()
     produces = (PrettyPrintedExpr,)
     name = "pretty_printer"
     #_debug=True
@@ -47,42 +86,14 @@ class PrettyPrinterPass(Analysis):
 
     def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
         # Get analysis results
-        envs = ctx.get(EnvsObj)
-        self.tenv: TypeEnv = envs.tenv
-        self.sym: SymTable = envs.sym
+        envs = ctx.try_get(EnvsObj)
+        if envs is not None:
+            self.sym: SymTable = envs.sym
         self.cnt=0
         self.b_names = []
-        if isinstance(root, ir.Spec):
-            cons_text, obls_text, Ts = self.visit(root)
-            cons_str = self._indent_expr(cons_text)
-            obls_str = self._indent_expr(obls_text)
-            p_to_T = {}
-            g_to_T = {}
-            d_to_T = {}
-            for (sid, e), T_str in zip(self.sym.entries.items(), Ts):
-                if e.invalid:
-                    i_str = " (OLD)"
-                else:
-                    i_str = ""
-                if e.role == 'P':
-                    p_to_T[e.name] = T_str + i_str
-                elif e.role == 'G':
-                    g_to_T[e.name] = T_str + i_str
-                elif e.role == 'D':
-                    d_to_T[e.name] = T_str + i_str
-                s = "Params:\n"        
-                for pname, T in p_to_T.items():
-                    s += f"    {pname}: {T}\n"
-                s += "Gen vars:\n"
-                for gname, T in g_to_T.items():
-                    s += f"    {gname}: {T}\n"
-                s += "Decision vars:\n"
-                for dname, T in d_to_T.items():
-                    s += f"    {dname}: {T}\n"
-            s += f"Spec:\n  Constraints:\n{cons_str}\n  Obligations:\n{obls_str}\n"
-        else:
-            s = self.visit(root)
-        print("\n"+s+"\n")
+        self.bvhoas_names = {}
+        s = self.visit(root)
+        #print("\n"+s+"\n")
         return PrettyPrintedExpr(s)
 
     ##############################
@@ -166,23 +177,28 @@ class PrettyPrinterPass(Analysis):
 
     @handles(ir.PiTHOAS)
     def _(self, node: ir.PiTHOAS) -> str:
-        assert 0
-        bv, resT = self.visit_children(node)
-        return (bv, resT)
+        bv_name, resT_str = self.visit_children(node)
+        return (bv_name, resT_str)
 
     @handles(ir.FuncT)
     def _(self, node: ir.FuncT):
         dom_str, (bv_name, resT_str) = self.visit_children(node)
         return f"Func[{dom_str} -> {bv_name}: {resT_str}]"
     
+    @handles(ir.RefT)
+    def _(self, node: ir.RefT):
+        T_str, dom_str = self.visit_children(node)
+        return f"Ref[{T_str} | {dom_str}]"
+
     ##############################
     ## Core-level IR Value nodes (Used throughout entire compiler flow)
     ##############################
 
     @handles(ir.VarRef)
     def _(self, node: ir.VarRef) -> str:
-        e = self.sym[node.sid]
-        return e.name
+        if hasattr(self, 'sym'):
+            return self.sym.get_name(node.sid)
+        return f"v{node.sid}"
 
     @handles(ir.BoundVar)
     def _(self, node: ir.BoundVar) -> str:
@@ -569,9 +585,7 @@ class PrettyPrinterPass(Analysis):
     def _(self, node: ir.Spec) -> str:
         cons_expr = self.visit(node.cons)
         obls_expr = self.visit(node.obls)
-        # visit Ts individually
-        Ts = (self.visit(T) for T in node.Ts._children)
-        return cons_expr, obls_expr, Ts
+        return cons_expr, obls_expr
 
     @handles(ir.And)
     def _(self, node: ir.And) -> str:
@@ -645,7 +659,11 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.BoundVarHOAS)
     def _(self, node: ir.BoundVarHOAS) -> str:
         T, = self.visit_children(node)
-        return f"b{id(node)}"
+        if node in self.bvhoas_names:
+            return self.bvhoas_names[node]
+        bv_name = self._new_elem_name()
+        self.bvhoas_names[node] = bv_name
+        return bv_name
 
     @handles(ir.LambdaHOAS)
     def _(self, node: ir.LambdaHOAS) -> str:
@@ -655,7 +673,7 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.VarHOAS)
     def _(self, node: ir.VarHOAS) -> str:
         T, = self.visit_children(node)
-        return f"v{node.sid}"
+        return f"{node.name}"
 
 #"⊎" disjoint union
 #"×"cartesian product
