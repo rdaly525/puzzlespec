@@ -47,9 +47,9 @@ class DomainSimplificationPass(Transform):
         if isinstance(dom, ir.Fin):
             _, N = dom._children
             return N
-        if isinstance(dom, ir.RestrictEq):
+        if isinstance(dom, ir.Singleton):
             return ir.Lit(ir.IntT(), val=1)
-        if isinstance(dom, ir.DomLit):
+        if isinstance(dom, ir.DomLit) and dom.is_set:
             # Card(DomLit(T, *elems)) = len(elems)
             num_elems = len(dom._children[1:])
             return ir.Lit(ir.IntT(), val=num_elems)

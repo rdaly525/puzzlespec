@@ -203,77 +203,38 @@ class SumT(Type):
         return isinstance(other, SumT) and len(self)==len(other) and all(self[i].eq(other[i]) for i in range(len(self)))
 
 
-#class ArrowT(Type):
-#    _numc=2
-#    def __init__(self, argT: Type, resT: Type):
-#        super().__init__(argT, resT)
-#
-#    @property
-#    def argT(self):
-#        return self._children[0]
-#    
-#    @property
-#    def resT(self):
-#        return self._children[1]
-#
-#    def __repr__(self):
-#        return f"{self.argT} -> {self.resT}"
-#    
-#    def eq(self, other):
-#        return isinstance(other, ArrowT) and self.argT.eq(other.argT) and self.resT.eq(other.resT)
+# Base class for Domain Types
+class _DomT(Type): pass
 
-class DomT(Type):
-    _fields = ("fins", "ords", "axes")
-    _numc = -1
-    def __init__(self, *factors: Type, fins: tp.Tuple[bool], ords: tp.Tuple[bool], axes : tp.Tuple[int]):
-        N = len(factors)
-        assert isinstance(factors, tuple) and len(factors)>0 and all(isinstance(f, Type) for f in factors)
-        assert isinstance(fins, tuple) and len(fins)==N and all(isinstance(f, bool) for f in fins)
-        assert isinstance(ords, tuple) and len(ords)==N and all(isinstance(o, bool) for o in ords)
-        assert isinstance(axes, tuple) and all(isinstance(a, int) and a<N for a in axes)
-        self.fins = fins
-        self.ords = ords
-        self.axes=axes
-        super().__init__(*factors)
-
-    @classmethod
-    def make(cls, carT: Type, fin: bool, ord: bool):
-        factors = (carT,)
-        fins = (fin,)
-        ords = (ord,)
-        axes = (0,)
-        return DomT(*factors, fins=fins, ords=ords, axes=axes)
+class DomT(_DomT):
+    _numc = 1
+    def __init__(self, carT: Type):
+        super().__init__(carT)
 
     @property
-    def factors(self):
-        return tuple(self._children)
-
-    @property
-    def carT(self):
-        if len(self.factors)==1:
-            return self.factors[0]
-        else:
-            return TupleT(*self.factors)
-
-    @property
-    def rank(self):
-        return len(self.axes)
-    
-    @property
-    def fin(self):
-        return all(self.fins)
-
-    @property
-    def ord(self):
-        return all(self.ords)
+    def carT(self) -> Type:
+        return self._children[0]
 
     def __repr__(self):
-        rank = len(self.axes)
-        #return f"Dom<{self.fins},{self.ords},{rank}>[{self.carT}]"
-        return f"Dom[{self.carT}]"
+        return f"DomT[{self.carT}]"
 
-    def eq(self, other):
-        return isinstance(other, DomT) and self.carT.eq(other.carT) and self.fins==other.fins and self.ords==other.ords and self.axes==other.axes
+# Sigma type-like (really the second projection of a function's graph)
+class ImageT(_DomT):
+    _numc = 2
+    def __init__(self, dom: Value, lamT: Type):
+        super().__init__(dom, lamT)
+
+    @property
+    def lamT(self) -> Type:
+        return self._children[1]
+
+    @property
+    def dom(self) -> Value:
+        return self._children[0]
+
+    def __repr__(self):
+        return f"ImageT[{self.dom}, {self.lamT}]"
+
 
 class LambdaTHOAS(Type):
     _numc = 2
@@ -281,15 +242,19 @@ class LambdaTHOAS(Type):
         super().__init__(bound_var, resT)
 
     @property
+    def bv(self):
+        return self._children[0]
+
+    @property
+    def argT(self):
+        return self.bv.T
+
+    @property
     def resT(self) -> Type:
         return self._children[1]
 
-    @property
-    def argT(self) -> Type:
-        return self._children[0].T
-
-    def __repr__(self):
-        return f"(\{self._children[0]}. {self.resT})"
+    #def __repr__(self):
+    #    return f"(\{self._children[0]}. {self.resT})"
 
 class LambdaT(Type):
     _numc = 2
@@ -316,14 +281,28 @@ class FuncT(Type):
         return self._children[0]
     
     @property
-    def piT(self) -> LambdaT:
+    def lamT(self) -> LambdaT:
         return self._children[1]
 
     def __repr__(self):
-        return f"Func[{self.dom.T}, {self.piT}]"
+        return f"Func[{self.dom.T}, {self.lamT}]"
 
     def eq(self, other):
-        return isinstance(other, FuncT) and self.dom.eq(other.dom) and self.piT.eq(other.piT)
+        return isinstance(other, FuncT) and self.dom.eq(other.dom) and self.lamT.eq(other.lamT)
+
+# ONLY USED FOR KIND CHECKING
+class ArrowT(Type):
+    _numc = 2
+    def __init__(self, argT: Type, resT: Type):
+        super().__init__(argT, resT)
+
+    @property
+    def argT(self) -> Type:
+        return self._children[0]
+
+    @property
+    def resT(self) -> Type:
+        return self._children[1]
 
 
 class RefT(Type):
@@ -420,7 +399,7 @@ class Lit(Value):
     _fields = ("val",)
     _numc = 1
     def __init__(self, T: Type, val: tp.Any):
-        self.val = T.cast_as(val)
+        self.val = val
         super().__init__(T)
 
 class Eq(Value):
@@ -493,12 +472,26 @@ class Universe(Value):
     def __init__(self, T: Type):
         super().__init__(T)
 
+# Dom(T)
+class Empty(Value):
+    _numc = 1
+    def __init__(self, T: Type):
+        super().__init__(T)
+
+# Single Element of the domain
+class Singleton(Value):
+    _numc = 2
+    def __init__(self, T: Type, v: Value):
+        super().__init__(T, v)
+
 # Dom(T) with literal elements
 class DomLit(Value):
+    _fields = ('is_set',) # is_set => is proven to be a set (i.e., elems are unique). ~is_set means "I dont know"
     _numc = -1
-    def __init__(self, T: Type, *elems: Value):
+    def __init__(self, T: Type, *elems: Value, is_set: bool=False):
         if not all(isinstance(elem, Value) for elem in elems):
             raise ValueError("DomLit children must be Values")
+        self.is_set = False
         super().__init__(T, *elems)
 
 # Int -> Dom[Int]
@@ -506,14 +499,6 @@ class Fin(Value):
     _numc = 2
     def __init__(self, T: Type, N: Value):
         super().__init__(T, N)
-
-# Dom[EnumT] -> EnumT
-class EnumLit(Value):
-    _fields = ("label",)
-    _numc = 1
-    def __init__(self, enumT: EnumT, label: str):
-        self.label = label
-        super().__init__(enumT)
 
 # Get the size of a domain
 # Dom(A) -> Int
@@ -619,8 +604,8 @@ class Exists(Value):
 # Dom(A) -> (A->B) -> Func(Dom(A)->B)
 class Map(Value):
     _numc=3
-    def __init__(self, T: Type, dom: Value, fun: Value):
-        super().__init__(T, dom, fun)
+    def __init__(self, T: Type, dom: Value, lam: Value):
+        super().__init__(T, dom, lam)
 
 @dataclass(eq=True, frozen=True)
 class _FuncLitLayout:
@@ -634,6 +619,7 @@ class _SparseLayout(_FuncLitLayout):
 class _DenseLayout(_FuncLitLayout):
     val_map: tp.Mapping[tp.Any, int]
 
+    # probably unsafe to use val._key.
     def index(self, val: Node):
         return self.val_map.get(val._key, None)
 
@@ -648,7 +634,6 @@ class _DenseLayout(_FuncLitLayout):
 
     def __lt__(self, other):
         return len(self.val_map) < len(other.val_map)
-
 
 class FuncLit(Value):
     _fields= ('layout',)
@@ -682,20 +667,14 @@ class Apply(Value):
 # Seq[A] -> ((A,B) -> B) -> B -> B
 class Fold(Value):
     _numc = 4
-    def __init__(self, T: Type, func: Value, fun: Value, init: Value):
-        super().__init__(T, func, fun, init)
+    def __init__(self, T: Type, func: Value, lam: Value, init: Value):
+        super().__init__(T, func, lam, init)
 
 # Slices a Sequential Domain
 class Slice(Value):
     _numc = 4
     def __init__(self, T: Type, dom: Value, lo: Value, hi: Value):
         super().__init__(T, dom, lo, hi)
-
-# Single Element of the domain
-class RestrictEq(Value):
-    _numc = 3
-    def __init__(self, T: Type, dom: Value, v: Value):
-        super().__init__(T, dom, v)
 
 class ElemAt(Value):
     _numc = 3
@@ -721,10 +700,6 @@ class Spec(Node):
     def obls(self):
         return self._children[1]
     
-    @property
-    def Ts(self):
-        return self._children[2]
-
 class And(Value):
     _numc = 3
     def __init__(self, T: Type, a: Value, b: Value):
@@ -806,7 +781,10 @@ class AllSame(Value):
 class BoundVarHOAS(Value):
     #_fields = ('_map_dom', '_is_map')
     _numc = 1
+    _cnt = 0
     def __init__(self, T: RefT):
+        self._name = f"b{self._cnt}"
+        BoundVarHOAS._cnt +=1
         super().__init__(T)
 
     @property
@@ -815,6 +793,9 @@ class BoundVarHOAS(Value):
 
     def __str__(self):
         return f"BV[{str(id(self))[-5:]}]"
+
+    def __repr__(self):
+        return self._name
 
 class LambdaHOAS(Value):
     _numc = 3
@@ -844,6 +825,7 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     SumT: -2,
     DomT: -2,
     FuncT: -2,
+    ArrowT: -2,
     LambdaTHOAS: -2,
     LambdaT: -2,
     RefT: -2,
@@ -876,10 +858,11 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     Sum: 8,
     Prod: 8,
     Universe: 9,
+    Empty: 9,
+    Singleton: 9,
+    DomLit: 9,
     Fin: 9,
     Range: 9,
-    EnumLit: 9,
-    DomLit: 9,
     Card: 9,
     IsMember: 9,
     CartProd: 9,
@@ -898,7 +881,6 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     Image: 10,
     ApplyFunc: 10,
     Apply: 10,
-    RestrictEq: 10,
     Slice: 10,
     Lambda: 12,
     LambdaHOAS: 12,

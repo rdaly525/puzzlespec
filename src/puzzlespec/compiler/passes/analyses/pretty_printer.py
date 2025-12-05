@@ -228,6 +228,8 @@ class PrettyPrinterPass(Analysis):
     def _(self, node: ir.Lit) -> str:
         if isinstance(node.T, ir.BoolT):
             return '𝕋' if node.val else '𝔽'
+        if isinstance(node.T, ir.EnumT):
+            return f"{node.T.name}.{node.val}"
         return str(node.val)
 
     @handles(ir.Eq)
@@ -376,6 +378,15 @@ class PrettyPrinterPass(Analysis):
         carT_str = self.visit(node.T.carT)
         return f"𝕌({carT_str})"
 
+    @handles(ir.Empty)
+    def _(self, node: ir.Empty) -> str:
+        return "∅"
+
+    @handles(ir.Singleton)
+    def _(self, node: ir.Singleton) -> str:
+        _, val_expr = self.visit_children(node)
+        return f"{{{val_expr}}}"
+
     @handles(ir.Fin)
     def _(self, node: ir.Fin) -> str:
         _, n_expr = self.visit_children(node)  # Skip type at index 0
@@ -385,10 +396,6 @@ class PrettyPrinterPass(Analysis):
     def _(self, node: ir.Range) -> str:
         _, lo_expr, hi_expr = self.visit_children(node)  # Skip type at index 0
         return f"{{{lo_expr}:{hi_expr}}}"
-
-    @handles(ir.EnumLit)
-    def _(self, node: ir.EnumLit) -> str:
-        return f"{node.T.name}.{node.label}"
 
     @handles(ir.DomLit)
     def _(self, node: ir.DomLit) -> str:
@@ -572,11 +579,6 @@ class PrettyPrinterPass(Analysis):
         _, dom_expr, lo_expr, hi_expr = self.visit_children(node)  # Skip type at index 0
         return f"{dom_expr}[{lo_expr}:{hi_expr}]"
 
-    @handles(ir.RestrictEq)
-    def _(self, node: ir.RestrictEq) -> str:
-        _, dom_expr, idx_expr = self.visit_children(node)  # Skip type at index 0
-        return f"{{{idx_expr}}}"
-
     ##############################
     ## Surface-level IR nodes (Used for analysis, but can be collapsed)
     ##############################
@@ -659,11 +661,11 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.BoundVarHOAS)
     def _(self, node: ir.BoundVarHOAS) -> str:
         T, = self.visit_children(node)
-        if node in self.bvhoas_names:
-            return self.bvhoas_names[node]
-        bv_name = self._new_elem_name()
-        self.bvhoas_names[node] = bv_name
-        return bv_name
+        #if node in self.bvhoas_names:
+        #    return self.bvhoas_names[node]
+        #bv_name = self._new_elem_name()
+        #self.bvhoas_names[node] = bv_name
+        return node._name
 
     @handles(ir.LambdaHOAS)
     def _(self, node: ir.LambdaHOAS) -> str:
@@ -673,6 +675,8 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.VarHOAS)
     def _(self, node: ir.VarHOAS) -> str:
         T, = self.visit_children(node)
+        if node.name is None:
+            return f"_var"
         return f"{node.name}"
 
 #"⊎" disjoint union

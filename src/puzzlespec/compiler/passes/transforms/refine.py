@@ -34,6 +34,7 @@ class RefineSimplify(Transform):
             T = T.T
         return node.replace(T)
 
+# This is the 'bottom up' version of refine
 class RefineCombine(Transform):
     """Combines refinements
     """
@@ -44,6 +45,7 @@ class RefineCombine(Transform):
 
     def run(self, root: ir.Node, ctx: Context) -> ir.Node:
         new_root = self.visit(root)
+        self.tmap: tp.Mapping[ir.Node, ir.RefT] = {}
         return new_root
 
     #@handles(ir.Mod)
@@ -56,8 +58,16 @@ class RefineCombine(Transform):
     #        # -> Int | Interval(0, 5+7)
     #    return node.replace(T, left, right)
 
-    #@handles(ir.And)
-    #def _(self, node: ir.And):
-    #    T, left, right = self.visit_children(node)
-    #    if isinstance(left, ir.RefT) and isinstance(right, ir.RefT):
+    @handles(ir.Add)
+    def _(self, node: ir.Add):
+        T, left, right = self.visit_children(node)
+        assert isinstance(left.T, ir.RefT) and isinstance(right.T, ir.RefT)
+        refT_l = self.tmap[left]
+        refT_r = self.tmap[right]
+        ldom = ast.DomainExpr(refT_l.dom)
+        rdom = ast.DomainExpr(refT_r.dom)
+        new_dom = (ldom * rdom).map(lambda l, r: l+r).image
+        refT = ir.RefT(T, new_dom.node)
+        self.tmap[node] = refT
+        return node.replace(refT, left, right)
  

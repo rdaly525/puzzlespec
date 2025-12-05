@@ -4,8 +4,9 @@ import math
 
 from ..pass_base import Transform, Context, handles
 from ...dsl import ir
+from ...dsl.utils import _substitute
 import typing as tp
-
+from ..analyses.pretty_printer import pretty
 
 # High level algortihm:
 # add 1 to all bound vars in arg
@@ -121,18 +122,29 @@ class BetaReductionPass(Transform):
     def _(self, node: ir.Apply):
         # first recursively reduce inside
         T, lam, arg = self.visit_children(node)
-        assert isinstance(lam, ir.Lambda)
-        lamT, body = lam._children
+        if isinstance(lam, ir.Lambda):
+            lamT, body = lam._children
 
-        # (Lam(body) arg)
+            # 1. shift argument up by 1 for the binder we’re eliminating
+            arg_p1 = self.shift(arg, +1, cutoff=0)
 
-        # 1. shift argument up by 1 for the binder we’re eliminating
-        arg_p1 = self.shift(arg, +1, cutoff=0)
+            # 2. substitute for "0" (j=0) in body
+            body_sub = self.subst(body, 0, arg_p1, depth=0)
 
-        # 2. substitute for "0" (j=0) in body
-        body_sub = self.subst(body, 0, arg_p1, depth=0)
+            # 3. shift everything down by 1 (remove the binder)
+            body_m1 = self.shift(body_sub, -1, cutoff=0)
 
-        # 3. shift everything down by 1 (remove the binder)
-        body_m1 = self.shift(body_sub, -1, cutoff=0)
-
-        return body_m1
+            return body_m1
+        else:
+            assert isinstance(lam, ir.LambdaHOAS)
+            T, bv, body = lam._children
+            print("HOAS SUB")
+            print("BV", pretty(bv))
+            print("BODY:")
+            print(pretty(body))
+            sub = _substitute(body, bv, arg)
+            print("POSTSUB_BOD")
+            print(pretty(sub))
+            print("*"*20)
+            return sub
+            

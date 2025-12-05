@@ -14,32 +14,40 @@ def build_unruly_spec() -> PuzzleSpec:
     nR, nC = v.param(sort=Int, name='nR'), v.param(sort=Int, name='nC')
 
     # Structural constraints
-    p += [nR % 2 == 0, nC % 2 == 0]
+    #p += [nR % 2 == 0, nC % 2 == 0]
 
     grid = topo.Grid2D(nR, nC)
 
     # color domain (black and white)
-    BW_dom, BW_enum = std.enum('B', 'W')
+    BW_dom, BW_enum = std.make_enum('B', 'W')
 
     # Generator variables, i.e., the 'clues' of the puzzle
     num_clues = v.gen_var(sort=Int, name='num_clues')
     givens = v.func_var(role='G', dom=grid.cells(), codom=opt.optional_dom(BW_dom), name='givens') # Cell -> Optional[BW_enum]
 
     # clue constraints
-    p += opt.count_some(givens)==num_clues
+    #p += opt.count_some(givens)==num_clues
 
     ## Decision variables, i.e., what the end user will solve for
     color = v.func_var(role='D', dom=grid.cells(), codom=BW_dom, name='color') # Cell -> BW_enum
 
     ### Puzzle Rules
     ## Handle the givens
-    p += grid.cells().forall(
-        lambda c: opt.fold(givens(c), on_none=True, on_some=lambda v: color(c)==v)
-    )
+    #p += grid.cells().forall(
+    #    lambda c: opt.fold(givens(c), on_none=True, on_some=lambda v: color(c)==v)
+    #)
 
     ### Equal balance of colors in all rows and cols
-    p += grid.cells().rows().forall(lambda row: std.count(color[row], lambda v: v==BW_enum.B) == nC // 2)
-    p += grid.cells().cols().forall(lambda col: std.count(color[col], lambda v: v==BW_enum.B) == nR // 2)
+    #c1 =color.rows().forall(lambda crow: std.count(crow, lambda v: v==BW_enum.B) == nC // 2)
+    #print(c1)
+    #print(c1.simplify)
+    #assert 0
+    dis = grid.cells().rows().forall(lambda row: std.distinct(color[row]))
+    print(dis)
+    #print(dis.simplify)
+    #assert 0
+    #p += grid.cells().rows().forall(lambda row: std.count(color[row], lambda v: v==BW_enum.B) == nC // 2)
+    #p += grid.cells().cols().forall(lambda col: std.count(color[col], lambda v: v==BW_enum.B) == nR // 2)
 
     ### No triple of the same color
     p += grid.cells().rows().forall(
