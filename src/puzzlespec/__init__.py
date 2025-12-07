@@ -7,14 +7,10 @@ Bool = BoolType(_ir.BoolT())
 Int = IntType(_ir.IntT())
 _base_types = ['Unit', 'Bool', 'Int', 'EnumType']
 
-# Other Types
-from .compiler.dsl.ast import TupleType, SumType, PiType, DomainType, FuncType
-_other_types = ['TupleType', 'SumType', 'PiType', 'DomainType', 'FuncType']
-
 
 # constructors
-from .libs.std import fin, interval, sum, distinct, all_same, count, enum
-_constructors = ['fin', 'interval', 'sum', 'distinct', 'all_same', 'count', 'enum']
+from .libs.std import fin, interval, sum, distinct, all_same, count, enum, U
+_constructors = ['fin', 'interval', 'sum', 'distinct', 'all_same', 'count', 'enum', 'U']
 
 # vars
 from .libs.var_def import param, gen_var, decision_var, var, func_var
@@ -26,8 +22,14 @@ from .compiler.dsl.setter import VarSetter
 _helpers = ['PuzzleSpecBuilder', 'VarSetter']
 __all__ = [
     *_base_types,
-    *_other_types,
     *_constructors,
     *_vars,
     *_helpers,
 ]
+
+import sys
+
+def _puzzlespec_repr():
+    return "<puzzlespec: domain-centric DSL with dependent constraints and SMT compilation>"
+
+sys.modules[__name__].__repr__ = _puzzlespec_repr

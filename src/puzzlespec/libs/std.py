@@ -5,6 +5,9 @@ def enum(*labels: str, name: str=None) -> tp.Tuple[ast.EnumDomainExpr, ast._Enum
     expr = ast.EnumDomainExpr.make_from_labels(*labels, name=name)
     return expr, expr.members
 
+def U(carT: ast.TExpr):
+    return ast.DomainExpr(ir.Universe(ir.DomT.make(carT.node,False,False)))
+
 def fin(n:ast.IntOrExpr)-> ast.SeqDomainExpr:
     n = ast.IntExpr.make(n)
     return n.fin()
