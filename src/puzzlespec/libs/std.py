@@ -1,6 +1,9 @@
 from ..compiler.dsl import ast, ast_nd, ir
 import typing as tp
 
+def U(carT: ast.TExpr):
+    return ast.DomainExpr(ir.Universe(ir.DomT(carT).node))
+
 def sum(func: ast.FuncExpr) -> ast.IntExpr:
     if not (isinstance(func, ast.FuncExpr) and isinstance(func.elemT, ir.IntT)):
         raise ValueError(f"Expected FuncExpr[IntExpr], got {func}")

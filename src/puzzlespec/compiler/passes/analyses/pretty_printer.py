@@ -183,7 +183,8 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.FuncT)
     def _(self, node: ir.FuncT):
         dom_str, (bv_name, resT_str) = self.visit_children(node)
-        return f"Func[{dom_str} -> {bv_name}: {resT_str}]"
+        #return f"Func[{dom_str} -> {bv_name}: {resT_str}]"
+        return f"({bv_name} : {dom_str}) -> {resT_str}"
     
     @handles(ir.RefT)
     def _(self, node: ir.RefT):

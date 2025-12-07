@@ -15,6 +15,7 @@ def gen_var(sort: ast.TExpr, name=None):
 def decision_var(sort: ast.TExpr, name=None):
     return var(sort=sort, name=name, role='D')
 
+_cnt = 0
 def var(
     sort: ast.TExpr=None,
     dom: tp.Optional[ast.DomainExpr]=None,
@@ -24,7 +25,10 @@ def var(
 ) -> ast.Expr:
     metadata = frozenset(kwargs.items())
     err_prefix=f"ERROR In var {name}: "
-    
+    global _cnt
+    if name is None:
+        name = f"v{_cnt}"
+        _cnt +=1
     if sort is not None and not isinstance(sort, ast.TExpr):
         raise ValueError(f"{err_prefix}sort must be a TExpr, got {type(sort)}")
     if sum((sort is None, dom is None)) != 1:
@@ -83,7 +87,6 @@ def var(
     full_sort = make_sort(bvs)
     var = ir.VarHOAS(full_sort, name=name, metadata=metadata)
     var = ast.wrap(var)
-    print(var.T)
     # add dom constraint
     for e in bv_exprs:
         var = var(e)
@@ -93,14 +96,17 @@ def func_var(
     dom: tp.Optional[ast.DomainExpr],
     sort: ir.Type=None,
     codom: tp.Optional[ast.DomainExpr]=None,
+    indices: tp.Tuple[ast.Expr]=None,
     name: tp.Optional[str]=None,
     **kwargs
 ):
+    if indices is None:
+        indices = ()
     return dom.map(lambda i: var(
         sort=sort,
         dom=codom,
         name=name,
-        indices=(i,),
+        indices=indices + (i,),
         **kwargs
     ))
 
