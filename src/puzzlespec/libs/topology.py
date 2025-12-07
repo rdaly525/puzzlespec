@@ -56,7 +56,7 @@ class Grid2D(Topology):
     ## relations among cells, vertices, edges
 
     #relation for 2 cells adjacent (4 means orthogonal, 8 means diagonal)
-    def cell_adjacent(self, n: ast.IntOrExpr, c1: 'CellIdxT', c2:'CellIdxT') -> ast.BoolExpr:
+    def cell_adjacent(self,c1: 'CellIdxT', c2:'CellIdxT', n: int=8) -> ast.BoolExpr:
         if type(c1.T) != type(self.CellIdxT) or type(c2.T) != type(self.CellIdxT):
             raise ValueError(f"c1 and c2 must be of type {self.CellIdxT}, got {c1.T} and {c2.T}")
         if n==4:

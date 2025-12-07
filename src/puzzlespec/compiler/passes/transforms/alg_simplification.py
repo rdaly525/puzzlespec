@@ -31,13 +31,20 @@ class AlgebraicSimplificationPass(Transform):
 
     # Arithmetic
 
-    # Simple -(-x) => x
     @handles(ir.Neg)
     def _(self, node: ir.Neg) -> ir.Node:
         T, a, = self.visit_children(node)
+        
+        # -(-x) => x
         match (a):
             case (ir.Neg(_, b)):
                 return b
+            case (ir.Sum(terms)):
+                return ir.Prod(
+                    ir.IntT(),
+                    *(ir.Neg(ir.IntT(), t) for t in terms[1:])
+                )
+
         return node.replace(T, a)
 
     @handles(ir.Add, ir.Sum)
@@ -73,6 +80,11 @@ class AlgebraicSimplificationPass(Transform):
         # simplify all literals
         const_children, non_const_children = _partition(children, lambda c: isinstance(c, ir.Lit))
         const_val = math.prod([c.val for c in const_children])
+        # Extract all the negatives and put it on the const_val
+        num_negs = sum(isinstance(c, ir.Neg) for c in non_const_children)
+        non_const_children = [c._children[1] if isinstance(c, ir.Neg) else c for c in non_const_children]
+        if num_negs%2==1:
+            const_val = -const_val
         match const_val:
             case 0:
                 return ir.Lit(T, 0)
@@ -249,10 +261,6 @@ class AlgebraicSimplificationPass(Transform):
             if isinstance(dom, ir.DomLit):
                 _, *elems = dom._children
                 return elems[idx_val]
-            if isinstance(dom, ir.RestrictEq):
-                assert idx.val==0
-                _, _, v = dom._children
-                return v
             if isinstance(dom, ir.CartProd):
                 cart_doms = dom._children[1:]
                 sizes = [ir.Card(ir.IntT(), d) for d in cart_doms]

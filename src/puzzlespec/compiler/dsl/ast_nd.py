@@ -169,7 +169,6 @@ class NDSeqDomainExpr(ast.DomainExpr):
         func = super().map(fn)
         return NDArrayExpr(func)
 
-    # Fin(nR) -> (ND({r} -> r, Fin(nC)-> Int)
     def rows(self) -> ArrayExpr:
         if self.rank != 2:
             raise ValueError(f"Expected 2D array, got {self.T}")
@@ -291,17 +290,12 @@ class NDArrayExpr(ast.FuncExpr):
         return self.domain.cols().map(lambda col_dom: self[col_dom])
 
     def windows(self, size: ast.IntOrExpr, stride: ast.IntOrExpr=1):
-        wins = self.tiles((size,), (stride,))
-        assert wins is not None
-        return wins
+        return self.tiles((size,), (stride,))
 
     def tiles(self, size: tp.Tuple[ast.IntOrExpr, ...], stride: tp.Tuple[ast.IntOrExpr, ...]=None) -> NDArrayExpr:
         dom_tiles = self.domain.tiles(size, stride)
-        def tlam(dom):
-            return self[dom]
         return dom_tiles.map(
-            #lambda tile_dom: self[tile_dom]
-            tlam
+            lambda tile_dom: self[tile_dom]
         )
 
     def __getitem__(self, dom: ast.DomainExpr) -> ast.FuncExpr:

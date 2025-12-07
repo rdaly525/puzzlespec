@@ -319,8 +319,7 @@ class PassManager:
     
     def _run_pass(self, root: ir.Node, p: Pass, ctx: Context) -> ir.Node:
         if self.verbose:
-            #print(f"P: {id(root)} {p.__class__.__name__}")
-            print(f"Running {p.__class__.__name__}")
+            print(f"  {p.__class__.__name__}")
         for req_analysis in p.requires:
             if ctx.try_get(req_analysis) is None:
                 if req_analysis in self.analysis_map:

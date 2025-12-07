@@ -438,7 +438,8 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.CartProd)
     def _(self, node: ir.CartProd) -> str:
         doms = self.visit_children(node)[1:]  # Skip type at index 0
-        return "(" + "×".join(doms) + ")"
+        #return "(" + "×".join(doms) + ")"
+        return "×".join(doms)
 
     @handles(ir.DomProj)
     def _(self, node: ir.DomProj) -> str:
