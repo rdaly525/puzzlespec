@@ -2,6 +2,7 @@ from __future__ import annotations
 import typing as tp
 # Unified Types and IR
 from dataclasses import dataclass
+
 # Base class for IR
 class Node:
     _fields: tp.Tuple[str, ...] = ()
@@ -207,8 +208,11 @@ class SumT(Type):
 class _DomT(Type): pass
 
 class DomT(_DomT):
+    _fields = ('_ord', '_elemAt')
     _numc = 1
-    def __init__(self, carT: Type):
+    def __init__(self, carT: Type, _ord=False, _elemAt=False):
+        self._ord= _ord
+        self._elemAt=_elemAt
         super().__init__(carT)
 
     @property
@@ -330,7 +334,7 @@ class ApplyT(Type):
     _numc = 2
     def __init__(self, lamT: LambdaT, arg: Value):
         assert _is_value(arg)
-        if not isinstance(lamT, LambdaT):
+        if not isinstance(lamT, (LambdaT, LambdaTHOAS)):
             raise ValueError(f"ApplyT must be a LambdaT, got {lamT}")
         super().__init__(lamT, arg)
 
@@ -365,10 +369,11 @@ class Value(Node):
         return self._children[0]
 
 class VarRef(Value):
-    _fields = ("sid",)
+    _fields = ("sid", "name")
     _numc = 1
-    def __init__(self, T: Type, sid: int):
+    def __init__(self, T: Type, sid: int, name:str):
         self.sid = sid
+        self.name = name
         super().__init__(T)
 
 
@@ -779,12 +784,14 @@ class AllSame(Value):
 
 # gets tranformed to a de-bruijn BoundVar
 class BoundVarHOAS(Value):
-    #_fields = ('_map_dom', '_is_map')
+    _fields = ('_name',)
     _numc = 1
     _cnt = 0
-    def __init__(self, T: RefT):
-        self._name = f"b{self._cnt}"
-        BoundVarHOAS._cnt +=1
+    def __init__(self, T: RefT, _name=None):
+        if _name is None:
+            _name = f"b{self._cnt}"
+            BoundVarHOAS._cnt +=1
+        self._name = f"{_name}"
         super().__init__(T)
 
     @property
@@ -796,6 +803,7 @@ class BoundVarHOAS(Value):
 
     def __repr__(self):
         return self._name
+
 
 class LambdaHOAS(Value):
     _numc = 3

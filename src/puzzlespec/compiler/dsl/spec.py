@@ -121,6 +121,9 @@ class PuzzleSpec:
         self._kind_check()
         return pretty_spec(self._spec, self.sym)
 
+    def __str__(self):
+        return self.pretty()
+
     def pretty_print(self):
         print(self.pretty())
 

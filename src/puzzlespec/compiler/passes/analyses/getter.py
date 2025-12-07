@@ -35,23 +35,45 @@ class VarGetter(Analysis):
     def _(self, node: ir.VarRef):
         return set([node])
 
-class VarPHGetter(Analysis):
-    requires = (EnvsObj,)
+class ClosedVarGetter(Analysis):
+    requires = ()
     produces = (VarSet,)
-    name = 'phvar_getter'
+    name = 'open_var_getter'
 
     def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
-        vars = self.visit(root)
-        var_map = {v:vs for v, vs in self._cache.items() if isinstance(v, ir.VarHOAS)}
-        return VarSet(var_map)
+        return VarSet(self.visit(root))
 
     def visit(self, node: ir.Node):
         vars: tp.List[tp.Set[ir.Node]] = self.visit_children(node)
-        if isinstance(node, ir.VarHOAS):
-            val = set([node])
-        else:
-            val = set()
+        val = set()
         for pset in vars:
             val |= pset
         return val       
+
+    @handles(ir.VarRef)
+    def _(self, node: ir.VarRef):
+        return set([node])
+
+
+
+
+#class VarPHGetter(Analysis):
+#    requires = (EnvsObj,)
+#    produces = (VarSet,)
+#    name = 'phvar_getter'
+#
+#    def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
+#        vars = self.visit(root)
+#        var_map = {v:vs for v, vs in self._cache.items() if isinstance(v, ir.VarHOAS)}
+#        return VarSet(var_map)
+#
+#    def visit(self, node: ir.Node):
+#        vars: tp.List[tp.Set[ir.Node]] = self.visit_children(node)
+#        if isinstance(node, ir.VarHOAS):
+#            val = set([node])
+#        else:
+#            val = set()
+#        for pset in vars:
+#            val |= pset
+#        return val       
 

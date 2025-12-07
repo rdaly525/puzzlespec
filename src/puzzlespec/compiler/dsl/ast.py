@@ -3,9 +3,10 @@ import typing as tp
 from . import ir
 from dataclasses import dataclass
 from enum import Enum as _Enum
-from .utils import _is_kind, _is_same_kind, _applyT, _has_bv, _substitute
+from .utils import _is_kind, _is_same_kind, _has_bv, _substitute
 from ..passes.analyses.pretty_printer import pretty
 from ..passes.analyses.kind_check import get_rawT
+from ..passes.transforms.beta_reduction import applyT
 
 @dataclass
 class TExpr:
@@ -34,6 +35,11 @@ class TExpr:
     def __str__(self):
         return pretty(self._node)
 
+    @property
+    def U(self):
+        return DomainExpr(ir.Universe(ir.DomT(self.node)))
+
+    @property
     def simplify(self) -> tp.Self:
         from ..passes.utils import simplify
         return type(self)(simplify(self.node))
@@ -120,7 +126,7 @@ class LambdaType(TExpr):
         return wrapT(self.node.argT)
 
     def resT(self, arg: Expr):
-        return wrapT(_applyT(self.node, arg.node))
+        return wrapT(applyT(self.node, arg.node))
 
 class _DomainType(TExpr): pass
 
@@ -133,6 +139,11 @@ class DomainType(_DomainType):
     @property
     def carT(self) -> TExpr:
         return wrapT(self.node.carT)
+
+    @property
+    def _ord(self) -> tp.Union[bool, tp.Tuple[bool,...]]:
+        return self.node._ord
+        
 
 class ImageType(_DomainType):
     def __post_init__(self):
@@ -538,7 +549,9 @@ def cartprod(*doms: DomainExpr) -> DomainExpr:
         raise ValueError(f"Expected all DomainExpr, got {doms}")
     carT = ir.TupleT(*[dom.T.carT.node for dom in doms])
     dom_nodes = tuple(dom.node for dom in doms)
-    T = ir.DomT(carT)
+    _ord = tuple(dom.T.node._ord for dom in doms)
+    _elemAt = tuple(dom.T.node._elemAt for dom in doms)
+    T = ir.DomT(carT,_ord=_ord, _elemAt=_elemAt)
     cartprod_node = ir.CartProd(T, *dom_nodes)
     return wrap(cartprod_node)
 
@@ -556,7 +569,7 @@ def coproduct(*doms: DomainExpr) -> DomainExpr:
 class DomainExpr(Expr):
     def __init__(self, node: ir.Value):
         super().__init__(node)
-        self._fin = isinstance(node, ir.Fin)
+        #self._fin = isinstance(node, ir.Fin)
 
     @property
     def T(self) -> _DomainType:
@@ -588,7 +601,9 @@ class DomainExpr(Expr):
             raise IndexError(f"Index {idx} out of range for tuple of length {len(self.T.carT)}")
         if isinstance(self.node, ir.CartProd):
             return DomainExpr(self.node._children[1:][idx])
-        proj_T = ir.DomT(self.T.carT[idx].node)
+        _ord = self.T.node._ord[idx]
+        _elemAt = self.T.node._elemAt[idx]
+        proj_T = ir.DomT(self.T.carT[idx].node, _ord, _elemAt)
         node = ir.DomProj(proj_T, self.node, idx)
         return DomainExpr(node)
         
@@ -688,15 +703,14 @@ class FuncExpr(Expr):
     def __call__(self, val: Expr) -> Expr:
         return self.apply(val)
     
-    # dom_row = ND({r} -> r, Fin(nC)-> Int)
-    def gather(self, ndarr: NDArrayExpr):
-        return ndarr.domain.map(lambda dom_idx: self.apply(dom_idx))
+    def gather(self, dom: DomainExpr):
+        return dom.map(lambda elem: self.apply(elem))
 
     # Basically a 'gather'
     def __getitem__(self, dom: DomainExpr) -> FuncExpr:
         if not isinstance(dom, DomainExpr):
-            raise ValueError(f"Can only index into funcs with a domain.\nFunc: {self}\n Got: {dom}")
-        return dom.map(lambda v: self.apply(v))
+            raise ValueError(f"Can only index into funcs with a domain (i.e., a gather).\nFunc: {self}\n Got: {dom}")
+        return self.gather(dom)
 
 def wrap(node: ir.Node) -> Expr:
     T = wrapT(node.T)

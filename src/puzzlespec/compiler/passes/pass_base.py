@@ -1,12 +1,11 @@
 from __future__ import annotations
 from functools import singledispatchmethod, singledispatch
-from multiprocessing import Value
 import typing as tp
 from typing import TYPE_CHECKING
 from abc import ABC, abstractmethod
 import inspect
 
-from puzzlespec.compiler.dsl.ir import LambdaHOAS
+from puzzlespec.compiler.dsl.ir import LambdaHOAS, Node
 
 if TYPE_CHECKING:
     from ..dsl import ir
@@ -128,6 +127,8 @@ class Analysis(Pass):
     enable_memoization=True
     
     def __call__(self, root: ir.Node, ctx: 'Context', cache = {}) -> ir.Node:
+        if not isinstance(root, Node):
+            raise ValueError(f"Can only analyze nodes, got {root}")
         if self.enable_memoization:
             self._cache = cache
         if self._debug:
@@ -206,6 +207,8 @@ class Transform(Pass):
     cse=False
     
     def __call__(self, root: ir.Node, ctx: 'Context', cache = {}) -> ir.Node:
+        if not isinstance(root, Node):
+            raise ValueError(f"Can only transform nodes, got {root}")
         if self.enable_memoization:
             self._cache = cache
         if self._debug:
@@ -316,7 +319,8 @@ class PassManager:
     
     def _run_pass(self, root: ir.Node, p: Pass, ctx: Context) -> ir.Node:
         if self.verbose:
-            print(f"P: {id(root)} {p.__class__.__name__}")
+            #print(f"P: {id(root)} {p.__class__.__name__}")
+            print(f"Running {p.__class__.__name__}")
         for req_analysis in p.requires:
             if ctx.try_get(req_analysis) is None:
                 if req_analysis in self.analysis_map:

@@ -50,15 +50,15 @@ def _substitute(node: ir.Node, bv: ir.BoundVarHOAS, arg: ir.Value):
     new_children = [_substitute(c, bv, arg) for c in node._children]
     return node.replace(*new_children)
 
-def _applyT(lamT: ir.LambdaT, arg: ir.Value):
-    assert isinstance(arg, ir.Value)
-    assert isinstance(lamT, ir.LambdaTHOAS)
-    bv, resT = lamT._children
-    #print(f"Applying {arg} to {lamT}")
-    if bv is arg:
-        return resT
-    new_resT = _substitute(resT, bv, arg)
-    return new_resT
+#def _applyT(lamT: ir.LambdaT, arg: ir.Value):
+#    assert isinstance(arg, ir.Value)
+#    assert isinstance(lamT, ir.LambdaTHOAS)
+#    bv, resT = lamT._children
+#    #print(f"Applying {arg} to {lamT}")
+#    if bv is arg:
+#        return resT
+#    new_resT = _substitute(resT, bv, arg)
+#    return new_resT
 
 # Checks for any bound/free vars
 def _is_concrete(node: ir.Node):
@@ -83,20 +83,20 @@ def _lit_val(node: ir.Node) -> tp.Optional[int|bool]:
         return node.val
     return None
 
-
 def simplify(node: ir.Node) -> ir.Node:
-        ctx = Context(self.envs_obj)
-        analysis_map = {
-            TypeMap: KindCheckingPass()
-        }
+    assert 0
+    ctx = Context(self.envs_obj)
+    analysis_map = {
+        TypeMap: KindCheckingPass()
+    }
 
-        opt_passes = [
-            CanonicalizePass(),
-            AlgebraicSimplificationPass(),
-            ConstFoldPass(),
-            DomainSimplificationPass(),
-            RefineSimplify(),
-            BetaReductionPass(),
-            #CSE(),
-        ]
+    opt_passes = [
+        CanonicalizePass(),
+        AlgebraicSimplificationPass(),
+        ConstFoldPass(),
+        DomainSimplificationPass(),
+        RefineSimplify(),
+        BetaReductionPass(),
+        #CSE(),
+    ]
 

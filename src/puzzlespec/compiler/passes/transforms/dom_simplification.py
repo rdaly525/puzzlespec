@@ -77,3 +77,5 @@ class DomainSimplificationPass(Transform):
                 ir.Add(ir.IntT(), lo, idx)
             )
         return node.replace(T, dom, idx)
+
+    

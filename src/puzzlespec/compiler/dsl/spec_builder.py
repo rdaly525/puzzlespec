@@ -177,9 +177,9 @@ class PuzzleSpecBuilder:
     #    self._rules = ir.TupleLit(*new_rules)
  
     def _add_rules(self, *new_rules: ast.Expr):
-        print("Adding rules:")
-        for r in new_rules:
-            print(pretty(r.node))
+        #print("Adding rules:")
+        #for r in new_rules:
+        #    print(pretty(r.node))
         self._rules += [r.node for r in new_rules]
 
     def __iadd__(self, other: tp.Union[ast.BoolExpr, tp.Iterable[ast.BoolExpr]]) -> tp.Self:
@@ -200,7 +200,7 @@ class PuzzleSpecBuilder:
         return ast.TupleExpr.make(tuple(self._rules))
 
     # Freezes the spec and makes it immutable 
-    def build(self, name: str) -> PuzzleSpec:
+    def build(self, name: str, opt=False) -> PuzzleSpec:
         # 1: Resolve Placeholders (for bound bars/lambdas)
         ctx = Context()
         pm = PassManager(KindCheckingPass(), ResolveBoundVars(), verbose=True)
@@ -223,8 +223,9 @@ class PuzzleSpecBuilder:
         )
         #spec_obls = spec.extract_obligations()
         # 3: Optimize/canonicalize
-        spec_opt = spec.optimize()
-        return spec_opt
+        if opt:
+            spec = spec.optimize()
+        return spec
 
     #def print(self, rules_node=None):
     #    if rules_node is None:

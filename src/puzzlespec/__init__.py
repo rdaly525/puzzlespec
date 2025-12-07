@@ -16,8 +16,8 @@ from .compiler.dsl.ast_nd import fin, interval, nd_cartprod
 _nd = ['fin', 'interval', 'nd_cartprod']
 
 # constructors
-from .libs.std import fin, interval, sum, distinct, all_same, count, enum, U
-_constructors = ['fin', 'interval', 'sum', 'distinct', 'all_same', 'count', 'enum', 'U']
+from .libs.std import sum, distinct, all_same, count, U, make_enum, enumT
+_constructors = ['sum', 'distinct', 'all_same', 'count', 'U', 'make_enum', 'enumT']
 
 # vars
 from .libs.var_def import param, gen_var, decision_var, var, func_var

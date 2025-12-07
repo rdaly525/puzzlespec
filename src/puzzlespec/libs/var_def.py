@@ -24,16 +24,17 @@ def var(
     **kwargs
 ) -> ast.Expr:
     metadata = frozenset(kwargs.items())
-    err_prefix=f"ERROR In var {name}: "
     global _cnt
     if name is None:
         name = f"v{_cnt}"
         _cnt +=1
+    err_prefix=f"ERROR In var {name}: "
     if sort is not None and not isinstance(sort, ast.TExpr):
         raise ValueError(f"{err_prefix}sort must be a TExpr, got {type(sort)}")
     if sum((sort is None, dom is None)) != 1:
         raise ValueError(f"{err_prefix}Either codom or sort must be provided")
     if indices is None:
+        indices = ()
         bv_exprs = ()
     elif not isinstance(indices, tp.Tuple):
         bv_exprs = (indices,)
@@ -76,11 +77,15 @@ def var(
                 return sort.node
         bv0 = bvs[0]
         bv_dom = bv0.T.dom
+        # THIS CURRENTLY DEPENDS ON BV0
+        sort_nest = make_sort(bvs[1:])
+        new_bv = ir.BoundVarHOAS(bv0.T.T)
+        new_sort_nest = utils._substitute(sort_nest, bv0, new_bv)
         T = ir.FuncT(
             bv_dom,
             ir.LambdaTHOAS(
-                bv0,
-                make_sort(bvs[1:])
+                new_bv,
+                new_sort_nest
             )
         )
         return T

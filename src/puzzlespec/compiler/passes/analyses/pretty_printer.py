@@ -9,41 +9,50 @@ def pretty(node: ir.Node) -> str:
     pexpr = PrettyPrinterPass().run(node, ctx)
     return pexpr.text
 
-def pretty_spec(spec: ir.Spec, sym: SymTable) -> str:
+def pretty_spec(spec: ir.Spec, sym: SymTable, just_vars=True) -> str:
     ctx = Context(EnvsObj(sym))
     free_vars = get_vars(spec)
     cons_text = pretty(spec.cons)
     obls_text = pretty(spec.obls)
-    p_to_T = {}
-    g_to_T = {}
-    d_to_T = {}
-    for (sid, e) in sym.entries.items():
-        if e.invalid:
-            i_str = " (OLD)"
-        else:
-            i_str = ""
-        T_str = ""
+    if just_vars:
+        s = "Free Variables:\n"
         for v in free_vars:
-            if isinstance(v, ir.VarHOAS):
-                raise NotImplementedError()
-            if v.sid == sid:
-                T_str = pretty(v.T)
-        if e.get('role') == 'P':
-            p_to_T[e.name] = T_str + i_str
-        elif e.get('role') == 'G':
-            g_to_T[e.name] = T_str + i_str
-        elif e.get('role') == 'D':
-            d_to_T[e.name] = T_str + i_str
-    s = "Params:\n"        
-    for pname, T in p_to_T.items():
-        s += f"    {pname}: {T}\n"
-    s += "Gen vars:\n"
-    for gname, T in g_to_T.items():
-        s += f"    {gname}: {T}\n"
-    s += "Decision vars:\n"
-    for dname, T in d_to_T.items():
-        s += f"    {dname}: {T}\n"
-    s += f"Spec:\n  Constraints:\n{cons_text}\n  Obligations:\n{obls_text}\n"
+            s += f"    {v.name} : {pretty(v.T)}\n"
+        s += "Constraints:\n"
+        s += cons_text
+        return s
+
+    else:
+        p_to_T = {}
+        g_to_T = {}
+        d_to_T = {}
+        for (sid, e) in sym.entries.items():
+            if e.invalid:
+                i_str = " (OLD)"
+            else:
+                i_str = ""
+            T_str = ""
+            for v in free_vars:
+                if isinstance(v, ir.VarHOAS):
+                    raise NotImplementedError()
+                if v.sid == sid:
+                    T_str = pretty(v.T)
+            if e.get('role') == 'P':
+                p_to_T[e.name] = T_str + i_str
+            elif e.get('role') == 'G':
+                g_to_T[e.name] = T_str + i_str
+            elif e.get('role') == 'D':
+                d_to_T[e.name] = T_str + i_str
+        s = "Params:\n"        
+        for pname, T in p_to_T.items():
+            s += f"    {pname}: {T}\n"
+        s += "Gen vars:\n"
+        for gname, T in g_to_T.items():
+            s += f"    {gname}: {T}\n"
+        s += "Decision vars:\n"
+        for dname, T in d_to_T.items():
+            s += f"    {dname}: {T}\n"
+        s += f"Spec:\n  Constraints:\n{cons_text}\n  Obligations:\n{obls_text}\n"
     return s
 
 class PrettyPrintedExpr(AnalysisObject):
@@ -189,7 +198,7 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.RefT)
     def _(self, node: ir.RefT):
         T_str, dom_str = self.visit_children(node)
-        return f"Ref[{T_str} | {dom_str}]"
+        return f"{{{T_str} | {dom_str}}}"
 
     ##############################
     ## Core-level IR Value nodes (Used throughout entire compiler flow)
@@ -199,7 +208,7 @@ class PrettyPrinterPass(Analysis):
     def _(self, node: ir.VarRef) -> str:
         if hasattr(self, 'sym'):
             return self.sym.get_name(node.sid)
-        return f"v{node.sid}"
+        return f"{node.name}"
 
     @handles(ir.BoundVar)
     def _(self, node: ir.BoundVar) -> str:

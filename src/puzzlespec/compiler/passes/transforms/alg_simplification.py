@@ -223,15 +223,15 @@ class AlgebraicSimplificationPass(Transform):
             return ir.Apply(T, lam, arg)
         return node.replace(T, func, arg)
 
-    @handles(ir.Slice)
-    def _(self, node: ir.Slice):
-        T, dom, lo, hi = self.visit_children(node)
-        if isinstance(lo, ir.Lit) and isinstance(hi, ir.Lit):
-            lo_val, hi_val = lo.val, hi.val
-            assert lo_val < hi_val
-            elems = [ir.ElemAt(T.carT, dom, ir.Lit(ir.IntT(), val=i)) for i in range(lo_val, hi_val)]
-            return ir.DomLit(T, *elems)
-        return node.replace(T, dom, lo, hi)
+    #@handles(ir.Slice)
+    #def _(self, node: ir.Slice):
+    #    T, dom, lo, hi = self.visit_children(node)
+    #    if isinstance(lo, ir.Lit) and isinstance(hi, ir.Lit):
+    #        lo_val, hi_val = lo.val, hi.val
+    #        assert lo_val < hi_val
+    #        elems = [ir.ElemAt(T.carT, dom, ir.Lit(ir.IntT(), val=i)) for i in range(lo_val, hi_val)]
+    #        return ir.DomLit(T, *elems)
+    #    return node.replace(T, dom, lo, hi)
 
     @handles(ir.ElemAt)
     def _(self, node: ir.ElemAt):

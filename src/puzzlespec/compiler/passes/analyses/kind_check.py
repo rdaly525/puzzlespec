@@ -99,7 +99,7 @@ class KindCheckingPass(Analysis):
         carT, = self.visit_children(node)
         if not _is_type(carT):
             raise TypeError(f"DomT's carT must be a type, got {carT}")
-        T = ir.DomT(carT)
+        T = node.replace(carT)
         self.Tmap[node] = T
         return T
 
@@ -195,22 +195,20 @@ class KindCheckingPass(Analysis):
     def _(self, node: ir.Lambda):
         # Verify type is LambdaT
         lamT, body = node._children
-        lamT = self.visit(lamT)
-        if not _is_kind(lamT, (ir.LambdaT, ir.LambdaTHOAS)):
-            raise TypeError(f"Lambda must have LambdaT type, got {node.T}")
+        argT, resT = self.visit(lamT)
         # Verify body is a Value
         if not _is_value(body):
             raise TypeError(f"Lambda body must be a Value, got {body}")
         # Push parameter type onto bound context for body checking
-        self.bctx.append(lamT.argT.T)
+        self.bctx.append(argT)
         # Visit body and get its type
         bodyT = self.visit(body)
         # Pop bound context
         self.bctx.pop()
         # Verify body type matches LambdaT result type
-        if not _is_same_kind(bodyT, lamT.resT):
-            raise TypeError(f"Lambda body type {bodyT} does not match LambdaT result type {lamT.resT}")
-        T = lamT
+        if not _is_same_kind(bodyT, resT):
+            raise TypeError(f"Lambda body type {bodyT} does not match LambdaT result type {resT}")
+        T = ir.ArrowT(argT, resT)
         self.Tmap[node] = T
         return T
 
@@ -641,8 +639,8 @@ class KindCheckingPass(Analysis):
         if len(branchesT) != len(scrutT.elemTs):
             raise TypeError(f"Match branches count {len(branchesT)} does not match sum type count {len(scrutT.elemTs)}")
         for i, (sum_elem_T, branch_T) in enumerate(zip(scrutT.elemTs, branchesT)):
-            if not _is_kind(branch_T, (ir.LambdaT, ir.LambdaTHOAS)):
-                raise TypeError(f"Match branch {i} must be lambdaT matching sum component {sum_elem_T} to match result type {T}. Got {branch_T}")
+            if not _is_kind(branch_T, ir.ArrowT):
+                raise TypeError(f"Match branch {i} must be arrowT")
             # Verify branch argument type matches sum component
             if not _is_same_kind(branch_T.argT, sum_elem_T):
                 raise TypeError(f"Match branch {i} argument type {branch_T.argT} does not match sum component {sum_elem_T}")
@@ -1017,13 +1015,13 @@ class KindCheckingPass(Analysis):
 
     @handles(ir.AllSame)
     def _(self, node: ir.AllSame):
-        T, funcT = self.visit_children(node)
+        T, arrT = self.visit_children(node)
         # Verify type is BoolT
         if not _is_kind(T, ir.BoolT):
             raise TypeError(f"AllSame must have BoolT type, got {T}")
         # Verify function argument is a Value with FuncT type
-        if not _is_kind(funcT, ir.FuncT):
-            raise TypeError(f"AllSame expects FuncT argument, got {funcT}")
+        if not _is_kind(arrT, ir.ArrowT):
+            raise TypeError(f"AllSame expects FuncT argument, got {arrT}")
         self.Tmap[node] = T
         return T
 

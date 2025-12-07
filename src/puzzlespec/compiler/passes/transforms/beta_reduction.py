@@ -8,22 +8,23 @@ from ...dsl.utils import _substitute
 import typing as tp
 from ..analyses.pretty_printer import pretty
 
-# High level algortihm:
-# add 1 to all bound vars in arg
-# Do substition: body[BV0 -> (arg+1)]
-# do body - 1
-class BetaReductionPass(Transform):
-    enable_memoization = False
-    requires: tp.Tuple[type, ...] = ()
-    produces: tp.Tuple[type, ...] = ()
-    name = "beta_reduction"
-
 
 def beta_reduce(node: ir.Node):
     p = BetaReductionPass()
     ctx = Context()
     return p.run(node, ctx)
 
+def applyT(lamT: ir.Node, arg: ir.Value):
+    assert isinstance(lamT, (ir.LambdaT, ir.LambdaTHOAS))
+    assert isinstance(arg, ir.Value)
+    appT = ir.ApplyT(lamT, arg)
+    T = beta_reduce(appT)
+    return T
+
+# High level algortihm:
+# add 1 to all bound vars in arg
+# Do substition: body[BV0 -> (arg+1)]
+# do body - 1
 class BetaReductionPass(Transform):
     enable_memoization = False
     requires: tp.Tuple[type, ...] = ()
@@ -104,19 +105,30 @@ class BetaReductionPass(Transform):
     @handles(ir.ApplyT)
     def _(self, node: ir.ApplyT):
         lamT, arg = node._children
-        assert isinstance(lamT, ir.LambdaT)
         assert isinstance(arg, ir.Value)
-        _, resT = lamT._children
-        # 1. shift argument up by 1 for the binder we’re eliminating
-        arg_p1 = self.shift(arg, +1, cutoff=0)
+        if isinstance(lamT, ir.LambdaT):
+            _, resT = lamT._children
+            # 1. shift argument up by 1 for the binder we’re eliminating
+            arg_p1 = self.shift(arg, +1, cutoff=0)
 
-        # 2. substitute for "0" (j=0) in body
-        resT_sub = self.subst(resT, 0, arg_p1, depth=0)
+            # 2. substitute for "0" (j=0) in body
+            resT_sub = self.subst(resT, 0, arg_p1, depth=0)
 
-        # 3. shift everything down by 1 (remove the binder)
-        resT_m1 = self.shift(resT_sub, -1, cutoff=0)
-        return resT_m1
-
+            # 3. shift everything down by 1 (remove the binder)
+            resT_m1 = self.shift(resT_sub, -1, cutoff=0)
+            return resT_m1
+        else:
+            assert isinstance(lamT, ir.LambdaTHOAS)
+            bv, resT = lamT._children
+            #print("HOAST SUB")
+            #print("BV", pretty(bv))
+            #print("REST:")
+            #print(pretty(resT))
+            sub = _substitute(resT, bv, arg)
+            #print("POSTSUB_BOD")
+            #print(pretty(sub))
+            #print("*"*20)
+            return sub
 
     @handles(ir.Apply)
     def _(self, node: ir.Apply):
@@ -138,13 +150,13 @@ class BetaReductionPass(Transform):
         else:
             assert isinstance(lam, ir.LambdaHOAS)
             T, bv, body = lam._children
-            print("HOAS SUB")
-            print("BV", pretty(bv))
-            print("BODY:")
-            print(pretty(body))
+            #print("HOAS SUB")
+            #print("BV", pretty(bv))
+            #print("BODY:")
+            #print(pretty(body))
             sub = _substitute(body, bv, arg)
-            print("POSTSUB_BOD")
-            print(pretty(sub))
-            print("*"*20)
+            #print("POSTSUB_BOD")
+            #print(pretty(sub))
+            #print("*"*20)
             return sub
             

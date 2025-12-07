@@ -94,4 +94,4 @@ class ResolveFreeVars(Transform):
     def _(self, v: ir.VarHOAS):
         new_T, = self.visit_children(v)
         sid = self.sym.new_var(v.name, v.metadata)
-        return ir.VarRef(new_T, sid)
+        return ir.VarRef(new_T, sid, v.name)

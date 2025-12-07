@@ -7,11 +7,14 @@ from ..compiler.dsl import ir
 
 def build_unruly_spec() -> PuzzleSpec:
     Int = ast.IntType(ir.IntT())
-    Bool = ast.BoolType(ir.BoolT())
     p = PuzzleSpecBuilder()
     
-    # Structural parameters
-    nR, nC = v.param(sort=Int, name='nR'), v.param(sort=Int, name='nC')
+    # Structural parameters + constraints
+    #nR = v.var(name='nR', dom = Int.U.restrict(lambda nR: nR%2==0))
+    #nC = v.var(name='nC', dom = Int.U.restrict(lambda nC: nC%2==0))
+
+    nR = v.param(name='nR', sort=Int)
+    nC = v.param(name='nC', sort=Int)
 
     # Structural constraints
     #p += [nR % 2 == 0, nC % 2 == 0]
@@ -38,28 +41,38 @@ def build_unruly_spec() -> PuzzleSpec:
     #)
 
     ### Equal balance of colors in all rows and cols
-    #c1 =color.rows().forall(lambda crow: std.count(crow, lambda v: v==BW_enum.B) == nC // 2)
-    #print(c1)
-    #print(c1.simplify)
-    #assert 0
-    dis = grid.cells().rows().forall(lambda row: std.distinct(color[row]))
-    print(dis)
-    #print(dis.simplify)
-    #assert 0
     #p += grid.cells().rows().forall(lambda row: std.count(color[row], lambda v: v==BW_enum.B) == nC // 2)
     #p += grid.cells().cols().forall(lambda col: std.count(color[col], lambda v: v==BW_enum.B) == nR // 2)
 
     ### No triple of the same color
-    p += grid.cells().rows().forall(
-        lambda line: line.windows(size=3, stride=1).forall(
-            lambda w: ~std.all_same(color[w])
-        )
-    )
-    p += grid.cells().cols().forall(
-        lambda line: line.windows(size=3, stride=1).forall(
-            lambda w: ~std.all_same(color[w])
-        )
-    )
+    def linelam(line):
+        print(line)
+        print(line.simplify)
+        def wlam(w):
+            print("WINDOW")
+            print(w.T)
+            print(w)
+            print("WINDOW SIMP")
+            print(w.T.simplify)
+            print(w.simplify)
+            return ~std.all_same(w)
+        return line.windows(size=3,stride=1).forall(wlam)
+    p += color.rows().forall(linelam)
+    #p += color.rows().forall(
+    #    lambda line: line.windows(size=3, stride=1).forall(
+    #        lambda w: ~std.all_same(w)
+    #    )
+    #)
+    #p += grid.cells().rows().forall(
+    #    lambda line: line.windows(size=3, stride=1).forall(
+    #        lambda w: ~std.all_same(color[w])
+    #    )
+    #)
+    #p += grid.cells().cols().forall(
+    #    lambda line: line.windows(size=3, stride=1).forall(
+    #        lambda w: ~std.all_same(color[w])
+    #    )
+    #)
 
 
     # Build the final immutable spec
