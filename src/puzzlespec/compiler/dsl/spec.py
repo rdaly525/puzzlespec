@@ -12,7 +12,7 @@ from ..passes.transforms.refine import RefineSimplify
 from ..passes.transforms.cse import CSE
 #from ..passes.analyses.constraint_categorizer import ConstraintCategorizer, ConstraintCategorizerVals
 from ..passes.analyses.getter import VarGetter, VarSet, get_vars
-from ..passes.analyses.kind_check import KindCheckingPass, TypeMap 
+from ..passes.analyses.type_check import TypeCheckingPass, TypeMap 
 #from ..passes.analyses.ast_printer import AstPrinterPass, PrintedAST
 from ..passes.pass_base import AnalysisObject, Analysis
 class PuzzleSpec:
@@ -64,7 +64,7 @@ class PuzzleSpec:
 
     def _kind_check(self):
         ctx = Context(self.envs_obj)
-        self.analyze([KindCheckingPass()], ctx=ctx)
+        self.analyze([TypeCheckingPass()], ctx=ctx)
 
     # applies passes, copies the sym table, returns a new spec
     def transform(
@@ -101,7 +101,7 @@ class PuzzleSpec:
     def optimize(self) -> 'PuzzleSpec':
         ctx = Context(self.envs_obj)
         analysis_map = {
-            TypeMap: KindCheckingPass()
+            TypeMap: TypeCheckingPass()
         }
 
         opt_passes = [

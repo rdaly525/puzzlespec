@@ -87,7 +87,7 @@ def simplify(node: ir.Node) -> ir.Node:
     assert 0
     ctx = Context(self.envs_obj)
     analysis_map = {
-        TypeMap: KindCheckingPass()
+        TypeMap: TypeCheckingPass()
     }
 
     opt_passes = [

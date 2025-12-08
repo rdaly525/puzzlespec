@@ -29,7 +29,7 @@ class Node:
         fields = tuple(getattr(self, field, None) for field in self._fields)
         #assert None not in fields
         priority = NODE_PRIORITY[(type(self))]
-        key = (-priority, self.__class__.__name__, fields, child_keys)
+        key = (priority, self.__class__.__name__, fields, child_keys)
         return key
 
     def __iter__(self):
@@ -404,6 +404,8 @@ class Lit(Value):
     _fields = ("val",)
     _numc = 1
     def __init__(self, T: Type, val: tp.Any):
+        if val == -9:
+            raise ValueError()
         self.val = val
         super().__init__(T)
 

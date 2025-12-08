@@ -153,7 +153,7 @@ class PrettyPrinterPass(Analysis):
         
         # count existing element binders in the env
         if t:
-            p = 't'
+            p = 'i'
         else:
             p = 'x'
         name = f"{p}{self.cnt}"
@@ -553,7 +553,8 @@ class PrettyPrinterPass(Analysis):
 
         # Lambda returns (var_name, body_str) tuple
         body_formatted = self._indent_expr(body_str)
-        return f"Map {var_name} ∈ {dom_expr}: [\n{body_formatted}\n]"
+        #return f"Map {var_name} ∈ {dom_expr}: [\n{body_formatted}\n]"
+        return f"({var_name} ∈ {dom_expr}) -> [\n{body_formatted}\n]"
         #return f"[{body_str} | {var_name} ∈ {dom_expr}]"
 
     @handles(ir.FuncLit)

@@ -35,12 +35,18 @@ class VarGetter(Analysis):
     def _(self, node: ir.VarRef):
         return set([node])
 
+def get_closed_vars(node: ir.Node):
+    ctx = Context()
+    varget = ClosedVarGetter()(node, ctx)
+    return varget.vars
+
 class ClosedVarGetter(Analysis):
     requires = ()
     produces = (VarSet,)
-    name = 'open_var_getter'
+    name = 'closed_var_getter'
 
     def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
+        self.bvars = []
         return VarSet(self.visit(root))
 
     def visit(self, node: ir.Node):
@@ -50,9 +56,13 @@ class ClosedVarGetter(Analysis):
             val |= pset
         return val       
 
-    @handles(ir.VarRef)
-    def _(self, node: ir.VarRef):
-        return set([node])
+    @handles(ir.LambdaHOAS)
+    def _(self, node: ir.LambdaHOAS):
+        T_vars, bv_vars, body_vars = self.visit_children(node)
+        vars = (T_vars | body_vars | bv_vars) | set((node._children[1]))
+        return vars
+
+
 
 
 

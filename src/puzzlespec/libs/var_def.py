@@ -1,5 +1,6 @@
 from ..compiler.dsl import ast, ir, utils
 import typing as tp
+from ..compiler.passes.analyses.getter import get_closed_vars
 
 #def var(sort: ast.TExpr, name=None, **kwargs):
 #    metadata = frozenset(kwargs.items())
@@ -51,9 +52,9 @@ def var(
         if len(diff) > 0:
             raise ValueError(f"{err_prefix}sort {sort} must only depend on {indices}, got {diff}")
     if dom is not None:
-        dom_bvs = utils._get_bvs(dom.node)
-        diff = dom_bvs - set(bvs)
-        if len(diff) > 0:
+        #dom_bvs = utils._get_bvs(dom.node)
+        dom_bvs = get_closed_vars(dom.node)
+        if any(bv in dom_bvs for bv in bvs):
             raise ValueError(f"{err_prefix}refinement domain {dom} must only depend on {indices}, got {diff}")
 
     ## Do dependency analysis
@@ -105,6 +106,7 @@ def func_var(
     name: tp.Optional[str]=None,
     **kwargs
 ):
+
     if indices is None:
         indices = ()
     return dom.map(lambda i: var(

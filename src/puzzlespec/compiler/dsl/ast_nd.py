@@ -1,7 +1,7 @@
 from __future__ import annotations
 import typing as tp
 from . import ir, ast
-from ..passes.analyses.kind_check import get_rawT
+from ..passes.analyses.type_check import get_rawT
 
 def fin(n: ast.IntOrExpr):
     n = ast.IntExpr.make(n)
@@ -181,7 +181,7 @@ class NDSeqDomainExpr(ast.DomainExpr):
         return self.axes_doms[1].map(lambda c: self[:,c])
 
     def __getitem__(self, val: tp.Any) -> NDArrayExpr:
-        if not isinstance(val, tuple) and len(val) != self.rank:
+        if isinstance(val, tuple) and len(val) != self.rank:
             raise ValueError(f"Getitem must have length {self.rank}")
         funcs: tp.List[ast.FuncExpr] = []
         offset=0
@@ -298,9 +298,22 @@ class NDArrayExpr(ast.FuncExpr):
             lambda tile_dom: self[tile_dom]
         )
 
-    def __getitem__(self, dom: ast.DomainExpr) -> ast.FuncExpr:
-        return wrap_nd(super().__getitem__(dom))
-
+    def __getitem__(self, val: tp.Any) -> NDArrayExpr:
+        if isinstance(val, tuple):
+            if len(val) != self.rank:
+                raise ValueError(f"Getitem must have length {self.rank}")
+            funcs: tp.List[ast.FuncExpr] = []
+            offset=0
+            for axis, dom in zip(self.axes, self.domain.doms):
+                if axis:
+                    v = val[offset]
+                    func = dom[v]
+                    offset +=1
+                else:
+                    func = dom
+                funcs.append(func)
+            return nd_cartprod(*funcs)
+        return super().__getitem__(val)
 
 def lift_to_dom(val: ast.Expr) -> ast.DomainExpr:
     domT = ir.DomT(carT=val.T.node, _elemAt=True)
@@ -315,12 +328,9 @@ def nd_cartprod(*dfs: tp.Union[ast.DomainExpr, ast.FuncExpr]) -> tp.Union[ast.Tu
         funcs: tp.List[ast.FuncExpr] = []
         for df in dfs:
             if isinstance(df, ast.FuncExpr):
-                #if not isinstance(df, ArrayExpr):
-                #    raise ValueError
                 funcs.append(df)
             elif isinstance(df, ast.DomainExpr):
                 return df.identity
-                #raise NotImplementedError("Cannot handle DomainExpr in nd_cartprod")
             else:
                 funcs.append(lift_to_func(df))
         dom_prod = nd_cartprod(*(func.domain for func in funcs))

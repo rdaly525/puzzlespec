@@ -1,5 +1,5 @@
 from ..compiler.dsl import ast, ir, utils
-from ..compiler.passes.analyses.kind_check import get_rawT
+from ..compiler.passes.analyses.type_check import get_rawT
 import typing as tp
 
 def optional(T: ast.TExpr) -> ast.TExpr:

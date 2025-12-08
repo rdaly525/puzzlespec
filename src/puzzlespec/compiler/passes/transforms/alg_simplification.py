@@ -40,7 +40,7 @@ class AlgebraicSimplificationPass(Transform):
             case (ir.Neg(_, b)):
                 return b
             case (ir.Sum(terms)):
-                return ir.Prod(
+                return ir.Sum(
                     ir.IntT(),
                     *(ir.Neg(ir.IntT(), t) for t in terms[1:])
                 )
@@ -60,13 +60,13 @@ class AlgebraicSimplificationPass(Transform):
         else:
             children = non_const_children
         # Remove all (..., x, -x, ...)
-        neg_children, non_neg_children = _partition(children, lambda c: isinstance(c, ir.Neg))
-        children = non_neg_children
-        for neg_child in neg_children:
-            if neg_child._children[1] in children:
-                children.remove(neg_child._children[1])
-            else:
-                children.append(neg_child)
+        #neg_children, non_neg_children = _partition(children, lambda c: isinstance(c, ir.Neg))
+        #children = non_neg_children
+        #for neg_child in neg_children:
+        #    if neg_child._children[1] in children:
+        #        children.remove(neg_child._children[1])
+        #    else:
+        #        children.append(neg_child)
 
         if len(children) == 1:
             return children[0]
@@ -81,10 +81,10 @@ class AlgebraicSimplificationPass(Transform):
         const_children, non_const_children = _partition(children, lambda c: isinstance(c, ir.Lit))
         const_val = math.prod([c.val for c in const_children])
         # Extract all the negatives and put it on the const_val
-        num_negs = sum(isinstance(c, ir.Neg) for c in non_const_children)
-        non_const_children = [c._children[1] if isinstance(c, ir.Neg) else c for c in non_const_children]
-        if num_negs%2==1:
-            const_val = -const_val
+        #num_negs = sum(isinstance(c, ir.Neg) for c in non_const_children)
+        #non_const_children = [c._children[1] if isinstance(c, ir.Neg) else c for c in non_const_children]
+        #if num_negs%2==1:
+        #    const_val = -const_val
         match const_val:
             case 0:
                 return ir.Lit(T, 0)

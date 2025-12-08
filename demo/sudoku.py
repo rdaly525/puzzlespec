@@ -1,50 +1,103 @@
-from puzzlespec import fin, var, func_var, Int, PuzzleSpecBuilder, VarSetter
+from puzzlespec import fin, var, func_var, Unit, Int, U, PuzzleSpecBuilder, VarSetter
 from puzzlespec.libs import std, optional as opt
 
 # Spec Builder
 p: PuzzleSpecBuilder = PuzzleSpecBuilder()
 
-# Define Parameters
+####################################
+# Define Parameters as *Variables* #
+####################################
+# Grid dim as N x N
 N = var(Int, name='N')
-box_dim = var(Int, name='box_dim')
 
-# Constraints on Parameters!
-p += (box_dim > 0) & (box_dim*box_dim==N)
+# Box size as sqrt(N)
+box_size = var(Int, name='box_size')
 
-# Alternatively using refinement types
-# box_dim = var(dom=Int.U.restrict(lambda bd: (bd > 0) & (bd*bd==N))
+# Constraints on parameters (N must be a perfect square)
+p += [box_size*box_size == N, box_size >= 0]
 
-# Value domain (1..N)
-Digits = std.range(1, N) # Domain of values {1..N}
+##############################
+# Domains are typed *values* #
+##############################
 
-# Grid structure
+# Domain for decision variables
+Digits = std.range(1, N) # [1..N)
+
+# Grid structure: Domain of Cell indices
 Cells = fin(N)*fin(N)
 
-# Decision variables
-cell_vals = func_var(dom=Cells, codom=Digits, name="cell_vals")
+#############################
+# Supports refinement types # 
+#############################
+# Alternate definition of box_size:  {i: Int | i >=0 & i*i==N}
+refinement_dom = U(Int).restrict(lambda i: (i >= 0) & (i*i==N))
+box_size_alt = var(dom=refinement_dom)
 
-# All values in each box, row, column, and Box are distinct
-p += cell_vals.tiles(size=[box_dim, box_dim], stride=[3,3]).forall(lambda region: std.distinct(region))
-p += cell_vals.cols().forall(lambda region: std.distinct(region))
-p += cell_vals.cols().forall(lambda region: std.distinct(region))
-# Givens
+#########################
+# Functions are *total* #
+#########################
+# variables can be functions
+cell_digits = func_var(dom=Cells, codom=Digits, name="cell_digits")
 
-# The Given clues of the puzzle
-DigitsOpt = opt.optional_dom(Digits) # Dom[𝟙] ⊎ Digits 
-givens = func_var(dom=Cells, codom=DigitsOpt, name="givens")
+##############################
+# Quantifcation over domains #
+##############################
+# Row constraint (numpy-style syntax)
+p += fin(N).forall(lambda r: std.distinct(cell_digits[Cells[r,:]]))
 
+# Alternate syntax
+p += cell_digits.cols().forall(lambda col_vals: std.distinct(col_vals))
 
-# Given vals must be consistent with cell_vals
+# Box constraint
+p += cell_digits.tiles(
+    #size=[box_size, box_size],
+    size=[3,3],
+    #stride=[box_size, box_size]
+    stride=[3,3]
+).forall(lambda box_vals: std.distinct(box_vals))
+
+#####################
+# Clues as Sum Type #
+#####################
+OptionalDigits = U(Unit) + Digits # Dom[𝟙] ⊎ Digits 
+givens = func_var(dom=Cells, codom=OptionalDigits, name="givens")
+
+# Given vals must be consistent with cell_digits
 p += Cells.forall(
-    lambda c: opt.fold(givens(c), on_none=True, on_some=lambda v: cell_vals(c)==v)
+    lambda c: givens(c).match(                # pattern match for clue
+        lambda _: True,                       # True if Unit
+        lambda v: cell_digits(c)==v # Same as cell_digit if given
+    )
 )
 
+spec = p.build("Sudoku")
+print("UNOPTIMIZED SPEC")
+print(spec)
+input()
+print("OPTIMIZED SPEC")
+print(spec.optimize())
+input()
+print("SETTING N=9")
+setter = VarSetter(spec)
+setter.N=9
+setter.box_size=3
+spec9 = setter.build()
+print(spec9.optimize())
+
+
+
+
+
+
+
+
+
 # German Whispers
-gw = True
+gw = False
 if gw:
     from puzzlespec.libs.topology import Grid2D
     grid = Grid2D(N, N)
-    whispers = fin(var(sort=Int, name='num_whispers')).map(
+    whispers = fin(var(sort=Int, name='num_gw')).map(
         lambda i: fin(var(sort=Int, indices=(i,), name='whisper_lens')).map(
             lambda j: var(dom=Cells, indices=(i, j), name='whispers_locs')
         )
@@ -60,19 +113,8 @@ if gw:
     # puzzle rule: neighboring whisper cells must have a difference of at least 5
     p += whispers.forall(
         lambda whisper: whisper.windows(2).forall(
-            lambda cells: abs(cell_vals(cells[0])-cell_vals(cells[1])) >= 5
+            lambda cells: abs(cell_digits(cells[0])-cell_digits(cells[1])) >= 5
         )
     )
 
-
-
-
-spec = p.build("Sudoku")
-print(spec)
-print("OPTIMIZED SPEC")
-print(spec.optimize())
-
-#setter = VarSetter(spec)
-#setter.N=9
-#spec9 = setter.build()
-#print(spec9.optimize())
+# API for directly assigning variables

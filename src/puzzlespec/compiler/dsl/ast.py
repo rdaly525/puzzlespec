@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from enum import Enum as _Enum
 from .utils import _is_kind, _is_same_kind, _has_bv, _substitute
 from ..passes.analyses.pretty_printer import pretty
-from ..passes.analyses.kind_check import get_rawT
+from ..passes.analyses.type_check import get_rawT
 from ..passes.transforms.beta_reduction import applyT
 
 @dataclass
