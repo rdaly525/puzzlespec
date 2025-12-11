@@ -7,6 +7,7 @@ from .utils import _is_kind, _is_same_kind, _has_bv, _substitute
 from ..passes.analyses.pretty_printer import pretty
 from ..passes.analyses.type_check import get_rawT
 from ..passes.transforms.beta_reduction import applyT
+from ..passes.transforms.resolve_vars import close_bound_vars
 
 @dataclass
 class TExpr:
@@ -36,7 +37,7 @@ class TExpr:
         return pretty(self._node)
 
     @property
-    def U(self):
+    def U(self) -> DomainExpr:
         return DomainExpr(ir.Universe(ir.DomT(self.node)))
 
     @property
@@ -390,9 +391,24 @@ class IntExpr(Expr):
         node = ir.Mul(ir.IntT(), self.node, other.node)
         return IntExpr(node)
 
+    def __pow__(self, other: int):
+        other = IntExpr.make(other)
+        from .ast_nd import fin
+        node = ir.ProdReduce(ir.IntT(), fin(other).map(lambda i: self).node)
+        return IntExpr(node)
+
     def __floordiv__(self, other: IntOrExpr) -> IntExpr:
         other = IntExpr.make(other)
         node = ir.Div(ir.IntT(), self.node, other.node)
+        return IntExpr(node)
+
+    def __truediv__(self, other: IntOrExpr) -> IntExpr:
+        other = IntExpr.make(other)
+        T = ir.RefT(
+            ir.IntT(),
+            dom = IntType(ir.IntT()).U.restrict(lambda v: v*other==self).node
+        )
+        node = ir.Div(T, self.node, other.node)
         return IntExpr(node)
 
     def __mod__(self, other: IntOrExpr) -> IntExpr:
@@ -506,10 +522,14 @@ class SumExpr(Expr):
     def T(self) -> SumType:
         return tp.cast(SumType, self._T)
  
-    def match(self, *branches) -> Expr:
+    def match(self, *branches: tp.Callable) -> Expr:
         if len(branches) != len(self.T):
             raise ValueError(f"Need a branch for each element of the sum type, got {len(branches)} branches for {len(self.T)} elements")
-        branch_exprs = [make_lambda(lam_expr, sort=T.node) for lam_expr, T in zip(branches, self.T.elemTs)]
+        branch_exprs = []
+        for lam_fn, T in zip(branches, self.T.elemTs):
+            bv = wrap(ir.BoundVarHOAS(T.node, closed=False))
+            lam_expr = make_lambda(lam_fn, bv)
+            branch_exprs.append(lam_expr)
         lamTs = [e.T for e in branch_exprs]
         bv = wrap(ir.BoundVarHOAS(lamTs[0].argT.node))
         match_T = lamTs[0].resT(bv)
@@ -529,18 +549,34 @@ class LambdaExpr(Expr):
     def T(self) -> LambdaType:
         return tp.cast(LambdaType, self._T)
 
-def make_lambda(fn: tp.Callable, sort: ir.Type) -> LambdaExpr:
-    bv_node = ir.BoundVarHOAS(sort)
-    bv_expr = wrap(bv_node)
-    ret_expr = fn(bv_expr)
-    ret_expr = Expr.make(ret_expr)
-    # new bound_var for T
-    #t_bv_node = ir.BoundVarHOAS(sort)
-    #retT = _substitute(ret_expr.T.node, bv_node, t_bv_node)
-    #lamT = ir.LambdaTHOAS(t_bv_node, retT)
-    retT = ret_expr.T.node
-    lamT = ir.LambdaTHOAS(bv_node, retT)
-    lambda_node = ir.LambdaHOAS(lamT, bv_node, ret_expr.node)
+def _call_fn(fn: tp.Callable, expr: Expr) -> Expr:
+    fn_args = fn.__code__.co_argcount
+    if fn_args==1:
+        ret = fn(expr)
+    elif isinstance(expr.T, TupleType) and len(expr.T)==fn_args:
+        args = [expr[i] for i in range(fn_args)]
+        ret = fn(*args)
+    else:
+        raise ValueError("Function has wrong number of arguments for sort")
+    return Expr.make(ret)
+
+
+
+def make_lambda(fn: tp.Callable, bv: Expr) -> LambdaExpr:
+    assert isinstance(bv.node, ir.BoundVarHOAS)
+    assert not bv.node.closed
+    body_expr = _call_fn(fn, bv)
+    return _make_lambda(bv, body_expr)
+
+def _make_lambda(bv: Expr, body: Expr) -> LambdaExpr:
+    assert isinstance(bv.node, ir.BoundVarHOAS)
+    retT = body.T.node
+    # Close the 'bv's in both the return type and the body
+    retT = close_bound_vars(retT, bv.node)
+    body_node = close_bound_vars(body.node, bv.node)
+    bv_closed = ir.BoundVarHOAS(bv.node.T, closed=True, name=bv.node.name)
+    lamT = ir.LambdaTHOAS(bv_closed, retT)
+    lambda_node = ir.LambdaHOAS(lamT, bv_closed, body_node)
     return LambdaExpr(lambda_node)
 
 def cartprod(*doms: DomainExpr) -> DomainExpr:
@@ -569,7 +605,6 @@ def coproduct(*doms: DomainExpr) -> DomainExpr:
 class DomainExpr(Expr):
     def __init__(self, node: ir.Value):
         super().__init__(node)
-        #self._fin = isinstance(node, ir.Fin)
 
     @property
     def T(self) -> _DomainType:
@@ -616,11 +651,18 @@ class DomainExpr(Expr):
     def __contains__(self, elem: Expr) -> BoolExpr:
         raise ValueError("Cannot use 'in'. Use dom.contains(val). Blame python for not being able to do this")
 
-    def map(self, fn: tp.Callable) -> FuncExpr:
+    def __iter__(self):
+        carT_ref = ir.RefT(self.T.carT.node, self.node)
+        bv = ir.BoundVarHOAS(carT_ref, closed=False, name=None)
+        yield wrap(bv)
+
+    def map(self, fn: tp.Callable=None) -> FuncExpr:
         if isinstance(self.T, ImageType):
             raise NotImplementedError("Cannot map over an image")
-        carT_ref = ir.RefT(self.T.carT.node, self.node)
-        lambda_expr = make_lambda(fn, sort=carT_ref)
+        if fn is None:
+            fn = lambda i: i
+        bv = [i for i in self][0]
+        lambda_expr = make_lambda(fn, bv)
         lamT = lambda_expr.T
         T = ir.FuncT(self.node, lamT.node)
         node = ir.Map(T, self.node, lambda_expr.node)
@@ -643,6 +685,9 @@ class DomainExpr(Expr):
         #    raise ValueError(f"Exists predicate must return Bool, got {func_expr.T.piT.resT}")
         node = ir.Exists(ir.BoolT(), func_expr.node)
         return BoolExpr(node)
+
+    def empty_func(self) -> EmptyFuncExpr:
+        return EmptyFuncExpr(self)
 
 
 class FuncExpr(Expr):
@@ -675,7 +720,7 @@ class FuncExpr(Expr):
 
     # Func[Dom(A) -> B] -> (B -> C) -> Func[Dom(A) -> C]
     def map(self, fn: tp.Callable) -> FuncExpr:
-        return self.domain.map(lambda a: fn(self.apply(a)))
+        return self.domain.map(lambda a: _call_fn(fn, self.apply(a)))
 
     # Func[Dom(A) -> B] -> Func[Dom(A) -> (A, B)]
     def enumerate(self) -> FuncExpr:
@@ -685,11 +730,17 @@ class FuncExpr(Expr):
     def imap(self, fn: tp.Callable) -> 'FuncExpr':
         return self.enumerate().map(fn)
 
-    def forall(self, pred_fun: tp.Callable) -> BoolExpr:
-        return self.domain.forall(lambda a: pred_fun(self.apply(a)))
+    def forall(self, pred_fun: tp.Callable=None) -> BoolExpr:
+        if pred_fun is None:
+            return self.domain.forall(lambda a: self.apply(a))
+        else:
+            return self.map(pred_fun).forall()
 
-    def exists(self, pred_fun: tp.Callable) -> BoolExpr:
-        return self.domain.exists(lambda a: pred_fun(self.apply(a)))
+    def exists(self, pred_fun: tp.Callable=None) -> BoolExpr:
+        if pred_fun is None:
+            return self.domain.forall(lambda a: self.apply(a))
+        else:
+            return self.map(pred_fun).forall()
 
     def size(self) -> IntExpr:
         return self.domain.size
@@ -711,6 +762,110 @@ class FuncExpr(Expr):
         if not isinstance(dom, DomainExpr):
             raise ValueError(f"Can only index into funcs with a domain (i.e., a gather).\nFunc: {self}\n Got: {dom}")
         return self.gather(dom)
+
+
+class EmptyFuncExpr(FuncExpr):
+    def __init__(self, dom: DomainExpr):
+        super().__init__(dom.identity.node)
+        self.dom = dom
+        self.empty = True
+
+    def __setitem__(self, k, val):
+        val = Expr.make(val)
+        if (isinstance(k, Expr) and isinstance(k.node, ir.BoundVarHOAS)):
+            # verify it came from correct dom
+            T = k.node.T
+            if isinstance(T, ir.RefT) and T.dom._key == self.dom.node._key:
+                lam_e = _make_lambda(k, val)
+                funcT = ir.FuncT(self.dom.node, lam_e.T.node)
+                func_node = ir.Map(funcT, self.dom.node, lam_e.node)
+                self.node = func_node
+                self.empty = False
+                return
+        raise ValueError(f"Must only set with iterator var produced from {self.dom}")
+
+    @property
+    def T(self) -> FuncType:
+        if self.empty:
+            raise ValueError("Must set EmptyFunc before using")
+        return super().T
+
+    @property
+    def domain(self) -> DomainExpr:
+        if self.empty:
+            raise ValueError("Must set EmptyFunc before using")
+        return super().domain
+
+    @property
+    def image(self) -> DomainExpr:
+        if self.empty:
+            raise ValueError("Must set EmptyFunc before using")
+        return super().image
+
+    def apply(self, arg: Expr) -> Expr:
+        if self.empty:
+            raise ValueError("Must set EmptyFunc before using")
+        return super().apply(arg)
+
+    # Func[Dom(A) -> B] -> (B -> C) -> Func[Dom(A) -> C]
+    def map(self, fn: tp.Callable) -> FuncExpr:
+        if self.empty:
+            raise ValueError("Must set EmptyFunc before using")
+        return super().map(fn)
+
+    # Func[Dom(A) -> B] -> Func[Dom(A) -> (A, B)]
+    def enumerate(self) -> FuncExpr:
+        if self.empty:
+            raise ValueError("Must set EmptyFunc before using")
+        return super().enumerate()
+
+    # Func[Dom(A) -> B] -> ((A,B) -> C) -> Func[Dom(A) -> C]
+    def imap(self, fn: tp.Callable) -> 'FuncExpr':
+        if self.empty:
+            raise ValueError("Must set EmptyFunc before using")
+        return super().imap(fn)
+
+    def forall(self, pred_fun: tp.Callable=None) -> BoolExpr:
+        if self.empty:
+            raise ValueError("Must set EmptyFunc before using")
+        return super().forall(pred_fun)
+
+    def exists(self, pred_fun: tp.Callable=None) -> BoolExpr:
+        if self.empty:
+            raise ValueError("Must set EmptyFunc before using")
+        return super().exists(pred_fun)
+
+    def size(self) -> IntExpr:
+        if self.empty:
+            raise ValueError("Must set EmptyFunc before using")
+        return super().size()
+
+    def sum(self) -> IntExpr:
+        if self.empty:
+            raise ValueError("Must set EmptyFunc before using")
+        return super().sum()
+    
+    def __contains__(self, elem: Expr) -> BoolExpr:
+        if self.empty:
+            raise ValueError("Must set EmptyFunc before using")
+        return super().__contains__(elem)
+
+    def __call__(self, val: Expr) -> Expr:
+        if self.empty:
+            raise ValueError("Must set EmptyFunc before using")
+        return super().__call__(val)
+    
+    def gather(self, dom: DomainExpr):
+        if self.empty:
+            raise ValueError("Must set EmptyFunc before using")
+        return super().gather(dom)
+
+    # Basically a 'gather'
+    def __getitem__(self, dom: DomainExpr) -> FuncExpr:
+        if self.empty:
+            raise ValueError("Must set EmptyFunc before using")
+        return super().__getitem__(dom)
+
 
 def wrap(node: ir.Node) -> Expr:
     T = wrapT(node.T)

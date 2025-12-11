@@ -1,5 +1,5 @@
 from puzzlespec import fin, var, func_var, Unit, Int, U, PuzzleSpecBuilder, VarSetter
-from puzzlespec.libs import std, optional as opt
+from puzzlespec.libs import std
 
 # Spec Builder
 p: PuzzleSpecBuilder = PuzzleSpecBuilder()
@@ -11,33 +11,32 @@ p: PuzzleSpecBuilder = PuzzleSpecBuilder()
 N = var(Int, name='N')
 
 # Box size as sqrt(N)
-box_size = var(Int, name='box_size')
-
+# box_size = var(Int, name='box_size')
 # Constraints on parameters (N must be a perfect square)
-p += [box_size*box_size == N, box_size >= 0]
+#p += [box_size*box_size == N, box_size >= 0]
 
 ##############################
 # Domains are typed *values* #
 ##############################
 
-# Domain for decision variables
-Digits = std.range(1, N) # [1..N)
-
 # Grid structure: Domain of Cell indices
 Cells = fin(N)*fin(N)
+
+# Domain for decision variables
+Digits = std.range(1, N+1) # [1..N)
 
 #############################
 # Supports refinement types # 
 #############################
 # Alternate definition of box_size:  {i: Int | i >=0 & i*i==N}
 refinement_dom = U(Int).restrict(lambda i: (i >= 0) & (i*i==N))
-box_size_alt = var(dom=refinement_dom)
+box_size = var(dom=refinement_dom, name='box_size')
 
 #########################
 # Functions are *total* #
 #########################
-# variables can be functions
-cell_digits = func_var(dom=Cells, codom=Digits, name="cell_digits")
+# variables can be functions.
+cell_digits = func_var(dom=Cells, codom=Digits, name="cell_digits") # Cells -> Digits
 
 ##############################
 # Quantifcation over domains #
@@ -50,10 +49,8 @@ p += cell_digits.cols().forall(lambda col_vals: std.distinct(col_vals))
 
 # Box constraint
 p += cell_digits.tiles(
-    #size=[box_size, box_size],
-    size=[3,3],
-    #stride=[box_size, box_size]
-    stride=[3,3]
+    size=(box_size, box_size),
+    stride=(box_size, box_size)
 ).forall(lambda box_vals: std.distinct(box_vals))
 
 #####################
@@ -64,23 +61,22 @@ givens = func_var(dom=Cells, codom=OptionalDigits, name="givens")
 
 # Given vals must be consistent with cell_digits
 p += Cells.forall(
-    lambda c: givens(c).match(                # pattern match for clue
-        lambda _: True,                       # True if Unit
+    lambda c: givens(c).match(      # pattern match for clue
+        lambda _: True,             # True if Unit
         lambda v: cell_digits(c)==v # Same as cell_digit if given
     )
 )
 
 spec = p.build("Sudoku")
-print("UNOPTIMIZED SPEC")
-print(spec)
-input()
-print("OPTIMIZED SPEC")
+#print("UNOPTIMIZED SPEC")
+#print(spec)
+#input()
+#print("OPTIMIZED SPEC")
 print(spec.optimize())
 input()
-print("SETTING N=9")
+print("SETTING N = 9")
 setter = VarSetter(spec)
-setter.N=9
-setter.box_size=3
+setter.N = 9
 spec9 = setter.build()
 print(spec9.optimize())
 

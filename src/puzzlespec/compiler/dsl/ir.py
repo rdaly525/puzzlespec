@@ -540,8 +540,6 @@ class DomProj(Value):
 class TupleLit(Value):
     _numc = -1
     def __init__(self, T: Type, *vals: Value):
-        if not all(isinstance(val, Value) for val in vals):
-            raise ValueError("Bad constructor for TupleLit")
         super().__init__(T, *vals)
 
 class Proj(Value):
@@ -786,14 +784,15 @@ class AllSame(Value):
 
 # gets tranformed to a de-bruijn BoundVar
 class BoundVarHOAS(Value):
-    _fields = ('_name',)
+    _fields = ('closed', 'name')
     _numc = 1
     _cnt = 0
-    def __init__(self, T: RefT, _name=None):
-        if _name is None:
-            _name = f"b{self._cnt}"
+    def __init__(self, T: RefT, closed: bool, name: tp.Optional[str]=None):
+        if name is None:
+            name = f"b{self._cnt}"
             BoundVarHOAS._cnt +=1
-        self._name = f"{_name}"
+        self.name = f"{name}"
+        self.closed = closed
         super().__init__(T)
 
     @property

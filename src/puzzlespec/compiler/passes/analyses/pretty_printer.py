@@ -673,11 +673,7 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.BoundVarHOAS)
     def _(self, node: ir.BoundVarHOAS) -> str:
         T, = self.visit_children(node)
-        #if node in self.bvhoas_names:
-        #    return self.bvhoas_names[node]
-        #bv_name = self._new_elem_name()
-        #self.bvhoas_names[node] = bv_name
-        return node._name
+        return node.name
 
     @handles(ir.LambdaHOAS)
     def _(self, node: ir.LambdaHOAS) -> str:

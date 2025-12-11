@@ -1,12 +1,21 @@
-import puzzlespec as ps
+from puzzlespec import make_enum, fin, var, func_var, Unit, Int, U, PuzzleSpecBuilder, VarSetter
+from puzzlespec.libs import std
+
+
 from puzzlespec.libs import optional as opt, topology as topo
 
-a = ps.func_var(dom=ps.fin(3), codom=ps.fin(4), name='V')
+a = func_var(dom=fin(3), codom=fin(4), name='V')
 print(a)
 e = a.forall(lambda i: i==2)
 print(e)
 print(e.simplify)
 
+func = fin(5).empty_func()
+for i in fin(5):
+    func[i] = i+1
+print(func)
+print(type(func))
+print(func[3:7])
 
 
 

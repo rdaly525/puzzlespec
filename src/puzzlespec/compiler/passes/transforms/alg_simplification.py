@@ -60,13 +60,13 @@ class AlgebraicSimplificationPass(Transform):
         else:
             children = non_const_children
         # Remove all (..., x, -x, ...)
-        #neg_children, non_neg_children = _partition(children, lambda c: isinstance(c, ir.Neg))
-        #children = non_neg_children
-        #for neg_child in neg_children:
-        #    if neg_child._children[1] in children:
-        #        children.remove(neg_child._children[1])
-        #    else:
-        #        children.append(neg_child)
+        neg_children, non_neg_children = _partition(children, lambda c: isinstance(c, ir.Neg))
+        children = non_neg_children
+        for neg_child in neg_children:
+            if neg_child._children[1] in children:
+                children.remove(neg_child._children[1])
+            else:
+                children.append(neg_child)
 
         if len(children) == 1:
             return children[0]

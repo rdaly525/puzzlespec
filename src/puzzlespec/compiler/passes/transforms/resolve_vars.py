@@ -1,3 +1,4 @@
+from re import A
 from ..pass_base import Transform, Context, AnalysisObject, handles
 from ..envobj import EnvsObj, SymTable
 from ...dsl import ir, ast
@@ -8,6 +9,7 @@ def resolve_bound_vars(root: ir.Node) -> ir.Node:
     new_root = ResolveBoundVars().run(root, ctx)
     return new_root
 
+# Translates BVHOAS -> BV
 class ResolveBoundVars(Transform):
     #_debug=True
     enable_memoization = False
@@ -95,3 +97,51 @@ class ResolveFreeVars(Transform):
         new_T, = self.visit_children(v)
         sid = self.sym.new_var(v.name, v.metadata)
         return ir.VarRef(new_T, sid, v.name)
+
+
+def close_bound_vars(root: ir.Node, bv: ir.BoundVarHOAS) -> ir.Node:
+    ctx = Context()
+    new_root = CloseBoundVars(bv).run(root, ctx)
+    return new_root
+
+class CloseBoundVars(Transform):
+    #_debug=True
+    enable_memoization = False
+    requires = ()
+    produces = ()
+    name = "close_bound_vars"
+    cse=True
+
+    def __init__(self, bv: ir.BoundVarHOAS):
+        self.bv = bv
+
+    def run(self, root, ctx):
+        new_root = self.visit(root)
+        return new_root
+
+    @handles(ir.BoundVarHOAS)
+    def _(self, node: ir.BoundVarHOAS):
+        T, = self.visit_children(node)
+        if node._key == self.bv._key:
+            if node.closed:
+                raise ValueError("Closed binder in scope")
+            return ir.BoundVarHOAS(T, closed=True, name=node.name)
+        return node.replace(*self.visit_children(node))
+
+    @handles(ir.Lambda, ir.LambdaT)
+    def _(self, node: ir.Lambda | ir.LambdaT):
+        raise ValueError("Lambda should not be in the AST")
+
+    @handles(ir.LambdaHOAS)
+    def _(self, node: ir.LambdaHOAS):
+        T, bv, body = node._children
+        if bv._key == self.bv._key:
+            raise ValueError("Same binder in scope")
+        return node.replace(*self.visit_children(node))
+
+    @handles(ir.LambdaTHOAS)
+    def _(self, node: ir.LambdaTHOAS):
+        bv, bodyT = node._children
+        if bv._key == self.bv._key:
+            raise ValueError("Same binder in scope")
+        return node.replace(*self.visit_children(node))

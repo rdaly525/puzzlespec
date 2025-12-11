@@ -200,7 +200,7 @@ class PuzzleSpecBuilder:
         return ast.TupleExpr.make(tuple(self._rules))
 
     # Freezes the spec and makes it immutable 
-    def build(self, name: str, opt=False) -> PuzzleSpec:
+    def build(self, name: str, opt=True) -> PuzzleSpec:
         # 1: Resolve Placeholders (for bound bars/lambdas)
         ctx = Context()
         pm = PassManager(TypeCheckingPass(), ResolveBoundVars(), verbose=True)
@@ -210,7 +210,6 @@ class PuzzleSpecBuilder:
         # Populate sym table and type environment
         sym = SymTable()
         ctx = Context(EnvsObj(sym))
-        #pm = PassManager(TypeCheckingPass(), AstPrinterPass(), ResolveFreeVars(), AstPrinterPass(), verbose=True)
         pm = PassManager(TypeCheckingPass(), ResolveFreeVars(), verbose=True)
         new_rules_node = pm.run(new_rules_node, ctx=ctx)
         env = ctx.get(EnvsObj)
@@ -225,12 +224,3 @@ class PuzzleSpecBuilder:
         if opt:
             spec = spec.optimize()
         return spec
-
-    #def print(self, rules_node=None):
-    #    if rules_node is None:
-    #        rules_node = ir.TupleLit(ir.TupleT(*(ir.BoolT() for _ in self._rules)), *self._rules)
-    #    ctx = Context()
-    #    pm = PassManager([AstPrinterPass()], verbose=True)
-    #    pm.run(rules_node, ctx)
-    #    a = ctx.get(PrintedAST)
-    #    print(a.text)

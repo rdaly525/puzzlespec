@@ -1,5 +1,4 @@
 from __future__ import annotations
-from hmac import new
 import math
 
 from ..pass_base import Transform, Context, handles

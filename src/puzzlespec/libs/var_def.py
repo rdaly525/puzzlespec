@@ -1,6 +1,7 @@
 from ..compiler.dsl import ast, ir, utils
 import typing as tp
 from ..compiler.passes.analyses.getter import get_closed_vars
+from ..compiler.passes.transforms.resolve_vars import close_bound_vars
 
 #def var(sort: ast.TExpr, name=None, **kwargs):
 #    metadata = frozenset(kwargs.items())
@@ -18,8 +19,7 @@ def decision_var(sort: ast.TExpr, name=None):
 
 _cnt = 0
 def var(
-    sort: ast.TExpr=None,
-    dom: tp.Optional[ast.DomainExpr]=None,
+    dom: ast.TExpr | ast.DomainExpr,
     name: tp.Optional[str]=None, 
     indices: tp.Optional[tp.Tuple[ast.Expr, ...]]=None,
     **kwargs
@@ -30,10 +30,10 @@ def var(
         name = f"v{_cnt}"
         _cnt +=1
     err_prefix=f"ERROR In var {name}: "
-    if sort is not None and not isinstance(sort, ast.TExpr):
-        raise ValueError(f"{err_prefix}sort must be a TExpr, got {type(sort)}")
-    if sum((sort is None, dom is None)) != 1:
-        raise ValueError(f"{err_prefix}Either codom or sort must be provided")
+    if isinstance(dom, ast.TExpr):
+        dom = dom.U
+    if not isinstance(dom, ast.DomainExpr):
+        raise ValueError(f"{err_prefix}var type must be a Type or a refinement dom")
     if indices is None:
         indices = ()
         bv_exprs = ()
@@ -46,16 +46,10 @@ def var(
         raise ValueError(f"{err_prefix}indices must be bound variables, got {indices}")
     if not all(e.T.is_ref is not None for e in bv_exprs):
         raise ValueError(f"{err_prefix}indices must be 'mapped' bound variables, got {indices}")
-    if sort is not None:
-        sort_bvs = utils._get_bvs(sort.node)
-        diff = sort_bvs - set(bvs)
-        if len(diff) > 0:
-            raise ValueError(f"{err_prefix}sort {sort} must only depend on {indices}, got {diff}")
-    if dom is not None:
-        #dom_bvs = utils._get_bvs(dom.node)
-        dom_bvs = get_closed_vars(dom.node)
-        if any(bv in dom_bvs for bv in bvs):
-            raise ValueError(f"{err_prefix}refinement domain {dom} must only depend on {indices}, got {diff}")
+    
+    dom_bvs = get_closed_vars(dom.node)
+    if any(bv in dom_bvs for bv in bvs):
+        raise ValueError(f"{err_prefix}refinement domain {dom} must only depend on {indices}, got {diff}")
 
     ## Do dependency analysis
     # indices = (i, j, k)
@@ -72,16 +66,14 @@ def var(
     
     def make_sort(bvs: tp.Tuple[ir.BoundVarHOAS,...]) -> ir.Type:
         if len(bvs)==0:
-            if dom is not None:
-                return ir.RefT(dom.T.carT.node, dom.node)
-            else:
-                return sort.node
+            return ir.RefT(dom.T.carT.node, dom.node)
         bv0 = bvs[0]
         bv_dom = bv0.T.dom
         # THIS CURRENTLY DEPENDS ON BV0
         sort_nest = make_sort(bvs[1:])
-        new_bv = ir.BoundVarHOAS(bv0.T.T)
+        new_bv = ir.BoundVarHOAS(bv0.T.T, closed=False)
         new_sort_nest = utils._substitute(sort_nest, bv0, new_bv)
+        new_sort_nest = close_bound_vars(new_sort_nest, new_bv)
         T = ir.FuncT(
             bv_dom,
             ir.LambdaTHOAS(

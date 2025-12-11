@@ -19,7 +19,7 @@ def _is_same_kind(T1: ir.Type, T2: ir.Type) -> bool:
     return T1._key == T2._key
 
 def _is_value(V: ir.Value) -> bool:
-    return isinstance(V, ir.Value)
+    return isinstance(V, (ir.Value, ir.BoundVar, ir.BoundVarHOAS))
 
 def _is_domain(V: ir.Value) -> bool:
     return _is_value(V) and _is_kind(V.T, ir.DomT)

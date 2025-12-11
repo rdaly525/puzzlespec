@@ -278,7 +278,7 @@ class NDArrayExpr(ast.FuncExpr):
         return NDSeqDomainExpr(super().domain)
 
     def map(self, fn: tp.Callable) -> NDSeqDomainExpr:
-        return NDArrayExpr(self.domain.map(lambda elem: fn(self.apply(elem))))
+        return NDArrayExpr(super().map(fn))
 
     def apply(self, i: ast.Expr):
         return wrap_nd(super().apply(i))
