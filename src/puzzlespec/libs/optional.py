@@ -1,5 +1,4 @@
 from ..compiler.dsl import ast, ir, utils
-from ..compiler.passes.analyses.type_check import get_rawT
 import typing as tp
 
 def optional(T: ast.TExpr) -> ast.TExpr:
@@ -30,7 +29,7 @@ def fold(val: ast.SumExpr, on_none: ast.Expr, on_some: tp.Callable[[ast.Expr], a
 def count_some(func: ast.FuncExpr) -> ast.IntExpr:
     if not isinstance(func, ast.FuncExpr):
         raise ValueError(f"Expected FuncExpr, got {type(func)}")
-    arrT = get_rawT(func.T.node)
+    arrT = func.T._rawT
     _check_optT(arrT.resT)
     some_dom = func.domain.restrict(lambda i: func(i).match(lambda _: False, lambda _: True))
     return some_dom.size

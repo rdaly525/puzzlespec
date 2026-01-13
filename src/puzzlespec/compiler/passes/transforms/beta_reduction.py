@@ -1,15 +1,14 @@
 from __future__ import annotations
-import math
 
 from ..pass_base import Transform, Context, handles
 from ...dsl import ir
-from ...dsl.utils import _substitute
+from ...dsl.utils import substitute
 import typing as tp
 from ..analyses.pretty_printer import pretty
 
 
-def beta_reduce(node: ir.Node):
-    p = BetaReductionPass()
+def beta_reduce_HOAS(node: ir.Node):
+    p = BetaReductionHOAS()
     ctx = Context()
     return p.run(node, ctx)
 
@@ -17,7 +16,7 @@ def applyT(lamT: ir.Node, arg: ir.Value):
     assert isinstance(lamT, (ir.LambdaT, ir.LambdaTHOAS))
     assert isinstance(arg, ir.Value)
     appT = ir.ApplyT(lamT, arg)
-    T = beta_reduce(appT)
+    T = beta_reduce_HOAS(appT)
     return T
 
 # High level algortihm:
@@ -101,61 +100,72 @@ class BetaReductionPass(Transform):
         # no change outside of β-redexes
         return node
 
-    @handles(ir.ApplyT)
-    def _(self, node: ir.ApplyT):
-        lamT, arg = node._children
-        assert isinstance(arg, ir.Value)
-        if isinstance(lamT, ir.LambdaT):
-            _, resT = lamT._children
-            # 1. shift argument up by 1 for the binder we’re eliminating
-            arg_p1 = self.shift(arg, +1, cutoff=0)
-
-            # 2. substitute for "0" (j=0) in body
-            resT_sub = self.subst(resT, 0, arg_p1, depth=0)
-
-            # 3. shift everything down by 1 (remove the binder)
-            resT_m1 = self.shift(resT_sub, -1, cutoff=0)
-            return resT_m1
-        else:
-            assert isinstance(lamT, ir.LambdaTHOAS)
-            bv, resT = lamT._children
-            #print("HOAST SUB")
-            #print("BV", pretty(bv))
-            #print("REST:")
-            #print(pretty(resT))
-            sub = _substitute(resT, bv, arg)
-            #print("POSTSUB_BOD")
-            #print(pretty(sub))
-            #print("*"*20)
-            return sub
-
     @handles(ir.Apply)
     def _(self, node: ir.Apply):
         # first recursively reduce inside
         T, lam, arg = self.visit_children(node)
-        if isinstance(lam, ir.Lambda):
-            lamT, body = lam._children
+        assert isinstance(lam, ir.Lambda)
+        lamT, body = lam._children
 
-            # 1. shift argument up by 1 for the binder we’re eliminating
-            arg_p1 = self.shift(arg, +1, cutoff=0)
+        # 1. shift argument up by 1 for the binder we’re eliminating
+        arg_p1 = self.shift(arg, +1, cutoff=0)
 
-            # 2. substitute for "0" (j=0) in body
-            body_sub = self.subst(body, 0, arg_p1, depth=0)
+        # 2. substitute for "0" (j=0) in body
+        body_sub = self.subst(body, 0, arg_p1, depth=0)
 
-            # 3. shift everything down by 1 (remove the binder)
-            body_m1 = self.shift(body_sub, -1, cutoff=0)
+        # 3. shift everything down by 1 (remove the binder)
+        body_m1 = self.shift(body_sub, -1, cutoff=0)
 
-            return body_m1
-        else:
-            assert isinstance(lam, ir.LambdaHOAS)
-            T, bv, body = lam._children
-            #print("HOAS SUB")
-            #print("BV", pretty(bv))
-            #print("BODY:")
-            #print(pretty(body))
-            sub = _substitute(body, bv, arg)
-            #print("POSTSUB_BOD")
-            #print(pretty(sub))
-            #print("*"*20)
-            return sub
+        return body_m1
+
+class BetaReductionHOAS(Transform):
+    enable_memoization = False
+    requires: tp.Tuple[type, ...] = ()
+    produces: tp.Tuple[type, ...] = ()
+    name = "beta_reduction_hoas"
+
+    def run(self, root: ir.Node, ctx: Context):
+        self.bv_map = {}
+        return self.visit(root)
+
+    @handles(ir.BoundVarHOAS)
+    def _(self, node: ir.BoundVarHOAS):
+        if node.name in self.bv_map:
+            #print(f"  BV: {node.name} -> {self.bv_map[node.name]}")
+            return self.visit(self.bv_map[node.name])
+        return node
+
+    @handles(ir.ApplyT)
+    def _(self, node: ir.ApplyT):
+        lamT, arg = node._children
+        arg = self.visit(arg)
+        assert isinstance(arg, ir.Value)
+        assert isinstance(lamT, ir.LambdaTHOAS)
+        bv, resT = lamT._children
+        assert bv not in self.bv_map
+        self.bv_map[bv.name] = arg
+        new_resT = self.visit(resT)
+        del self.bv_map[bv.name]
+        return new_resT
+
+    @handles(ir.LambdaHOAS)
+    def _(self, node: ir.LambdaHOAS):
+        T, bv, body = node._children
+        assert bv.name not in self.bv_map
+        return super().visit(node)
+
+    @handles(ir.Apply)
+    def _(self, node: ir.Apply):
+        #T, lam, arg = self.visit_children(node)
+        T, lam, arg = node._children
+        assert isinstance(lam, ir.LambdaHOAS)
+        T, bv, body = lam._children
+        assert bv.name not in self.bv_map
+        self.bv_map[bv.name] = arg
+        #print(f"Replace {bv.name} with {arg} in (")
+        #print(f"  BODY:{body}")
+        new_body = self.visit(body)
+        #print(f"  NEW BODY:{new_body} )")
+        del self.bv_map[bv.name]
+        return new_body
             

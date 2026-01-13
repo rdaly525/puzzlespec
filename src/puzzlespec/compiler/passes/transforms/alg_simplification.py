@@ -2,7 +2,7 @@ from __future__ import annotations
 import math
 
 from ..pass_base import Transform, Context, handles
-from ...dsl import ir
+from ...dsl import ir, ast
 import typing as tp
 
 
@@ -135,7 +135,7 @@ class AlgebraicSimplificationPass(Transform):
     @handles(ir.Div)
     def _(self, node: ir.Div) -> ir.Node:
         T, a, b = self.visit_children(node)
-        if ir.Node.equals(a,b):
+        if a==b:
             return ir.Lit(T, 1)
         match (a, b):
             case (_, ir.Lit(val=1)):
@@ -229,44 +229,30 @@ class AlgebraicSimplificationPass(Transform):
     @handles(ir.ApplyFunc)
     def _(self, node: ir.ApplyFunc):
         T, func, arg = self.visit_children(node)
-        # TODO Add obligation for arg being in func's domain
         if isinstance(func, ir.Map):
-            _, _, lam = func._children
-            return ir.Apply(T, lam, arg)
+            _, dom, lam = func._children
+            from ...dsl import ast
+            node = ir.Apply(T, lam, arg)
+            return ast.wrap(node).refine(lambda _: ast.wrap(dom).contains(ast.wrap(arg))).node
         return node.replace(T, func, arg)
 
-    #@handles(ir.Slice)
-    #def _(self, node: ir.Slice):
-    #    T, dom, lo, hi = self.visit_children(node)
-    #    if isinstance(lo, ir.Lit) and isinstance(hi, ir.Lit):
-    #        lo_val, hi_val = lo.val, hi.val
-    #        assert lo_val < hi_val
-    #        elems = [ir.ElemAt(T.carT, dom, ir.Lit(ir.IntT(), val=i)) for i in range(lo_val, hi_val)]
-    #        return ir.DomLit(T, *elems)
-    #    return node.replace(T, dom, lo, hi)
+    @handles(ir.Proj)
+    def _(self, node: ir.Proj):
+        T, tup = self.visit_children(node)
+        if isinstance(tup, ir.TupleLit):
+            elems = tup._children[1:]
+            assert node.idx < len(elems)
+            return elems[node.idx]
+        return node.replace(T, tup)
 
-    @handles(ir.ElemAt)
-    def _(self, node: ir.ElemAt):
-        T, dom, idx = self.visit_children(node)
-        if isinstance(idx, ir.Lit):
-            idx_val = idx.val
-            if isinstance(dom, ir.Fin):
-                return idx
-            if isinstance(dom, ir.Range):
-                _, lo, hi = dom._children
-                return ir.Add(ir.IntT(), lo, idx)
-            if isinstance(dom, ir.Slice):
-                _, slice_dom, lo, hi = dom._children
-                return ir.ElemAt(T, slice_dom, ir.Add(ir.IntT(), lo, idx))
-            if isinstance(dom, ir.DomLit):
-                _, *elems = dom._children
-                return elems[idx_val]
-            if isinstance(dom, ir.CartProd):
-                cart_doms = dom._children[1:]
-                sizes = [ir.Card(ir.IntT(), d) for d in cart_doms]
-                strides = [ir.Prod(ir.IntT(), *sizes[j+1:]) for j in range(len(sizes))]
-                indices = [ir.Mod(ir.IntT(), ir.Div(ir.IntT(), idx, stride), size) for stride, size in zip(strides, sizes)]
-                return ir.TupleLit(dom.T.carT, *[ir.ElemAt(d.T.carT, d, i) for d, i in zip(cart_doms, indices)])
-            if isinstance(dom, ir.DisjUnion):
-                raise NotImplementedError("ElemAt of disj union not implemented")
-        return node.replace(T, dom, idx)
+    #(proj(bv,0), proj(bv,1))
+    @handles(ir.TupleLit)
+    def _(self, node: ir.TupleLit):
+        T, *elems = self.visit_children(node)
+        if len(elems)>0 and all(isinstance(e, ir.Proj) and e.idx==i for i, e in enumerate(elems)):
+            v0 = elems[0]._children[1]
+            if all(v0==e._children[1] for e in elems):
+                #Make sure that the proj value has the correct size
+                if len(ast.wrap(v0).T)==len(elems):
+                    return v0
+        return node.replace(T, *elems)

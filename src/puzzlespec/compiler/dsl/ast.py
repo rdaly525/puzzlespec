@@ -3,83 +3,114 @@ import typing as tp
 from . import ir
 from dataclasses import dataclass
 from enum import Enum as _Enum
-from .utils import _is_kind, _is_same_kind, _has_bv, _substitute
+from .utils import _has_bv
 from ..passes.analyses.pretty_printer import pretty
-from ..passes.analyses.type_check import get_rawT
+from ..passes.analyses.type_check import type_check
 from ..passes.transforms.beta_reduction import applyT
 from ..passes.transforms.resolve_vars import close_bound_vars
+import inspect
 
 @dataclass
 class TExpr:
-    _node: ir.Type
+    node: ir.Type
     def __post_init__(self):
-        assert isinstance(self._node, ir.Type)
+        assert isinstance(self.node, ir.Type)
+        if self.is_ref:
+            if self.ref_dom.T.carT != self:
+                raise ValueError()
 
     def __repr__(self):
-        return pretty(self._node)
+        return pretty(self.node)
 
+    # no refinement node
     @property
-    def node(self):
-        if self.is_ref:
-            return self._node.T
-        return self._node
+    def _node(self):
+        def get(node: ir.Type):
+            if isinstance(node, ir.RefT):
+                return get(node.T)
+            return node
+        return get(self.node)
 
     @property
     def is_ref(self):
-        return isinstance(self._node, ir.RefT)
+        return isinstance(self.node, ir.RefT)
     
     @property
-    def ref_dom(self):
-        assert self.is_ref
-        return DomainExpr(self.node.dom)
-
-    def __str__(self):
-        return pretty(self._node)
+    def ref_dom(self) -> tp.Optional[DomainExpr]:
+        if self.is_ref:
+            return DomainExpr(self.node.dom)
+        return None
 
     @property
     def U(self) -> DomainExpr:
+        if self.is_ref:
+            return self.ref_dom
         return DomainExpr(ir.Universe(ir.DomT(self.node)))
+
+    def refine(self, dom: DomainExpr):
+        if self.is_ref:
+            new_dom = dom & self.ref_dom
+        else:
+            new_dom = dom
+        return wrapT(ir.RefT(self._node, new_dom.node))
+
+    def wrapRef(self, T: TExpr):
+        if self.is_ref:
+            return T.refine(self.ref_dom)
+        return T
 
     @property
     def simplify(self) -> tp.Self:
         from ..passes.utils import simplify
-        return type(self)(simplify(self.node))
+        return type(self)(simplify(self.node, 0))
+
+    def _bound_var(self, name=None):
+        new_bv = ir.BoundVarHOAS(self.node, False, name)
+        return wrap(new_bv)
+
+    def __eq__(self, other):
+        if isinstance(other, TExpr):
+            return self._rawT() == other._rawT()
+        return False
+
+    def _rawT(self, keep_nd=False) -> ir.Node:
+        return self.node.rawT(keep_nd)
 
 
 class UnitType(TExpr):
     def __post_init__(self):
         super().__post_init__()
-        if not isinstance(self.node, ir.UnitT):
+        if not isinstance(self._node, ir.UnitT):
             raise ValueError(f"Expected UnitType, got {self.node}")
 
 class BoolType(TExpr):
     def __post_init__(self):
         super().__post_init__()
-        if not isinstance(self.node, ir.BoolT):
+        if not isinstance(self._node, ir.BoolT):
             raise ValueError(f"Expected BoolType, got {self.node}")
 
 class IntType(TExpr):
     def __post_init__(self):
         super().__post_init__()
-        if not isinstance(self.node, ir.IntT):
+        if not isinstance(self._node, ir.IntT):
             raise ValueError(f"Expected IntType, got {self.node}")
 
 class EnumType(TExpr):
     def __post_init__(self):
         super().__post_init__()
-        if not isinstance(self.node, ir.EnumT):
+        if not isinstance(self._node, ir.EnumT):
             raise ValueError(f"Expected EnumType, got {self.node}")
 
 class TupleType(TExpr):
     def __post_init__(self):
         super().__post_init__()
-        if not isinstance(self.node, ir.TupleT):
+        if not isinstance(self._node, ir.TupleT):
             raise ValueError(f"Expected TupleType, got {self.node}")
 
     def elemT(self, i: int) -> TExpr:
         if not isinstance(i, int):
             raise ValueError("Tuple index must be concrete (python) int")
-        return wrapT(self.node[i])
+        return wrapT(self._node[i])
 
     def __getitem__(self, i: int):
         return self.elemT(i)
@@ -88,13 +119,13 @@ class TupleType(TExpr):
         return tuple(self.elemT(i) for i in range(len(self)))
 
     def __len__(self):
-        return len(self.node)
+        return len(self._node)
 
 
 class SumType(TExpr):
     def __post_init__(self):
         super().__post_init__()
-        if not isinstance(self.node, ir.SumT):
+        if not isinstance(self._node, ir.SumT):
             raise ValueError(f"Expected SumType, got {self.node}")
 
     def make_sum(self, val: tp.Any) -> SumExpr:
@@ -103,10 +134,10 @@ class SumType(TExpr):
     def elemT(self, i: int) -> TExpr:
         if not isinstance(i, int):
             raise ValueError("Tuple index must be concrete (python) int")
-        return wrapT(self.node[i])
+        return wrapT(self._node[i])
 
     def __len__(self):
-        return len(self.node)
+        return len(self._node)
 
     @property
     def elemTs(self) -> tp.Tuple[TExpr]:
@@ -119,51 +150,48 @@ class SumType(TExpr):
 class LambdaType(TExpr):
     def __post_init__(self):
         super().__post_init__()
-        if not isinstance(self.node, ir.LambdaTHOAS):
+        if not isinstance(self._node, ir.LambdaTHOAS):
             raise ValueError(f"Expected LambdaType, got {self.node}")
 
     @property
     def argT(self) -> TExpr:
-        return wrapT(self.node.argT)
+        return wrapT(self._node.argT)
 
     def resT(self, arg: Expr):
-        return wrapT(applyT(self.node, arg.node))
+        return wrapT(applyT(self._node, arg.node))
 
-class _DomainType(TExpr): pass
+    def _raw_resT(self, keep_nd: bool=False):
+        return wrapT(self._rawT(keep_nd).resT)
 
-class DomainType(_DomainType):
+class ArrowType(TExpr):
+    def __post_init__(self):
+        return super().__post_init__()
+        if not isinstance(self._node, ir.ArrowT):
+            raise ValueError(f"Expected ArrowT, got {self._node}")
+
+    @property
+    def argT(self) -> TExpr:
+        return wrapT(self._node.argT)
+
+    @property
+    def resT(self) -> TExpr:
+        return wrapT(self._node.resT)
+
+
+class DomainType(TExpr):
     def __post_init__(self):
         super().__post_init__()
-        if not isinstance(self.node, ir.DomT):
+        if not isinstance(self._node, ir.DomT):
             raise ValueError(f"Expected DomainType, got {self.node}")
 
     @property
     def carT(self) -> TExpr:
-        return wrapT(self.node.carT)
-
-    @property
-    def _ord(self) -> tp.Union[bool, tp.Tuple[bool,...]]:
-        return self.node._ord
-        
-
-class ImageType(_DomainType):
-    def __post_init__(self):
-        super().__post_init__()
-        if not isinstance(self.node, ir.ImageT):
-            raise ValueError(f"Expected DomainType, got {self.node}")
-
-    @property
-    def dom(self) -> DomainExpr:
-        return DomainExpr(self.node.dom)
-
-    @property
-    def lamT(self) -> LambdaType:
-        return LambdaType(self.node.lamT)
+        return wrapT(self._node.carT)
 
 class FuncType(TExpr):
     def __post_init__(self):
         super().__post_init__()
-        if not isinstance(self.node, ir.FuncT):
+        if not isinstance(self._node, ir.FuncT):
             raise ValueError(f"Expected FuncType, got {self.node}")
 
     def elemT(self, arg: Expr) -> TExpr:
@@ -171,18 +199,20 @@ class FuncType(TExpr):
 
     @property
     def domain(self) -> DomainExpr:
-        return DomainExpr(self.node.dom)
+        return wrap(self.node.dom)
 
     @property
     def lamT(self) -> LambdaType:
-        return wrapT(self.node.lamT)
+        return wrapT(self._node.lamT)
 
 def wrapT(T: ir.Type):
+    from .ast_nd import NDDomType
     assert isinstance(T, ir.Type)
-    if isinstance(T, ir.RefT):
-        _T = T.T
-    else:
-        _T = T
+    def get(T: ir.Type):
+        if isinstance(T, ir.RefT):
+            return get(T.T)
+        return T
+    _T = get(T)
     match type(_T):
         case ir.UnitT:
             return UnitType(T)
@@ -200,8 +230,12 @@ def wrapT(T: ir.Type):
             return LambdaType(T)
         case ir.DomT:
             return DomainType(T)
+        case ir.NDDomT:
+            return NDDomType(T)
         case ir.FuncT:
             return FuncType(T)
+        case ir.ArrowT:
+            return ArrowType(T)
         case _:
             raise ValueError(f"Expected Type, got {T}")
 
@@ -220,11 +254,12 @@ class Expr:
 
     @property
     def T(self) -> TExpr:
-        raise NotImplementedError()
+        return wrapT(self.node.T)
 
+    # raw T, no refinement
     @property
     def _T(self) -> TExpr:
-        return wrapT(self.node.T)
+        return wrapT(self.T._node)
     
     @classmethod
     def make(cls, val: tp.Any) -> Expr:
@@ -232,23 +267,21 @@ class Expr:
             if type(val)==Expr:
                 raise ValueError("Raw Expr found!!", val)
             return val
-        #if val is None:
-        #    return UnitExpr.make()
-        if isinstance(val, ir.Value):
-            return wrap(val)
         if isinstance(val, bool):
             return BoolExpr.make(val)
         if isinstance(val, int):
             return IntExpr.make(val)
         if isinstance(val, tp.Tuple):
             return TupleExpr.make(val)
+        if isinstance(val, set):
+            return DomainExpr.make(val)
         raise ExprMakeError(f"Cannot make Expr from {val}")
 
     def __eq__(self, other):
         other = Expr.make(other)
-        if not _is_same_kind(self.T.node, other.T.node):
+        if self.T != other.T:
             raise ValueError(f"Cannot compare {self.T} and {other.T}")
-        return wrap(ir.Eq(ir.BoolT(), self.node, other.node))
+        return BoolExpr(ir.Eq(ir.BoolT(), self.node, other.node))
         
     def __ne__(self, other):
         return ~(self == other)
@@ -256,11 +289,29 @@ class Expr:
     def __repr__(self):
         return pretty(self.node)
 
+    def refine(self, v: DomainExpr | tp.Callable):
+        if isinstance(v, DomainExpr):
+            dom = v
+        else:
+            dom = self.T.U.restrict(v)
+        new_T = self.T.refine(dom)
+        new_node = self.node.replace(new_T.node, *self.node._children[1:])
+        return type(self)(new_node)
+
+    @property
+    def singleton(self):
+        domT = ir.DomT(self.T._node)
+        node = ir.Singleton(domT, self.node)
+        return DomainExpr(node)
+
     @property
     def simplify(self) -> tp.Self:
         from ..passes.utils import simplify
-        simp = simplify(self.node)
+        simp = simplify(self.node, hoas=True, verbose=0)
         return wrap(simp)
+
+    def type_check(self) -> ir.Type:
+        return type_check(self.node)
 
 
 class UnitExpr(Expr):
@@ -271,7 +322,7 @@ class UnitExpr(Expr):
 
     @property
     def T(self) -> UnitType:
-        return tp.cast(UnitType, self._T)
+        return tp.cast(UnitType, super().T)
     
     @classmethod
     def make(cls) -> UnitExpr:
@@ -286,7 +337,7 @@ class BoolExpr(Expr):
 
     @property
     def T(self) -> BoolType:
-        return tp.cast(BoolType, self._T)
+        return tp.cast(BoolType, super().T)
 
     @classmethod
     def make(cls, val: tp.Any) -> BoolExpr:
@@ -323,8 +374,8 @@ class BoolExpr(Expr):
 
     def ite(self, t: Expr, f: Expr) -> Expr:
         t, f = Expr.make(t), Expr.make(f)
-        node = ir.Ite(t.T.node, self.node, t.node, f.node)
-        return wrap(node)
+        node = ir.Ite(t.T._node, self.node, t.node, f.node)
+        return type(t)(node)
 
     def __bool__(self) -> bool:
         raise TypeError("BoolExpr cannot be used as a python boolean")
@@ -354,7 +405,7 @@ class IntExpr(Expr):
 
     @property
     def T(self) -> IntType:
-        return tp.cast(IntType, self._T)
+        return tp.cast(IntType, super().T)
 
     @classmethod
     def make(cls, val: tp.Any) -> IntExpr:
@@ -365,8 +416,8 @@ class IntExpr(Expr):
             return IntExpr(node)
         raise ValueError(f"Expected Int expression. Got {val}")
 
-    #def fin(self):
-    #    return DomainExpr(ir.Fin(ir.DomT(ir.IntT()), self.node), _fin=True)
+    def fin(self):
+        return DomainExpr(ir.Fin(ir.DomT(ir.IntT()), self.node))
 
     def __add__(self, other: IntOrExpr) -> IntExpr:
         other = IntExpr.make(other)
@@ -398,21 +449,20 @@ class IntExpr(Expr):
         return IntExpr(node)
 
     def __floordiv__(self, other: IntOrExpr) -> IntExpr:
-        other = IntExpr.make(other)
+        other = IntExpr.make(other).refine(lambda i: i!=0)
         node = ir.Div(ir.IntT(), self.node, other.node)
         return IntExpr(node)
 
+    def ceildiv(self, other: IntOrExpr):
+        return -(-self//other)
+
     def __truediv__(self, other: IntOrExpr) -> IntExpr:
-        other = IntExpr.make(other)
-        T = ir.RefT(
-            ir.IntT(),
-            dom = IntType(ir.IntT()).U.restrict(lambda v: v*other==self).node
-        )
-        node = ir.Div(T, self.node, other.node)
-        return IntExpr(node)
+        other = IntExpr.make(other).refine(lambda i: i!=0)
+        node = ir.Div(ir.IntT(), self.node, other.node)
+        return IntExpr(node).refine(lambda v: v*other==self)
 
     def __mod__(self, other: IntOrExpr) -> IntExpr:
-        other = IntExpr.make(other)
+        other = IntExpr.make(other).refine(lambda i: i!=0)
         node = ir.Mod(ir.IntT(), self.node, other.node)
         return IntExpr(node)
 
@@ -447,7 +497,7 @@ class EnumExpr(Expr):
     
     @property
     def T(self) -> EnumType:
-        return tp.cast(EnumType, self._T)
+        return tp.cast(EnumType, super().T)
 
     @classmethod
     def make(cls, val) -> EnumExpr:
@@ -455,7 +505,7 @@ class EnumExpr(Expr):
             return val
         raise NotImplementedError(f"cannot cast {val} to EnumExpr")
 
-IntOrExpr = tp.Union[int, IntExpr, Expr]
+IntOrExpr = tp.Union[int, IntExpr]
 BoolOrExpr = tp.Union[bool, BoolExpr, Expr]
 EnumOrExpr = tp.Union[str, EnumExpr, Expr]
 
@@ -468,7 +518,7 @@ class TupleExpr(Expr):
 
     @property
     def T(self) -> TupleType:
-        return tp.cast(TupleType, self._T)
+        return tp.cast(TupleType, super().T)
    
     @classmethod
     def make(cls, vals: tp.Tuple[tp.Any, ...]=None) -> TupleExpr:
@@ -478,7 +528,7 @@ class TupleExpr(Expr):
             return vals
         if isinstance(vals, tp.Tuple):
             vals = tuple(Expr.make(v) for v in vals)
-            node = ir.TupleLit(ir.TupleT(*[e.T.node for e in vals]), *[e.node for e in vals])
+            node = ir.TupleLit(ir.TupleT(*[e.T._node for e in vals]), *[e.node for e in vals])
             return TupleExpr(node)
         raise ExprMakeError(f"Cannot make TupleExpr from {vals}")
 
@@ -486,14 +536,26 @@ class TupleExpr(Expr):
     def empty(cls):
         return cls.make()
 
-    def __getitem__(self, idx: int) -> Expr:
-        if idx < 0 or idx >= len(self):
-            raise IndexError(f"Tuple index out of range: {idx}")
-        node = ir.Proj(self.T[idx].node, self.node, idx)
-        return wrap(node)
+    def __getitem__(self, idx: int|slice) -> Expr:
+        if isinstance(idx, int):
+            if idx < 0 or idx >= len(self):
+                raise IndexError(f"Tuple index out of range: {idx}")
+            node = ir.Proj(self.T[idx].node, self.node, idx)
+            return wrap(node)
+        elif isinstance(idx, slice):
+            lo, hi, step = idx.start, idx.stop, idx.step
+            if lo is None:
+                lo = 0
+            if hi is None:
+                hi = len(self)
+            if step is None:
+                step = 1
+            return tuple(self[i] for i in range(lo, hi, step))
+        else:
+            raise ValueError("Cannot dynamically index tuples")
 
     def __len__(self) -> int:
-        return len(self.T)
+        return len(self._T)
 
     # Nice unpacking
     def __iter__(self) -> None:
@@ -515,27 +577,27 @@ class SumExpr(Expr):
                 idx = i
         if idx is None:
             raise ValueError(f"Cannot make SumExpr from {val} with type {T}")
-        node = ir.Inj(T.node, val.node, idx=idx)
+        node = ir.Inj(T._node, val.node, idx=idx)
         return SumExpr(node)
 
     @property
     def T(self) -> SumType:
-        return tp.cast(SumType, self._T)
+        return tp.cast(SumType, super().T)
  
     def match(self, *branches: tp.Callable) -> Expr:
         if len(branches) != len(self.T):
             raise ValueError(f"Need a branch for each element of the sum type, got {len(branches)} branches for {len(self.T)} elements")
         branch_exprs = []
         for lam_fn, T in zip(branches, self.T.elemTs):
-            bv = wrap(ir.BoundVarHOAS(T.node, closed=False))
-            lam_expr = make_lambda(lam_fn, bv)
+            bv = T._bound_var()
+            lam_expr = LambdaExpr.make(lam_fn, bv)
             branch_exprs.append(lam_expr)
         lamTs = [e.T for e in branch_exprs]
-        bv = wrap(ir.BoundVarHOAS(lamTs[0].argT.node))
+        bv = lamTs[0].argT._bound_var()
         match_T = lamTs[0].resT(bv)
         if _has_bv(bv, match_T.node):
             raise NotImplementedError("Dependently typed match")
-        match_node = ir.Match(match_T.node, self.node, *[e.node for e in branch_exprs])
+        match_node = ir.Match(match_T._node, self.node, *[e.node for e in branch_exprs])
         return wrap(match_node)
 
 
@@ -545,49 +607,93 @@ class LambdaExpr(Expr):
         if not isinstance(self._T, LambdaType):
             raise ValueError(f"Expected LambdaType, got {self._T}")
 
+    @classmethod
+    def make(cls, fn: tp.Callable, bv: Expr|TExpr, inj=False) -> LambdaExpr:
+        if isinstance(bv, TExpr):
+            bv = bv._bound_var()
+        assert isinstance(bv.node, ir.BoundVarHOAS)
+        assert not bv.node.closed
+        body_expr = _call_fn(fn, bv)
+        return _make_lambda(bv, body_expr, inj)
+
     @property
     def T(self) -> LambdaType:
-        return tp.cast(LambdaType, self._T)
+        return tp.cast(LambdaType, super().T)
+
+    # Function composition
+    # self: B->C @ f: A -> B
+    def compose(self, other: LambdaExpr):
+        if not isinstance(other, LambdaExpr):
+            raise ValueError(f"Expected LambdaExpr, got {other}")
+        if self.T.argT != other.T._raw_resT():
+            raise ValueError(f"Composition {self.T} @ {other.T} is not valid")
+        def lam(a: Expr):
+            b = other.apply(a)
+            c = self.apply(b)
+            return c
+        inj = self._inj and other._inj
+        return LambdaExpr.make(lam, other.T.argT, inj)
+
+    def __matmul__(self, other: LambdaExpr):
+        return self.compose(other)
+
+    def apply(self, arg: Expr) -> Expr:
+        arg = Expr.make(arg)
+        if self.T.argT != arg.T:
+            if self.T.argT != arg.T:
+                raise ValueError(f"Cannot apply a {arg.T} to {self._T.argT}")
+        node = ir.Apply(
+            T = self.T.resT(arg).node,
+            lam = self.node,
+            arg = arg.node
+        )
+        return wrap(node)
+
+    @property
+    def _inj(self) -> bool:
+        return self.node.inj
+
+    def __call__(self, arg: Expr) -> Expr:
+        return self.apply(arg)
+        
+def _num_fn_args(fn: tp.Callable):
+    # Calculate number of non-default args
+    sig = inspect.signature(fn)
+    fn_args = sum(v.default is inspect.Parameter.empty for v in sig.parameters.values())
+    return fn_args
 
 def _call_fn(fn: tp.Callable, expr: Expr) -> Expr:
-    fn_args = fn.__code__.co_argcount
+    fn_args = _num_fn_args(fn)
     if fn_args==1:
         ret = fn(expr)
     elif isinstance(expr.T, TupleType) and len(expr.T)==fn_args:
         args = [expr[i] for i in range(fn_args)]
         ret = fn(*args)
     else:
-        raise ValueError("Function has wrong number of arguments for sort")
+        raise ValueError(f"Function has wrong number of arguments for sort. Expected {fn_args}, got {len(expr.T)}")
     return Expr.make(ret)
 
 
-
-def make_lambda(fn: tp.Callable, bv: Expr) -> LambdaExpr:
+def _make_lambda(bv: Expr, body: Expr, inj=False) -> LambdaExpr:
     assert isinstance(bv.node, ir.BoundVarHOAS)
-    assert not bv.node.closed
-    body_expr = _call_fn(fn, bv)
-    return _make_lambda(bv, body_expr)
-
-def _make_lambda(bv: Expr, body: Expr) -> LambdaExpr:
-    assert isinstance(bv.node, ir.BoundVarHOAS)
+    bv.node.closed=True
     retT = body.T.node
-    # Close the 'bv's in both the return type and the body
-    retT = close_bound_vars(retT, bv.node)
-    body_node = close_bound_vars(body.node, bv.node)
-    bv_closed = ir.BoundVarHOAS(bv.node.T, closed=True, name=bv.node.name)
-    lamT = ir.LambdaTHOAS(bv_closed, retT)
-    lambda_node = ir.LambdaHOAS(lamT, bv_closed, body_node)
+    ## Close the 'bv's in both the return type and the body
+    #retT = close_bound_vars(retT, bv.node)
+    #body_node = close_bound_vars(body.node, bv.node)
+    #bv_closed = ir.BoundVarHOAS(bv.node.T, closed=True, name=bv.node.name)
+    #lamT = ir.LambdaTHOAS(bv_closed, retT)
+    #lambda_node = ir.LambdaHOAS(lamT, bv_closed, body_node, inj=inj)
+    lamT = ir.LambdaTHOAS(bv.node, retT)
+    lambda_node = ir.LambdaHOAS(lamT, bv.node, body.node, inj=inj)    
     return LambdaExpr(lambda_node)
 
 def cartprod(*doms: DomainExpr) -> DomainExpr:
-    # TODO handle images
     if not all(isinstance(dom, DomainExpr) for dom in doms):
         raise ValueError(f"Expected all DomainExpr, got {doms}")
-    carT = ir.TupleT(*[dom.T.carT.node for dom in doms])
+    carT = ir.TupleT(*[dom.T.carT._node for dom in doms])
     dom_nodes = tuple(dom.node for dom in doms)
-    _ord = tuple(dom.T.node._ord for dom in doms)
-    _elemAt = tuple(dom.T.node._elemAt for dom in doms)
-    T = ir.DomT(carT,_ord=_ord, _elemAt=_elemAt)
+    T = ir.DomT(carT)
     cartprod_node = ir.CartProd(T, *dom_nodes)
     return wrap(cartprod_node)
 
@@ -597,7 +703,7 @@ def coproduct(*doms: DomainExpr) -> DomainExpr:
         raise ValueError(f"Expected list of DomainExpr, got {doms}")
     if not all(isinstance(d.T, DomainType) for d in doms):
         raise NotImplementedError("Images not implemented for coproduct")
-    carT = ir.SumT(*[dom.T.carT.node for dom in doms])
+    carT = ir.SumT(*[dom.T.carT._node for dom in doms])
     T = ir.DomT(carT)
     coprod_node = ir.DisjUnion(T, *[dom.node for dom in doms])
     return wrap(coprod_node)
@@ -606,18 +712,39 @@ class DomainExpr(Expr):
     def __init__(self, node: ir.Value):
         super().__init__(node)
 
+    @classmethod
+    def make(cls, val: tp.Any) -> DomainExpr:
+        if isinstance(val, DomainExpr):
+            return val
+        if isinstance(val, set):
+            vals = [Expr.make(v) for v in val]
+            if not all(isinstance(v.T, vals[0].T) for v in vals):
+                raise ValueError(f"Cannot make DomainExpr from {val}")
+            return DomainExpr(ir.DomLit(ir.DomT(vals[0].T._node), *vals))
+        raise ValueError(f"Cannot make DomainExpr from {val}")
+
     @property
-    def T(self) -> _DomainType:
-        return self._T
+    def T(self) -> DomainType:
+        return tp.cast(DomainType, super().T)
 
     @property
     def size(self) -> IntExpr:
         node = ir.Card(ir.IntT(), self.node)
         return IntExpr(node)
 
+    @property
+    def is_singleton(self) -> bool:
+        return isinstance(self.node, ir.Singleton)
+
+    @property
+    def unique_elem(self) -> bool:
+        if not self.is_singleton:
+            raise ValueError()
+        return wrap(ir.Unique(self.T.carT._node, self.node))
+
     def restrict(self, pred_fun: tp.Callable) -> DomainExpr:
         func_expr = self.map(pred_fun)
-        node = ir.Restrict(self.T.node, func_expr.node)
+        node = ir.Restrict(self.T._node, func_expr.node)
         return DomainExpr(node)
 
     def contains(self, elem: Expr):
@@ -625,22 +752,20 @@ class DomainExpr(Expr):
         node = ir.IsMember(ir.BoolT(), self.node, elem.node)
         return BoolExpr(node)
 
-    def dom_proj(self, idx: int) -> DomainExpr:
-        assert isinstance(idx, int)
-        if isinstance(self.T, ImageType):
-            raise NotImplementedError("Cannot project into an image")
-        assert isinstance(self.T, DomainType)
-        if not isinstance(self.T.carT, TupleType):
-            raise NotImplementedError("cannot project to non-tuple carT")
-        if idx not in range(len(self.T.carT)):
-            raise IndexError(f"Index {idx} out of range for tuple of length {len(self.T.carT)}")
-        if isinstance(self.node, ir.CartProd):
-            return DomainExpr(self.node._children[1:][idx])
-        _ord = self.T.node._ord[idx]
-        _elemAt = self.T.node._elemAt[idx]
-        proj_T = ir.DomT(self.T.carT[idx].node, _ord, _elemAt)
-        node = ir.DomProj(proj_T, self.node, idx)
-        return DomainExpr(node)
+    #def dom_proj(self, idx: int) -> DomainExpr:
+    #    assert isinstance(idx, int)
+    #    assert isinstance(self.T, DomainType)
+    #    if not isinstance(self.T.carT, TupleType):
+    #        raise NotImplementedError("cannot project to non-tuple carT")
+    #    if idx not in range(len(self.T.carT)):
+    #        raise IndexError(f"Index {idx} out of range for tuple of length {len(self.T.carT)}")
+    #    if isinstance(self.node, ir.CartProd):
+    #        return DomainExpr(self.node._children[1:][idx])
+    #    _ord = self.T.node._ord[idx]
+    #    _elemAt = self.T.node._elemAt[idx]
+    #    proj_T = ir.DomT(self.T.carT[idx].node, _ord, _elemAt)
+    #    node = ir.DomProj(proj_T, self.node, idx)
+    #    return DomainExpr(node)
         
     def __add__(self, other: 'DomainExpr') -> 'DomainExpr':
         return coproduct(self, other)
@@ -648,25 +773,76 @@ class DomainExpr(Expr):
     def __mul__(self, other: 'DomainExpr') -> 'DomainExpr':
         return cartprod(self, other)
 
+    def subset_of(self, other: DomainExpr) -> BoolExpr:
+        other = DomainExpr.make(other)
+        node = ir.Subset(ir.BoolT(), self.node, other.node)
+        return BoolExpr(node)
+
+    def proper_subset_of(self, other: DomainExpr) -> BoolExpr:
+        other = DomainExpr.make(other)
+        node = ir.ProperSubset(ir.BoolT(), self.node, other.node)
+        return BoolExpr(node)
+
+    def __gt__(self, other: DomainExpr) -> BoolExpr:
+        return other.proper_subset_of(self)
+
+    def __ge__(self, other: DomainExpr) -> BoolExpr:
+        return other.subset_of(self)
+
+    def __lt__(self, other: DomainExpr) -> BoolExpr:
+        return self.proper_subset_of(other)
+
+    def __le__(self, other: DomainExpr) -> BoolExpr:
+        return self.subset_of(other)
+
+    def union(self, other: DomainExpr) -> DomainExpr:
+        if self.T.carT != other.T.carT:
+            raise ValueError(f"Cannot union domains with different carrier types: {self.T.carT} != {other.T.carT}")
+        node = ir.Union(self.T._node, self.node, other.node)
+        return DomainExpr(node)
+
+    def intersection(self, other: DomainExpr) -> DomainExpr:
+        if self.T.carT != other.T.carT:
+            raise ValueError(f"Cannot intersect domains with different carrier types: {self.T.carT} != {other.T.carT}")
+        node = ir.Intersection(self.T._node, self.node, other.node)
+        return DomainExpr(node)
+
+    def __and__(self, other: DomainExpr) -> DomainExpr:
+        return self.intersection(other)
+
+    def __or__(self, other: DomainExpr) -> DomainExpr:
+        return self.union(other)
+
     def __contains__(self, elem: Expr) -> BoolExpr:
         raise ValueError("Cannot use 'in'. Use dom.contains(val). Blame python for not being able to do this")
+    
+    def gather(self, dom: DomainExpr) -> DomainExpr:
+        assert isinstance(dom, DomainExpr)
+        return dom.refine(lambda _: dom <= self)
+
+    def __getitem__(self, dom: DomainExpr) -> DomainExpr:
+        if not isinstance(dom, DomainExpr):
+            raise ValueError()
+        return self.gather(dom)
+
+    @property
+    def _bv(self):
+        bv = self.T.carT._bound_var()
+        return bv.refine(self)
 
     def __iter__(self):
-        carT_ref = ir.RefT(self.T.carT.node, self.node)
-        bv = ir.BoundVarHOAS(carT_ref, closed=False, name=None)
-        yield wrap(bv)
+        yield self._bv
 
-    def map(self, fn: tp.Callable=None) -> FuncExpr:
-        if isinstance(self.T, ImageType):
-            raise NotImplementedError("Cannot map over an image")
-        if fn is None:
-            fn = lambda i: i
-        bv = [i for i in self][0]
-        lambda_expr = make_lambda(fn, bv)
+    def map(self, fn: tp.Callable | LambdaExpr, _inj=False) -> FuncExpr:
+        if isinstance(fn, LambdaExpr):
+            lambda_expr = fn
+        else:
+            bv = self._bv
+            lambda_expr = LambdaExpr.make(fn, bv, _inj)
         lamT = lambda_expr.T
-        T = ir.FuncT(self.node, lamT.node)
+        T = ir.FuncT(self.node, lamT._node)
         node = ir.Map(T, self.node, lambda_expr.node)
-        return FuncExpr(node)
+        return wrap(node)
 
     @property
     def identity(self):
@@ -698,19 +874,17 @@ class FuncExpr(Expr):
 
     @property
     def T(self) -> FuncType:
-        return tp.cast(FuncType, self._T)
+        return tp.cast(FuncType, super().T)
 
     @property
     def domain(self) -> DomainExpr:
-        return DomainExpr(self.T.node.dom)
+        return DomainExpr(self.T._node.dom)
 
     @property
     def image(self) -> DomainExpr:
-        T = ir.ImageT(
-            self.domain.node,
-            self.T.lamT
-        )
-        node = ir.Image(T, self.node)
+        arrT = self.T._rawT()
+        domT = ir.DomT(arrT.resT)
+        node = ir.Image(domT, self.node)
         return wrap(node)
 
     def apply(self, arg: Expr) -> Expr:
@@ -722,6 +896,20 @@ class FuncExpr(Expr):
     def map(self, fn: tp.Callable) -> FuncExpr:
         return self.domain.map(lambda a: _call_fn(fn, self.apply(a)))
 
+    # Function composition
+    # self: B->C @ f: A -> B
+    def compose(self, other: FuncExpr | LambdaExpr):
+        if not isinstance(other, (FuncExpr, LambdaExpr)):
+            raise ValueError(f"Expected FunExpr, got {other}")
+        if self.T.argT != other.T._rawT.resT:
+            raise ValueError(f"Composition {self.T} @ {other.T} is not valid")
+        def lam(a: Expr):
+            return self.apply(other.apply(a))
+        return self.map(lam)
+    
+    def __matmul__(self, other: FuncExpr | LambdaExpr):
+        return self.compose(other)
+    
     # Func[Dom(A) -> B] -> Func[Dom(A) -> (A, B)]
     def enumerate(self) -> FuncExpr:
         return self.domain.map(lambda a: TupleExpr.make((a, self.apply(a))))
@@ -763,12 +951,28 @@ class FuncExpr(Expr):
             raise ValueError(f"Can only index into funcs with a domain (i.e., a gather).\nFunc: {self}\n Got: {dom}")
         return self.gather(dom)
 
+def fin(n: IntOrExpr):
+    n = IntExpr.make(n).refine(lambda i: i >=0)
+    T = ir.DomT(carT=ir.IntT())
+    node = ir.Fin(T, n.node)
+    return DomainExpr(node)
+
 
 class EmptyFuncExpr(FuncExpr):
     def __init__(self, dom: DomainExpr):
+        self.empty = False
         super().__init__(dom.identity.node)
         self.dom = dom
+    
+    def __post_init__(self):
+        return super().__post_init__()
         self.empty = True
+
+    @property
+    def T(self) -> FuncType:
+        if self.empty:
+            raise ValueError("Must set EmptyFunc before using")
+        return super().T
 
     def __setitem__(self, k, val):
         val = Expr.make(val)
@@ -777,18 +981,13 @@ class EmptyFuncExpr(FuncExpr):
             T = k.node.T
             if isinstance(T, ir.RefT) and T.dom._key == self.dom.node._key:
                 lam_e = _make_lambda(k, val)
-                funcT = ir.FuncT(self.dom.node, lam_e.T.node)
+                funcT = ir.FuncT(self.dom.node, lam_e.T._node)
                 func_node = ir.Map(funcT, self.dom.node, lam_e.node)
                 self.node = func_node
                 self.empty = False
                 return
         raise ValueError(f"Must only set with iterator var produced from {self.dom}")
 
-    @property
-    def T(self) -> FuncType:
-        if self.empty:
-            raise ValueError("Must set EmptyFunc before using")
-        return super().T
 
     @property
     def domain(self) -> DomainExpr:
@@ -866,8 +1065,8 @@ class EmptyFuncExpr(FuncExpr):
             raise ValueError("Must set EmptyFunc before using")
         return super().__getitem__(dom)
 
-
 def wrap(node: ir.Node) -> Expr:
+    from .ast_nd import NDDomType, NDDomainExpr, NDArrayExpr
     T = wrapT(node.T)
     # Base theory types
     if isinstance(T, UnitType):
@@ -884,8 +1083,13 @@ def wrap(node: ir.Node) -> Expr:
         return TupleExpr(node)
     if isinstance(T, SumType):
         return SumExpr(node)
-    if isinstance(T, (DomainType, ImageType)):
+    if isinstance(T, NDDomType):
+        return NDDomainExpr(node)
+    if isinstance(T, DomainType):
         return DomainExpr(node)
     if isinstance(T, FuncType):
-        return FuncExpr(node)
+        if isinstance(T.domain, NDDomainExpr):
+            return NDArrayExpr(node)
+        else:
+            return FuncExpr(node)
     raise NotImplementedError(f"Cannot cast node {node} with T={T} to Expr")

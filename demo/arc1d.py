@@ -1,16 +1,16 @@
 from puzzlespec import make_enum, fin, var, func_var, Unit, Int, U, PuzzleSpecBuilder, VarSetter
-from puzzlespec.libs import std
+from puzzlespec.libs import std, nd
 
 p: PuzzleSpecBuilder = PuzzleSpecBuilder()
 # Puzzles of the following:
 # [A,B,C,A,B,C] -> [C,B,A,C,B,A]
 # [A,B,A,B] -> [B,A,B,A]
-max_dim = 30
+max_dim = 10
 Color, colors = make_enum('ABC')
 ##############
 # Raw inputs #
 ##############
-Ni = var(dom=std.range(1, max_dim), name='Ni')
+Ni = var(nd.range(1, max_dim), name='Ni')
 Gi = func_var(dom=fin(Ni), codom=Color, name='Gi')
 
 ###############

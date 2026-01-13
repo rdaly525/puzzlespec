@@ -8,20 +8,20 @@ Int = IntType(_ir.IntT())
 _base_types = ['Unit', 'Bool', 'Int']
 
 # ast constructors
-from .compiler.dsl.ast import cartprod, coproduct
-_ast = ['cartprod', 'coproduct']
+from .compiler.dsl.ast import cartprod, coproduct, fin
+_ast = ['cartprod', 'coproduct', 'fin']
 
 # ND constructors
-from .compiler.dsl.ast_nd import fin, interval, nd_cartprod
-_nd = ['fin', 'interval', 'nd_cartprod']
+#from .compiler.dsl.nd_lib import fin, range_ as range
+#_nd = ['fin', 'range']
 
 # constructors
 from .libs.std import sum, distinct, all_same, count, U, make_enum, enumT
 _constructors = ['sum', 'distinct', 'all_same', 'count', 'U', 'make_enum', 'enumT']
 
 # vars
-from .libs.var_def import param, gen_var, decision_var, var, func_var
-_vars = ['param', 'gen_var', 'decision_var', 'var', 'func_var']
+from .libs.var_def import var, func_var
+_vars = ['var', 'func_var']
 
 # helper classes
 from .compiler.dsl.spec_builder import PuzzleSpecBuilder
@@ -30,7 +30,6 @@ _helpers = ['PuzzleSpecBuilder', 'VarSetter']
 __all__ = [
     *_base_types,
     *_ast,
-    *_nd,
     *_constructors,
     *_vars,
     *_helpers,

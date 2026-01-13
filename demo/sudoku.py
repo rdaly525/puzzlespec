@@ -1,5 +1,5 @@
 from puzzlespec import fin, var, func_var, Unit, Int, U, PuzzleSpecBuilder, VarSetter
-from puzzlespec.libs import std
+from puzzlespec.libs import std, nd
 
 # Spec Builder
 p: PuzzleSpecBuilder = PuzzleSpecBuilder()
@@ -20,10 +20,10 @@ N = var(Int, name='N')
 ##############################
 
 # Grid structure: Domain of Cell indices
-Cells = fin(N)*fin(N)
+Cells = nd.fin(N)*nd.fin(N)
 
 # Domain for decision variables
-Digits = std.range(1, N+1) # [1..N)
+Digits = nd.range(1, N+1) # [1..N)
 
 #############################
 # Supports refinement types # 
@@ -36,19 +36,24 @@ box_size = var(dom=refinement_dom, name='box_size')
 # Functions are *total* #
 #########################
 # variables can be functions.
-cell_digits = func_var(dom=Cells, codom=Digits, name="cell_digits") # Cells -> Digits
+cell_digits = func_var(Cells, Digits, name="cell_digits") # Cells -> Digits
 
 ##############################
 # Quantifcation over domains #
 ##############################
 # Row constraint (numpy-style syntax)
-p += fin(N).forall(lambda r: std.distinct(cell_digits[Cells[r,:]]))
+#row_func = nd.fin(N).empty_func()
+#for r in nd.fin(N):
+#    row_func[r] = std.distinct(cell_digits[Cells[r,:]])
+#p += row_func.forall()
 
 # Alternate syntax
-p += cell_digits.cols().forall(lambda col_vals: std.distinct(col_vals))
+p += nd.rows(cell_digits).forall(lambda col_vals: std.distinct(col_vals))
+p += nd.cols(cell_digits).forall(lambda col_vals: std.distinct(col_vals))
 
 # Box constraint
-p += cell_digits.tiles(
+p += nd.tiles(
+    cell_digits,
     size=(box_size, box_size),
     stride=(box_size, box_size)
 ).forall(lambda box_vals: std.distinct(box_vals))

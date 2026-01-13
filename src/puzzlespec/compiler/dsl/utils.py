@@ -7,6 +7,11 @@ import functools as ft
 def _is_type(T: ir.Type) -> bool:
     return isinstance(T, ir.Type)
 
+def _unrwap_ref(T: ir.Type) -> ir.Type:
+    if isinstance(T, ir.RefT):
+        return _unrwap_ref(T.T)
+    return T
+
 def _is_kind(T: ir.Type, kind: tp.Type[ir.Type]) -> bool:
     if isinstance(T, ir.RefT):
         return _is_kind(T.T, kind)
@@ -16,7 +21,7 @@ def _is_same_kind(T1: ir.Type, T2: ir.Type) -> bool:
     if not _is_type(T1) or not _is_type(T2):
         raise TypeError(f"Cannot compare types {T1} and {T2}")
     assert _is_type(T1) and _is_type(T2)
-    return T1._key == T2._key
+    return T1.rawT() == T2.rawT()
 
 def _is_value(V: ir.Value) -> bool:
     return isinstance(V, (ir.Value, ir.BoundVar, ir.BoundVarHOAS))
@@ -36,19 +41,30 @@ def _get_bvs(node: ir.Node) -> set[ir.BoundVarHOAS]:
         return set()
     return set.union(*(_get_bvs(c) for c in node._children))
 
-def _substitute(node: ir.Node, bv: ir.BoundVarHOAS, arg: ir.Value):
-    if isinstance(node, ir.LambdaTHOAS):
-        lam_bv, lam_resT = node._children
-        if lam_bv is bv:
-            raise ValueError(f"Cannot substitute into lambda type {node}")
-    if isinstance(node, ir.LambdaHOAS):
-        lam_T, lam_bv, lam_body = node._children
-        if lam_bv is bv:
-            raise ValueError(f"Cannot substitute into lambda placeholder {node}")
-    if node is bv:
-        return arg
-    new_children = [_substitute(c, bv, arg) for c in node._children]
-    return node.replace(*new_children)
+def substitute(node: ir.Node, bv: ir.BoundVarHOAS, arg: ir.Value):
+    cache = {bv: arg}
+    ret = _substitute(node, cache)
+    del cache
+    return ret
+#def _substitute(node: ir.Node, bv: ir.BoundVarHOAS, arg: ir.Value, cache: tp.Mapping[ir.Node, ir.Node]):
+def _substitute(node: ir.Node, cache: tp.Mapping[ir.Node, ir.Node]):
+    #if isinstance(node, ir.LambdaTHOAS):
+    #    lam_bv, lam_resT = node._children
+    #    if lam_bv == bv:
+    #        raise ValueError(f"Cannot substitute into lambda type {node}")
+    #if isinstance(node, ir.LambdaHOAS):
+    #    lam_T, lam_bv, lam_body = node._children
+    #    if lam_bv == bv:
+    #        raise ValueError(f"Cannot substitute into lambda placeholder {node}")
+    if node in cache:
+        return cache[node]
+    new_children = []
+    for c in node._children:
+        new_children.append(_substitute(c, cache))
+    #new_children = [_substitute(c, bv, arg) for c in node._children]
+    new_node = node.replace(*new_children)
+    cache[node] = new_node
+    return new_node
 
 #def _applyT(lamT: ir.LambdaT, arg: ir.Value):
 #    assert isinstance(arg, ir.Value)
