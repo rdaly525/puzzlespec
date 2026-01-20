@@ -1,4 +1,4 @@
-from puzzlespec import fin, var, func_var, Unit, Int, U, PuzzleSpecBuilder, VarSetter
+from puzzlespec import var, func_var, Unit, Int, U, PuzzleSpecBuilder, VarSetter
 from puzzlespec.libs import std, nd
 
 # Spec Builder
@@ -11,9 +11,9 @@ p: PuzzleSpecBuilder = PuzzleSpecBuilder()
 N = var(Int, name='N')
 
 # Box size as sqrt(N)
-# box_size = var(Int, name='box_size')
+box_size = var(Int, name='box_size')
 # Constraints on parameters (N must be a perfect square)
-#p += [box_size*box_size == N, box_size >= 0]
+p += [box_size*box_size == N, box_size >= 0]
 
 ##############################
 # Domains are typed *values* #
@@ -48,29 +48,29 @@ cell_digits = func_var(Cells, Digits, name="cell_digits") # Cells -> Digits
 #p += row_func.forall()
 
 # Alternate syntax
-p += nd.rows(cell_digits).forall(lambda col_vals: std.distinct(col_vals))
-p += nd.cols(cell_digits).forall(lambda col_vals: std.distinct(col_vals))
+#p += nd.rows(cell_digits).forall(lambda row_vals: std.distinct(row_vals))
+#p += nd.cols(cell_digits).forall(lambda col_vals: std.distinct(col_vals))
 
 # Box constraint
-p += nd.tiles(
-    cell_digits,
-    size=(box_size, box_size),
-    stride=(box_size, box_size)
-).forall(lambda box_vals: std.distinct(box_vals))
+#p += nd.tiles(
+#    cell_digits,
+#    size=(box_size, box_size),
+#    stride=(box_size, box_size)
+#).forall(lambda box_vals: std.distinct(box_vals))
 
 #####################
 # Clues as Sum Type #
 #####################
-OptionalDigits = U(Unit) + Digits # Dom[𝟙] ⊎ Digits 
-givens = func_var(dom=Cells, codom=OptionalDigits, name="givens")
-
-# Given vals must be consistent with cell_digits
-p += Cells.forall(
-    lambda c: givens(c).match(      # pattern match for clue
-        lambda _: True,             # True if Unit
-        lambda v: cell_digits(c)==v # Same as cell_digit if given
-    )
-)
+#OptionalDigits = U(Unit) + Digits # Dom[𝟙] ⊎ Digits 
+#givens = func_var(Cells, OptionalDigits, name="givens")
+#
+## Given vals must be consistent with cell_digits
+#p += Cells.forall(
+#    lambda c: givens(c).match(      # pattern match for clue
+#        lambda _: True,             # True if Unit
+#        lambda v: cell_digits(c)==v # Same as cell_digit if given
+#    )
+#)
 
 spec = p.build("Sudoku")
 #print("UNOPTIMIZED SPEC")

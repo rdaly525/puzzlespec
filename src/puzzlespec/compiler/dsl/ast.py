@@ -1,5 +1,6 @@
 from __future__ import annotations
 import typing as tp
+
 from . import ir
 from dataclasses import dataclass
 from enum import Enum as _Enum
@@ -45,7 +46,7 @@ class TExpr:
     def U(self) -> DomainExpr:
         if self.is_ref:
             return self.ref_dom
-        return DomainExpr(ir.Universe(ir.DomT(self.node)))
+        return DomainExpr(ir.Universe(ir.DomT(self.node, False)))
 
     def refine(self, dom: DomainExpr):
         if self.is_ref:
@@ -62,7 +63,7 @@ class TExpr:
     @property
     def simplify(self) -> tp.Self:
         from ..passes.utils import simplify
-        return type(self)(simplify(self.node, 0))
+        return type(self)(simplify(self.node, hoas=True, verbose=0))
 
     def _bound_var(self, name=None):
         new_bv = ir.BoundVarHOAS(self.node, False, name)
@@ -70,11 +71,12 @@ class TExpr:
 
     def __eq__(self, other):
         if isinstance(other, TExpr):
-            return self._rawT() == other._rawT()
+            return self._rawT == other._rawT
         return False
 
-    def _rawT(self, keep_nd=False) -> ir.Node:
-        return self.node.rawT(keep_nd)
+    @property
+    def _rawT(self) -> ir.Node:
+        return self.node.rawT
 
 
 class UnitType(TExpr):
@@ -82,18 +84,21 @@ class UnitType(TExpr):
         super().__post_init__()
         if not isinstance(self._node, ir.UnitT):
             raise ValueError(f"Expected UnitType, got {self.node}")
+Unit = UnitType(ir.UnitT())
 
 class BoolType(TExpr):
     def __post_init__(self):
         super().__post_init__()
         if not isinstance(self._node, ir.BoolT):
             raise ValueError(f"Expected BoolType, got {self.node}")
+Bool = BoolType(ir.BoolT())
 
 class IntType(TExpr):
     def __post_init__(self):
         super().__post_init__()
         if not isinstance(self._node, ir.IntT):
             raise ValueError(f"Expected IntType, got {self.node}")
+Int = IntType(ir.IntT())
 
 class EnumType(TExpr):
     def __post_init__(self):
@@ -154,6 +159,10 @@ class LambdaType(TExpr):
             raise ValueError(f"Expected LambdaType, got {self.node}")
 
     @property
+    def inj_known(self):
+        return self._node.inj
+
+    @property
     def argT(self) -> TExpr:
         return wrapT(self._node.argT)
 
@@ -161,7 +170,7 @@ class LambdaType(TExpr):
         return wrapT(applyT(self._node, arg.node))
 
     def _raw_resT(self, keep_nd: bool=False):
-        return wrapT(self._rawT(keep_nd).resT)
+        return wrapT(self._rawT.resT)
 
 class ArrowType(TExpr):
     def __post_init__(self):
@@ -181,8 +190,16 @@ class ArrowType(TExpr):
 class DomainType(TExpr):
     def __post_init__(self):
         super().__post_init__()
-        if not isinstance(self._node, ir.DomT):
+        if not isinstance(self._node, ir._DomT):
             raise ValueError(f"Expected DomainType, got {self.node}")
+
+    @property
+    def is_ord(self) -> bool:
+        return self._node.ord
+
+    @property
+    def is_singleton(self) -> bool:
+        return self._node.is_singleton
 
     @property
     def carT(self) -> TExpr:
@@ -198,6 +215,10 @@ class FuncType(TExpr):
         return self.lamT.resT(arg)
 
     @property
+    def inj_known(self):
+        return self.lamT.inj_known
+
+    @property
     def domain(self) -> DomainExpr:
         return wrap(self.node.dom)
 
@@ -206,7 +227,7 @@ class FuncType(TExpr):
         return wrapT(self._node.lamT)
 
 def wrapT(T: ir.Type):
-    from .ast_nd import NDDomType
+    from . import ast_nd as nd
     assert isinstance(T, ir.Type)
     def get(T: ir.Type):
         if isinstance(T, ir.RefT):
@@ -229,9 +250,12 @@ def wrapT(T: ir.Type):
         case ir.LambdaTHOAS:
             return LambdaType(T)
         case ir.DomT:
-            return DomainType(T)
+            if _T.ord:
+                return nd.OrdDomainType(T)
+            else:
+                return DomainType(T)
         case ir.NDDomT:
-            return NDDomType(T)
+            return nd.NDDomainType(T)
         case ir.FuncT:
             return FuncType(T)
         case ir.ArrowT:
@@ -251,6 +275,7 @@ class Expr:
     def __post_init__(self):
         if not isinstance(self.node, ir.Value):
             raise ValueError(f"Expr must be an ir.Value, got {self.node}")
+        #self.type_check()
 
     @property
     def T(self) -> TExpr:
@@ -300,7 +325,7 @@ class Expr:
 
     @property
     def singleton(self):
-        domT = ir.DomT(self.T._node)
+        domT = ir.DomT(self.T._node, ord=True, is_singleton=True)
         node = ir.Singleton(domT, self.node)
         return DomainExpr(node)
 
@@ -684,27 +709,30 @@ def _make_lambda(bv: Expr, body: Expr, inj=False) -> LambdaExpr:
     #bv_closed = ir.BoundVarHOAS(bv.node.T, closed=True, name=bv.node.name)
     #lamT = ir.LambdaTHOAS(bv_closed, retT)
     #lambda_node = ir.LambdaHOAS(lamT, bv_closed, body_node, inj=inj)
-    lamT = ir.LambdaTHOAS(bv.node, retT)
+    lamT = ir.LambdaTHOAS(bv.node, retT, inj=inj)
     lambda_node = ir.LambdaHOAS(lamT, bv.node, body.node, inj=inj)    
     return LambdaExpr(lambda_node)
 
 def cartprod(*doms: DomainExpr) -> DomainExpr:
     if not all(isinstance(dom, DomainExpr) for dom in doms):
         raise ValueError(f"Expected all DomainExpr, got {doms}")
+    is_singleton = all(dom.T.is_singleton for dom in doms)
+    if all(dom.T.is_ord for dom in doms) and not is_singleton:
+        from . import ast_nd
+        return ast_nd.nd_cartprod(*doms)
     carT = ir.TupleT(*[dom.T.carT._node for dom in doms])
     dom_nodes = tuple(dom.node for dom in doms)
-    T = ir.DomT(carT)
+    ord = all(dom.T._node.ord for dom in doms)
+    T = ir.DomT(carT, ord, is_singleton)
     cartprod_node = ir.CartProd(T, *dom_nodes)
     return wrap(cartprod_node)
 
 def coproduct(*doms: DomainExpr) -> DomainExpr:
-    # TODO HANDLE IMAGES
     if not all(isinstance(other, DomainExpr) for other in doms):
         raise ValueError(f"Expected list of DomainExpr, got {doms}")
-    if not all(isinstance(d.T, DomainType) for d in doms):
-        raise NotImplementedError("Images not implemented for coproduct")
     carT = ir.SumT(*[dom.T.carT._node for dom in doms])
-    T = ir.DomT(carT)
+    ord = all(dom.T.is_ord for dom in doms)
+    T = ir.DomT(carT, ord)
     coprod_node = ir.DisjUnion(T, *[dom.node for dom in doms])
     return wrap(coprod_node)
 
@@ -733,40 +761,26 @@ class DomainExpr(Expr):
         return IntExpr(node)
 
     @property
-    def is_singleton(self) -> bool:
-        return isinstance(self.node, ir.Singleton)
-
-    @property
     def unique_elem(self) -> bool:
-        if not self.is_singleton:
+        if not self.T.is_singleton:
             raise ValueError()
         return wrap(ir.Unique(self.T.carT._node, self.node))
 
     def restrict(self, pred_fun: tp.Callable) -> DomainExpr:
         func_expr = self.map(pred_fun)
+        func_expr.type_check()
+        if func_expr.T.lamT.argT != self.T.carT:
+            raise ValueError(f"Cannot restrict {self.T} with {func_expr.T.lamT.argT}")
         node = ir.Restrict(self.T._node, func_expr.node)
-        return DomainExpr(node)
+        d = DomainExpr(node)
+        d.type_check()
+        return d
 
     def contains(self, elem: Expr):
         elem = Expr.make(elem)
         node = ir.IsMember(ir.BoolT(), self.node, elem.node)
         return BoolExpr(node)
 
-    #def dom_proj(self, idx: int) -> DomainExpr:
-    #    assert isinstance(idx, int)
-    #    assert isinstance(self.T, DomainType)
-    #    if not isinstance(self.T.carT, TupleType):
-    #        raise NotImplementedError("cannot project to non-tuple carT")
-    #    if idx not in range(len(self.T.carT)):
-    #        raise IndexError(f"Index {idx} out of range for tuple of length {len(self.T.carT)}")
-    #    if isinstance(self.node, ir.CartProd):
-    #        return DomainExpr(self.node._children[1:][idx])
-    #    _ord = self.T.node._ord[idx]
-    #    _elemAt = self.T.node._elemAt[idx]
-    #    proj_T = ir.DomT(self.T.carT[idx].node, _ord, _elemAt)
-    #    node = ir.DomProj(proj_T, self.node, idx)
-    #    return DomainExpr(node)
-        
     def __add__(self, other: 'DomainExpr') -> 'DomainExpr':
         return coproduct(self, other)
     
@@ -817,10 +831,14 @@ class DomainExpr(Expr):
         raise ValueError("Cannot use 'in'. Use dom.contains(val). Blame python for not being able to do this")
     
     def gather(self, dom: DomainExpr) -> DomainExpr:
+        if dom.T != self.T:
+            raise ValueError()
         assert isinstance(dom, DomainExpr)
         return dom.refine(lambda _: dom <= self)
 
     def __getitem__(self, dom: DomainExpr) -> DomainExpr:
+        if dom.T != self.T:
+            raise ValueError()
         if not isinstance(dom, DomainExpr):
             raise ValueError()
         return self.gather(dom)
@@ -882,8 +900,9 @@ class FuncExpr(Expr):
 
     @property
     def image(self) -> DomainExpr:
-        arrT = self.T._rawT()
-        domT = ir.DomT(arrT.resT)
+        arrT = self.T._rawT
+        ord = self.domain.T.is_ord and self.T.inj_known
+        domT = ir.DomT(arrT.resT, ord)
         node = ir.Image(domT, self.node)
         return wrap(node)
 
@@ -936,9 +955,6 @@ class FuncExpr(Expr):
     def sum(self) -> IntExpr:
         return IntExpr(ir.SumReduce(ir.IntT(), self.node))
     
-    def __contains__(self, elem: Expr) -> BoolExpr:
-        return elem in self.image
-
     def __call__(self, val: Expr) -> Expr:
         return self.apply(val)
     
@@ -947,15 +963,11 @@ class FuncExpr(Expr):
 
     # Basically a 'gather'
     def __getitem__(self, dom: DomainExpr) -> FuncExpr:
+        if dom.T.is_singleton:
+            return self(dom.unique_elem)
         if not isinstance(dom, DomainExpr):
             raise ValueError(f"Can only index into funcs with a domain (i.e., a gather).\nFunc: {self}\n Got: {dom}")
         return self.gather(dom)
-
-def fin(n: IntOrExpr):
-    n = IntExpr.make(n).refine(lambda i: i >=0)
-    T = ir.DomT(carT=ir.IntT())
-    node = ir.Fin(T, n.node)
-    return DomainExpr(node)
 
 
 class EmptyFuncExpr(FuncExpr):
@@ -1066,7 +1078,7 @@ class EmptyFuncExpr(FuncExpr):
         return super().__getitem__(dom)
 
 def wrap(node: ir.Node) -> Expr:
-    from .ast_nd import NDDomType, NDDomainExpr, NDArrayExpr
+    from . import ast_nd as nd
     T = wrapT(node.T)
     # Base theory types
     if isinstance(T, UnitType):
@@ -1083,13 +1095,15 @@ def wrap(node: ir.Node) -> Expr:
         return TupleExpr(node)
     if isinstance(T, SumType):
         return SumExpr(node)
-    if isinstance(T, NDDomType):
-        return NDDomainExpr(node)
     if isinstance(T, DomainType):
+        if isinstance(T, nd.OrdDomainType):
+            return nd.OrdDomainExpr(node)
+        if isinstance(T, nd.NDDomainType):
+            return nd.NDDomainExpr(node)
         return DomainExpr(node)
     if isinstance(T, FuncType):
-        if isinstance(T.domain, NDDomainExpr):
-            return NDArrayExpr(node)
+        if isinstance(T.domain, nd.NDDomainExpr):
+            return nd.NDArrayExpr(node)
         else:
             return FuncExpr(node)
     raise NotImplementedError(f"Cannot cast node {node} with T={T} to Expr")

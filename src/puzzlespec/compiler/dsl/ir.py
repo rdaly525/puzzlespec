@@ -54,7 +54,16 @@ class Node:
         new_fields = {**self.field_dict, **kwargs}
         if (new_fields == self.field_dict) and (new_children == self._children):
             return self
-        return type(self)(*new_children, **new_fields)
+        #from ..passes.analyses.type_check import type_check, stripT
+        #if isinstance(self, Value):
+        #    if stripT(self.T) != stripT(new_children[0]):
+        #        raise ValueError()
+        new_node = type(self)(*new_children, **new_fields)
+        #if isinstance(self, DomT):
+        #    if self != new_node:
+        #        raise ValueError()
+        #type_check(new_node)
+        return new_node
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -116,9 +125,10 @@ class Type(Node):
     def T(self):
         return self
     
-    def rawT(self, keep_nd: bool=False):
+    @property
+    def rawT(self):
         from ..passes.analyses.type_check import stripT
-        return stripT(self, keep_nd)
+        return stripT(self)
 
 ## Base types
 class UnitT(Type):
@@ -196,25 +206,57 @@ class SumT(Type):
     def __len__(self):
         return len(self._children)
 
-    def __repr__(self):
-        return "⊎".join(str(child) for child in self._children)
+    #def __repr__(self):
+    #    return "⊎".join(str(child) for child in self._children)
 
+class _DomT(Type):
+    ord = False
+    is_singleton=False
 
-class DomT(Type):
+    @property
+    def carT(self) -> Type:
+        raise NotImplementedError()
+
+class DomT(_DomT):
+    _fields = ('ord', 'is_singleton')
     _numc = 1
-    def __init__(self, carT: Type):
+    def __init__(self, carT: Type, ord: bool, is_singleton: bool=False):
+        self.ord = ord
+        self.is_singleton = is_singleton
         super().__init__(carT)
 
     @property
     def carT(self) -> Type:
         return self._children[0]
 
-    def __repr__(self):
-        return f"DomT[{self.carT}]"
+    #def __repr__(self):
+    #    return f"DomT[{self.carT}]"
+
+class NDDomT(_DomT):
+    _fields=('axes',)
+    _numc=-1
+    def __init__(self, *factors: Type, axes: tp.Tuple[int]):
+        assert all(isinstance(f, DomT) for f in factors)
+        self.axes = axes
+        super().__init__(*factors)
+    
+    @property
+    def carT(self) -> Type:
+        return TupleT(*(f.carT for f in self._children))
+    
+    @property
+    def factors(self) -> tp.Tuple[_DomT]:
+        return self._children
+
+    @property
+    def ord(self) -> bool:
+        return all(f.ord for f in self.factors)
 
 class LambdaTHOAS(Type):
+    _fields = ('inj',)
     _numc = 2
-    def __init__(self, bound_var: Value, resT: Type):
+    def __init__(self, bound_var: Value, resT: Type, inj=False):
+        self.inj = inj
         super().__init__(bound_var, resT)
 
     @property
@@ -257,8 +299,8 @@ class FuncT(Type):
     def lamT(self) -> LambdaT:
         return self._children[1]
 
-    def __repr__(self):
-        return f"Func[{self.dom.T}, {self.lamT}]"
+    #def __repr__(self):
+    #    return f"Func[{self.dom.T}, {self.lamT}]"
 
     def eq(self, other):
         return isinstance(other, FuncT) and self.dom.eq(other.dom) and self.lamT.eq(other.lamT)
@@ -275,7 +317,6 @@ class ArrowT(Type):
     @property
     def resT(self) -> Type:
         return self._children[1]
-
 
 class RefT(Type):
     _numc = 2
@@ -310,10 +351,6 @@ class ApplyT(Type):
         return f"AppT({self.piT}, {self.arg})"
 
     @property
-    def piT(self) -> LambdaT:
-        return self._children[0]
-
-    @property
     def arg(self) -> Value:
         return self._children[1]
 
@@ -326,41 +363,41 @@ class ApplyT(Type):
 #
 #
 #
-class NDDomT(Type):
-    _numc = -1
-    _fields = ('base_rank',)
-    def __init__(self,
-        embed: Value, # S -> B (BOTH IN TUPLE FORM) # Lambda
-        elem: Value, # B -> E (B IN TUPLE FORM) # Lambda
-        *doms: Value, # base_rank base_doms (B), + rank shape_doms (S)
-        base_rank: int
-    ):
-        self.base_rank = base_rank
-        super().__init__(embed, elem, *doms)
-
-    @property
-    def rank(self) -> int:
-        return len(self._children)-2-self.base_rank
-
-    @property
-    def base_doms(self):
-        return tuple(self._children[2:self.base_rank+2])
-
-    @property
-    def shape_doms(self):
-        return tuple(self._children[2+self.base_rank:])
-
-    @property
-    def embed(self):
-        return self._children[0]
-
-    @property
-    def elem(self):
-        return self._children[1]
-
-    @property
-    def carT(self):
-        return self.elem.T.resT
+#class NDDomT(Type):
+#    _numc = -1
+#    _fields = ('base_rank',)
+#    def __init__(self,
+#        embed: Value, # S -> B (BOTH IN TUPLE FORM) # Lambda
+#        elem: Value, # B -> E (B IN TUPLE FORM) # Lambda
+#        *doms: Value, # base_rank base_doms (B), + rank shape_doms (S)
+#        base_rank: int
+#    ):
+#        self.base_rank = base_rank
+#        super().__init__(embed, elem, *doms)
+#
+#    @property
+#    def rank(self) -> int:
+#        return len(self._children)-2-self.base_rank
+#
+#    @property
+#    def base_doms(self):
+#        return tuple(self._children[2:self.base_rank+2])
+#
+#    @property
+#    def shape_doms(self):
+#        return tuple(self._children[2+self.base_rank:])
+#
+#    @property
+#    def embed(self):
+#        return self._children[0]
+#
+#    @property
+#    def elem(self):
+#        return self._children[1]
+#
+#    @property
+#    def carT(self):
+#        return self.elem.T.resT
 
 ##############################
 ## Core-level IR Value nodes (Used throughout entire compiler flow)
@@ -567,14 +604,14 @@ class ProperSubset(Value):
         super().__init__(T, domA, domB)
 
 class Union(Value):
-    _numc = 3
-    def __init__(self, T: Type, domA: Value, domB: Value):
-        super().__init__(T, domA, domB)
+    _numc = -1
+    def __init__(self, T: Type, *doms: Value):
+        super().__init__(T, *doms)
 
 class Intersection(Value):
-    _numc = 3
-    def __init__(self, T: Type, domA: Value, domB: Value):
-        super().__init__(T, domA, domB)
+    _numc = -1
+    def __init__(self, T: Type, *doms: Value):
+        super().__init__(T, *doms)
 
 class TupleLit(Value):
     _numc = -1
@@ -799,10 +836,10 @@ class GtEq(Value):
 #    def __init__(self, T: Type, dom: Value, a: Value, b: Value):
 #        super().__init__(T, dom, a, b)
 
-class Gather(Value):
-    _numc = 3
-    def __init__(self, T: Type, dom: Value, base_dom: Value):
-        super().__init__(T, dom, base_dom)
+#class Gather(Value):
+#    _numc = 3
+#    def __init__(self, T: Type, dom: Value, base_dom: Value):
+#        super().__init__(T, dom, base_dom)
 
 
 # Common Fold Values
@@ -826,6 +863,28 @@ class AllSame(Value):
     _numc = 2
     def __init__(self, T: Type, func: Value):
         super().__init__(T, func)
+
+# ND nodes
+class Slice(Value):
+    _numc = 5
+    def __init__(self, T: Type, dom: Value, lo: Value, hi: Value, step: Value):
+        super().__init__(T, dom, lo, hi, step)
+
+class ElemAt(Value):
+    _numc = 3
+    def __init__(self, T: Type, dom: Value, idx: Value):
+        super().__init__(T, dom, idx)
+
+class Range(Value):
+    _numc = 4
+    def __init__(self, T: Type, lo: Value, hi: Value, step: Value):
+        super().__init__(T, lo, hi, step)
+
+class Enumerate(Value):
+    _numc = 2
+    def __init__(self, T: Type, dom: Value):
+        super().__init__(T, dom)
+
 
 ##############################
 ## Constructor-level IR nodes (Used for construction but immediatley gets transformed for spec)

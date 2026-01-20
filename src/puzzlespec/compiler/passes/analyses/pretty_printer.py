@@ -149,17 +149,13 @@ class PrettyPrinterPass(Analysis):
     
     @handles(ir.NDDomT)
     def _(self, node: ir.NDDomT) -> str:
-        embed_s, elem_s, *ds = self.visit_children(node)
-        bs = ds[:node.base_rank]
-        ss = ds[node.base_rank:]
-        bs = "B=("+ ",".join(bs) + ",)"
-        ss = "S=("+ ",".join(ss) + ",)"
-        bs = self._indent_expr(bs)
-        ss = self._indent_expr(ss)
-        embed_s = self._indent_expr(f"embed={embed_s}")
-        elem_s = self._indent_expr(f"elem={elem_s}")
-        return f"NDDom[\n{bs},\n{ss},\n{embed_s},\n{elem_s}\n]"
-
+        #factors = self.visit_children(node)
+        factors = node._children
+        shape_Ts = [factors[a].carT for a in node.axes]
+        shape_s = self.visit(ir.TupleT(*shape_Ts))
+        base_s = self.visit(ir.TupleT(*(f.carT for f in factors)))
+        return f"NDDom[{shape_s} -> {base_s}]"
+        
 
     def _new_bv_name(self, t: bool=False) -> str:
         if t:
@@ -188,8 +184,9 @@ class PrettyPrinterPass(Analysis):
 
     @handles(ir.LambdaT, ir.LambdaTHOAS)
     def _(self, node: ir.Node) -> str:
+        argT = self.visit(node._children[0].T)
         bv, resT = self._lambdaT(node)
-        return f"{bv} -> {resT}"
+        return f"({bv} : {argT}) -> {resT}"
 
     @handles(ir.FuncT)
     def _(self, node: ir.FuncT):
@@ -474,16 +471,15 @@ class PrettyPrinterPass(Analysis):
         return "(" + "×".join(doms) + ",)"
         #return "×".join(doms)
 
-    @handles(ir.Gather)
-    def _(self, node: ir.Gather) -> str:
-        T, dom, base_dom = self.visit_children(node)
-        return dom
+    #@handles(ir.Gather)
+    #def _(self, node: ir.Gather) -> str:
+    #    T, dom, base_dom = self.visit_children(node)
+    #    return dom
 
-    #@handles(ir.DomProj)
-    #def _(self, node: ir.DomProj) -> str:
-    #    # TODO: Determine how to pretty print DomProj
-    #    _, dom_expr = self.visit_children(node)  # Skip type at index 0
-    #    return f"π{subscript(node.idx)}⟦{dom_expr}⟧"
+    @handles(ir.DomProj)
+    def _(self, node: ir.DomProj) -> str:
+        _, dom_expr = self.visit_children(node)  # Skip type at index 0
+        return f"π{subscript(node.idx)}⟦{dom_expr}⟧"
 
     # Collections - Tuple nodes
     @handles(ir.TupleLit)
@@ -705,6 +701,26 @@ class PrettyPrinterPass(Analysis):
     def _(self, node: ir.AllSame) -> str:
         _, vals_expr = self.visit_children(node)  # Skip type at index 0
         return f"same({vals_expr})"
+
+    @handles(ir.ElemAt)
+    def _(self, node: ir.ElemAt) -> str:
+        _, dom_expr, idx_expr = self.visit_children(node)
+        return f"{dom_expr}[{idx_expr}]"
+
+    @handles(ir.Slice)
+    def _(self, node: ir.Slice) -> str:
+        _, dom_expr, lo_expr, hi_expr, step_expr = self.visit_children(node)
+        return f"{dom_expr}[{lo_expr}:{hi_expr}:{step_expr}]"
+
+    @handles(ir.Range)
+    def _(self, node: ir.Range) -> str:
+        _, lo_expr, hi_expr, step_expr = self.visit_children(node)
+        return f"{{{lo_expr}:{hi_expr}:{step_expr}}}"
+
+    @handles(ir.Enumerate)
+    def _(self, node: ir.Enumerate) -> str:
+        _, dom_expr = self.visit_children(node)
+        return f"enum({dom_expr})"
 
     ##############################
     ## Constructor-level IR nodes (Used for construction but immediately gets transformed for spec)

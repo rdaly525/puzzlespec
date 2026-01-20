@@ -6,8 +6,9 @@ from .transforms.beta_reduction import BetaReductionHOAS, BetaReductionPass
 from .transforms.refine import RefineSimplify
 from .transforms import ConstFoldPass, AlgebraicSimplificationPass
 from .transforms.resolve_vars import ResolveBoundVars
+from .transforms.ord import OrdSimplificationPass
 
-def simplify(node: ir.Node, hoas: bool=False, verbose: int = 2) -> ir.Node:
+def simplify(node: ir.Node, hoas: bool=False, verbose: int = 0) -> ir.Node:
     opt_passes = [
         TypeCheckingPass(),
         [
@@ -15,9 +16,10 @@ def simplify(node: ir.Node, hoas: bool=False, verbose: int = 2) -> ir.Node:
             ConstFoldPass(),
             AlgebraicSimplificationPass(),
             DomainSimplificationPass(),
+            OrdSimplificationPass(),
             #RefineSimplify(),
             BetaReductionHOAS() if hoas else BetaReductionPass()
-        ]
+        ],
     ]
     ctx = Context()
     pm = PassManager(*opt_passes, verbose=verbose)

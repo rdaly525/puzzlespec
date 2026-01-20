@@ -2,10 +2,15 @@ from __future__ import annotations
 import typing as tp
 range_ = range
 from ..compiler.dsl import ir, ast, ast_nd as nd
-#from ..passes.analyses.type_check import get_rawT
+from ..compiler.dsl.ast_nd import fin
 
-def fin(n: ast.IntOrExpr):
-    return nd.NDDomainExpr.make(ast.fin(n))
+#def affine(dom: nd.OrdDomainExpr, a: ast.IntExpr, b: ast.IntExpr) -> nd.OrdDomainExpr:
+#    if not isinstance(dom, nd.OrdDomainExpr):
+#        raise ValueError("Must be seq")
+#    a, b = ast.IntExpr.make(a), ast.IntExpr(b)
+#    node = ir.Affine(dom.T.node, dom.node, a.node, b.node)
+#    return OrdDomainExpr(node)
+
 
 def nd_dom(shape: tp.Tuple[ast.IntOrExpr]):
     return nd.nd_cartprod(*(fin(n) for n in shape))
@@ -20,8 +25,8 @@ def range(*args: ast.IntOrExpr) -> nd.NDDomainExpr:
     if len(args) == 3:
         lo, hi, step = args
     lo, hi, step = tuple(ast.IntExpr.make(v) for v in (lo, hi, step))
-    N = (hi-lo)//step
-    return fin(N).map(lambda i: (step*i[0]+lo,), _inj=True).image
+    node = ir.Range(ir.DomT(ir.IntT(), True), lo.node, hi.node, step.node)
+    return ast.wrap(node)
 
 ArrOrDom = tp.Union[nd.NDDomainExpr, nd.NDArrayExpr]
 
@@ -30,30 +35,30 @@ def windows(dom: ArrOrDom, size: ast.IntOrExpr, stride: ast.IntOrExpr=1) -> nd.N
 
 def tiles(ndom: ArrOrDom, size: tp.Tuple[ast.IntOrExpr, ...], stride: tp.Tuple[ast.IntOrExpr, ...]=None) -> nd.NDArrayExpr:
     if isinstance(ndom, nd.NDArrayExpr):
-        dom_tiles = ndom.domain.tiles(size, stride)
+        dom_tiles = tiles(ndom.domain, size, stride)
         return dom_tiles.map(
             lambda tile_dom: ndom[tile_dom]
         )
-    elif isinstance(ndom, nd.NDDomainExpr):
-        rank = ndom.rank
-        if stride == None:
-            strides = [1 for _ in range_(rank)]
-        strides = [ast.IntExpr.make(s) for s in stride]
-        sizes = [ast.IntExpr.make(s) for s in size]
-        if len(sizes) != rank or len(strides) != rank:
-            raise ValueError(f"Expected size and stride for all dimensions ({rank}), got {size} and {stride}")
-        odoms = []
-        for size, stride, dom in zip(sizes, strides, ndom.shape_doms):
-            odom = ast.fin((dom.size-(size-stride))/stride)
-            odoms.append(odom)
-        odom = nd.NDDomainExpr(tuple(odoms))
-        def lam(oidx: ast.TupleExpr,ndom=ndom):
-            slices = []
-            for oi, size, stride in zip(sizes, strides, oidx):
-                slices.append(slice(oi*stride, oi*stride+size))
-            return ndom[*slices]
-        return odom.map(lam)
-    raise ValueError()
+    if not isinstance(ndom, nd.NDDomainExpr):
+        raise ValueError()
+    rank = ndom.rank
+    if stride == None:
+        stride = [1 for _ in range_(rank)]
+    if len(size) != rank or len(stride) != rank:
+        raise ValueError(f"Expected size and stride for all dimensions ({rank}), got {size} and {stride}")    
+    strides = [ast.IntExpr.make(s) for s in stride]
+    sizes = [ast.IntExpr.make(s) for s in size]
+    odoms = []
+    for size, stride, dom in zip(sizes, strides, ndom.shape_doms):
+        odom = fin((dom.size-(size-stride))/stride)
+        odoms.append(odom)
+    odom = nd.nd_cartprod(*odoms)
+    def lam(oidx: ast.TupleExpr, ndom=ndom):
+        slices = []
+        for oi, size, stride in zip(oidx, sizes, strides):
+            slices.append(slice(oi*stride, oi*stride+size))
+        return ndom[*slices]
+    return odom.map(lam, _inj=True).image
 
 def slices(dom: ArrOrDom, i: int) -> nd.NDDomainExpr | nd.NDArrayExpr:
     if isinstance(dom, nd.NDArrayExpr):
@@ -62,10 +67,11 @@ def slices(dom: ArrOrDom, i: int) -> nd.NDDomainExpr | nd.NDArrayExpr:
     elif isinstance(dom, nd.NDDomainExpr):
         if i not in range_(dom.rank):
             raise ValueError("Invalid slices")
-        domk = nd.NDDomainExpr.make(dom.T.shape_doms[i])
-        def lam(idx: ast.TupleExpr):
-            slices = list(slice(None) for _ in dom.T.shape_doms)
-            slices[i] = idx[0]
+        domk = dom.shape_doms[i]
+        rank = dom.rank
+        def lam(idx: ast.IntExpr):
+            slices = [slice(None) for _ in range_(rank)]
+            slices[i] = idx
             slice_dom = dom[*slices]
             return slice_dom
         dom = domk.map(lam, _inj=True).image

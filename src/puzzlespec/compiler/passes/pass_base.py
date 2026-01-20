@@ -12,6 +12,7 @@ if TYPE_CHECKING:
 
 class AnalysisObject(ABC):
     persistent = False
+    gen_pass = None
 
 class Context:
     def __init__(self, *args):
@@ -331,6 +332,9 @@ class PassManager:
                     assert isinstance(analysis_pass, Analysis)
                     anal_obj= analysis_pass(root, ctx)
                     ctx.add(anal_obj)
+                    assert ctx.try_get(req_analysis) is not None
+                elif gen_pass := req_analysis.gen_pass:
+                    self._run_pass(root, gen_pass(), ctx)
                     assert ctx.try_get(req_analysis) is not None
                 else:
                     raise ValueError(f"Analysis {req_analysis} not found in analysis map")

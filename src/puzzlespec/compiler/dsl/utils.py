@@ -21,7 +21,7 @@ def _is_same_kind(T1: ir.Type, T2: ir.Type) -> bool:
     if not _is_type(T1) or not _is_type(T2):
         raise TypeError(f"Cannot compare types {T1} and {T2}")
     assert _is_type(T1) and _is_type(T2)
-    return T1.rawT() == T2.rawT()
+    return T1.rawT == T2.rawT
 
 def _is_value(V: ir.Value) -> bool:
     return isinstance(V, (ir.Value, ir.BoundVar, ir.BoundVarHOAS))

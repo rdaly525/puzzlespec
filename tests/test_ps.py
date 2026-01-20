@@ -1,10 +1,10 @@
-from puzzlespec import make_enum, fin, var, func_var, Unit, Int, U, PuzzleSpecBuilder, VarSetter
+from puzzlespec import make_enum, var, func_var, Unit, Int, U, PuzzleSpecBuilder, VarSetter
 from puzzlespec.libs import std
 from puzzlespec.libs import optional as opt, topology as topo, nd
-
+fin = nd.fin
 def test_basic():
-    f = fin(5)
-    g = fin(5)*fin(3)
+    f = nd.fin(5)
+    g = nd.fin(5)*nd.fin(3)
     h = g.map(lambda i, j: i+j)
     print(h)
     print(h.simplify)
@@ -12,49 +12,72 @@ def test_basic():
 #test_basic()
 
 def test_vars():
-    n = var(Int,name='n')
-    m = var(fin(n),name='m')
-    print(n)
-    print(m)
+    n = var(Int, name='n')
+    #m = var(fin(n), name='m')
+    m = var(Int, name='m')
     f0 = func_var(fin(n), fin(m), name='f0')
+    print(f0.T)
     print(f0.T.simplify)
     f1 = func_var(fin(n), lambda i: fin(m+i), name='f1')
     print(f1.T.simplify)
     f2 = func_var(fin(n), lambda i: fin(m+i), lambda i, j: fin(i+j) + fin(j), name='f2')
     print(f2.T.simplify)
-    print(f2(m)(n).T)
+    print(f2(3)(4).T.simplify)
     print(f2(m)(n).T._rawT)
 
 #test_vars()
 
+def test_1d():
+    n = var(Int, name='n')
+    f1 = fin(n)
+    f2 = nd.range(2, n)
+    for f in (f1, f2):
+        print("*"*20)
+        print(f)
+        v0 = f[3]
+        print(v0.simplify)
+        v1 = f[3:5]
+        print(v1.simplify)
+        wins = f.windows(3, 3)
+        print(wins.simplify)
+        win1 = wins[n]
+        print(win1.simplify)
+        g = f.map(lambda i: i*i)
+        print(g.simplify)
+        g0 = g[n:n+3][2]
+        print(g0.simplify)
+
+#test_1d()
+
 def test_nd():
     n = var(Int, name='n')
-    #d = nd.range(-3,3) * nd.range(3, n)
-    d = nd.fin(n) * nd.fin(6)
-    d.type_check()
-    print("T1")
-    #r = nd.tiles(d, (2,2),(2,2))
-    #print(r.simplify)
-    #assert 0
-    g = d[2:5,3]
-    gsimp = g.simplify
-    gsimp.type_check()
-    print(gsimp.T)
-    print("T2")
-    #print(d[g].simplify)
+    m = var(Int, name='m')
+    d = nd.fin(n) * nd.fin(m)
+    g = d[2:5, 3]
+    print(g)
+    print(g.simplify)
+    rows = nd.rows(d)
+    print(rows.simplify)
+    row5 = rows[5]
+    print(row5)
+    print(row5.simplify)
+    tiles = nd.tiles(d, (2,2), (2,2))
+    print(tiles)
+    print(tiles.simplify)
     f = d.map(lambda i, j: i*2+j, _inj=True)
-    f.type_check()
-    print("T3")
-    #print(f.T.simplify)
-    print("T4")
-    #print(f.simplify)
-    print("T5")
+    print(f)
     print(f.simplify)
-    print("T6")
     print(f[1,2].simplify)
+    rows = nd.rows(f)
+    print(rows)
+    print("*"*30)
+    print(rows.simplify)
+    tiles = nd.tiles(f, (2,2), (2,2))
+    print(tiles)
+    a = tiles.forall(lambda vals: std.distinct(vals))
+    print(a.simplify)
 
-
-#test_nd()
+test_nd()
 
 def test_nd_vars():
     n = var(Int, name='n')
@@ -81,8 +104,7 @@ def test_nd_vars():
     print("*"*30)
     print(b.simplify)
 
-test_nd_vars()
-
+#test_nd_vars()
 
 
 def test_empty_func():

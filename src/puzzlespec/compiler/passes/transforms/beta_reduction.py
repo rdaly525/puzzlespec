@@ -132,7 +132,7 @@ class BetaReductionHOAS(Transform):
     def _(self, node: ir.BoundVarHOAS):
         if node.name in self.bv_map:
             #print(f"  BV: {node.name} -> {self.bv_map[node.name]}")
-            return self.visit(self.bv_map[node.name])
+            return self.bv_map[node.name]
         return node
 
     @handles(ir.ApplyT)
@@ -160,8 +160,10 @@ class BetaReductionHOAS(Transform):
         T, lam, arg = node._children
         assert isinstance(lam, ir.LambdaHOAS)
         T, bv, body = lam._children
+        if bv.name in self.bv_map:
+            raise ValueError()
         assert bv.name not in self.bv_map
-        self.bv_map[bv.name] = arg
+        self.bv_map[bv.name] = self.visit(arg)
         #print(f"Replace {bv.name} with {arg} in (")
         #print(f"  BODY:{body}")
         new_body = self.visit(body)

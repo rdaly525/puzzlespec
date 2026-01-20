@@ -8,8 +8,8 @@ Int = IntType(_ir.IntT())
 _base_types = ['Unit', 'Bool', 'Int']
 
 # ast constructors
-from .compiler.dsl.ast import cartprod, coproduct, fin
-_ast = ['cartprod', 'coproduct', 'fin']
+from .compiler.dsl.ast import cartprod, coproduct
+_ast = ['cartprod', 'coproduct']
 
 # ND constructors
 #from .compiler.dsl.nd_lib import fin, range_ as range

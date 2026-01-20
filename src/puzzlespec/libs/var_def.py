@@ -1,5 +1,4 @@
-from puzzlespec.compiler.dsl.ast_nd import NDDomainExpr
-from ..compiler.dsl import ast, ir, utils
+from ..compiler.dsl import ast, ir
 import typing as tp
 
 
@@ -56,7 +55,6 @@ def func_var(
         return T
     full_sort = make_sort(doms)
     var = ir.VarHOAS(full_sort, name=name, metadata=metadata)
-    # TODO I want this to behave like an ND-array 
     var = ast.wrap(var)
     return var
     
