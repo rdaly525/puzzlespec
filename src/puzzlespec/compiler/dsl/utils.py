@@ -98,21 +98,3 @@ def _lit_val(node: ir.Node) -> tp.Optional[int|bool]:
     if isinstance(node, ir.Lit):
         return node.val
     return None
-
-def simplify(node: ir.Node) -> ir.Node:
-    assert 0
-    ctx = Context(self.envs_obj)
-    analysis_map = {
-        TypeMap: TypeCheckingPass()
-    }
-
-    opt_passes = [
-        CanonicalizePass(),
-        AlgebraicSimplificationPass(),
-        ConstFoldPass(),
-        DomainSimplificationPass(),
-        RefineSimplify(),
-        BetaReductionPass(),
-        #CSE(),
-    ]
-

@@ -122,7 +122,7 @@ class Node:
 
 class Type(Node):
     @property
-    def T(self):
+    def T(self) -> tp.Self:
         return self
     
     @property
@@ -413,7 +413,7 @@ class Value(Node):
         super().__init__(T, *children)
     
     @property
-    def T(self):
+    def T(self) -> Type:
         return self._children[0]
 
 class VarRef(Value):

@@ -192,7 +192,7 @@ class PrettyPrinterPass(Analysis):
     def _(self, node: ir.FuncT):
         dom, lamT = node._children
         dom_str, (bv_name, resT_str) = self.visit(dom), self._lambdaT(lamT)
-        return f"({bv_name} : {dom_str}) -> {resT_str}"
+        return f"({bv_name} : {self.visit(lamT.argT)} ∈ {dom_str}) -> {resT_str}"
     
     @handles(ir.RefT)
     def _(self, node: ir.RefT):
@@ -520,13 +520,13 @@ class PrettyPrinterPass(Analysis):
         _, scrut_node, *branches = node._children
         scrut_expr = self.visit(scrut_node)
         assert all(isinstance(branch, (ir.Lambda, ir.LambdaHOAS)) for branch in branches)
-        branch_exprs = [self.visit(branch) for branch in branches]
+        branch_exprs = [self._lambda(branch) for branch in branches]
         branch_argTs = []
         for branch_lam in branches:
             argT = self.visit(branch_lam.T.argT)
             branch_argTs.append(argT)
         #branch_exprs_str = ", ".join(f"(λ {var_name}. {body})" for var_name, body in branch_exprs)
-        branch_strs = [f"{var_name}: {argT} = {body}" for argT, (var_name, body) in zip(branch_argTs, branch_exprs)]
+        branch_strs = [f"{var_name}: {argT} = {body}" for argT, (_, var_name, body) in zip(branch_argTs, branch_exprs)]
         return f"match {scrut_expr}:\n" + "\n".join(self._indent_expr(bs) for bs in branch_strs) + "\n"
 
     @handles(ir.Restrict)

@@ -503,7 +503,7 @@ class TypeCheckingPass(Analysis):
         if not _is_kind(T, ir.IntT):
             raise TypeError(f"Card must have IntT type, got {T}")
         # Verify domain argument is a domain
-        if not _is_kind(domainT, ir.DomT):
+        if not _is_kind(domainT, ir._DomT):
             raise TypeError(f"Card expects domain argument, got {domainT}")
         self.Tmap[node] = T
         return T

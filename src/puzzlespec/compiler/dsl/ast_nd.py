@@ -7,7 +7,7 @@ from . import ir, ast
 #from ..passes.analyses.nd_axis import get_info, DomInfo
 
 def fin(n: ast.IntOrExpr):
-    n = ast.IntExpr.make(n).refine(lambda i: i>0)
+    n = ast.IntExpr.make(n)
     T = ir.DomT(carT=ir.IntT(), ord=True)
     node = ir.Fin(T, n.node)
     return OrdDomainExpr(node)

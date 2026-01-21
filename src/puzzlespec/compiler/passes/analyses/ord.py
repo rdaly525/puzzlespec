@@ -3,23 +3,28 @@ from __future__ import annotations
 import typing as tp
 
 from ..pass_base import Analysis, AnalysisObject, Context, handles
-from ...dsl import ir, ast
+from ...dsl import ir, ast, ast_nd
 from ..envobj import EnvsObj
 
-def gen_enumerate(node: ir._DomT) -> ir.Enumerate:
+def gen_enumerate(node: ir._DomT) -> ast.FuncExpr:
+    dom = ast.wrap(node)
+    dom_fin = ast_nd.fin(dom.size)
     lam = get_elem_lam(node)
-    T = ir.FuncT(
-        ir.Fin(ir.DomT(ir.IntT(), True, False), ir.Card(ir.IntT(), node)),
-        lamT = lam.T._node
-    )
-    node = ir.Enumerate(T, node)
-    return node
+    return dom_fin.map(lam, _inj=True)
+    #fin_dom = ir.Fin(ir.DomT(ir.IntT(), True, False), ir.Card(ir.IntT(), node))
+    #T = ir.FuncT(
+    #    fin_dom,
+    #    lamT = lam.T._node
+    #)
+    #node = ir.Enumerate(T, node)
+    #return fin_dom, node
 
 def get_elem_lam(node: ir._DomT) -> ast.LambdaExpr:
     if not node.T.ord:
         raise ValueError()
     np = OrdAnalysis()(node, Context()).node_map
-    assert node in np
+    if node not in np:
+        raise ValueError()
     return np[node]
 
 class OrdMap(AnalysisObject):
@@ -62,7 +67,29 @@ class OrdAnalysis(Analysis):
         lam_s = ast.LambdaExpr.make(lambda i: (lo+i*step), ast.Int)
         lam = lam_s @ self.node_map[dom]
         self.node_map[node] = lam
-        
+    @handles(ir.Singleton)
+    def _(self, node: ir.Singleton):
+        self.visit_children(node)
+        T, val = node._children
+        self.node_map[node] = ast.LambdaExpr.make(lambda i: ast.wrap(val), ast.Int)
+
+    @handles(ir.CartProd)
+    def _(self, node: ir.CartProd):
+        self.visit_children(node)
+        T, *doms = node._children
+        for dom in doms:
+            assert dom in self.node_map
+        Ns: tp.List[ast.IntExpr] = [ast.wrap(dom).size for dom in doms]
+        base_lams = [self.node_map[dom] for dom in doms]
+        def lam(i):
+            idxs = []
+            for N in reversed(Ns):
+                idxs.append(i%N)
+                i = i // N
+            idxs = [base_lams[i](idx) for i, idx in enumerate(reversed(idxs))]
+            return ast.TupleExpr.make(tuple(idxs))
+        self.node_map[node] = ast.LambdaExpr.make(lam, ast.Int)
+
     @handles(ir.Image)
     def _(self, node: ir.Image):
         self.visit_children(node)

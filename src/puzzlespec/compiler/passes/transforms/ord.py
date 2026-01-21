@@ -20,8 +20,8 @@ class OrdSimplificationPass(Transform):
     def _(self, node: ir.ElemAt) -> ir.Node:
         T, dom, idx = self.visit_children(node)
         e = gen_enumerate(dom)
-        node = ir.ApplyFunc(T, e, idx)
-        return self.visit(node)
+        app = e(ast.wrap(idx))
+        return app.node
 
     @handles(ir.Slice)
     def _(self, node: ir.Slice):
@@ -41,3 +41,11 @@ class OrdSimplificationPass(Transform):
                 assert lam_f.T.inj
         return node.replace(T, dom, lo, hi, step)
 
+    @handles(ir.Forall)
+    def _(self, node: ir.Forall):
+        T, func = self.visit_children(node)
+        f: ast.FuncExpr = ast.wrap(func)
+        if f.domain.T.is_ord:
+            e = gen_enumerate(f.domain.node)
+            return e.forall(lambda elem: f(elem)).node
+        return node.replace(T, func)

@@ -3,6 +3,7 @@ import typing as tp
 from puzzlespec.compiler.passes.analyses.ast_printer import AstPrinterPass, PrintedAST
 from puzzlespec.compiler.passes.analyses.type_check import TypeCheckingPass
 from puzzlespec.compiler.passes.analyses.pretty_printer import PrettyPrinterPass, pretty
+from puzzlespec.compiler.passes.analyses.bound_var_check import CheckBoundVars
 from puzzlespec.compiler.passes.transforms.resolve_vars import ResolveBoundVars, ResolveFreeVars, VarMap
 from . import ast, ir
 from .envs import SymTable, TypeEnv
@@ -203,7 +204,8 @@ class PuzzleSpecBuilder:
     def build(self, name: str, opt=True) -> PuzzleSpec:
         # 1: Resolve Placeholders (for bound bars/lambdas)
         ctx = Context()
-        pm = PassManager(TypeCheckingPass(), ResolveBoundVars(), verbose=True)
+        #pm = PassManager(TypeCheckingPass(), ResolveBoundVars(), verbose=True)
+        pm = PassManager(TypeCheckingPass(), CheckBoundVars(), verbose=True)
         rules_node = ir.TupleLit(ir.TupleT(*(ir.BoolT() for _ in self._rules)), *self._rules)
         new_rules_node = pm.run(rules_node, ctx=ctx)
 

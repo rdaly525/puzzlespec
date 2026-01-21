@@ -1,5 +1,4 @@
-from re import A
-from ..pass_base import Transform, Context, AnalysisObject, handles
+from ..pass_base import Analysis, Transform, Context, AnalysisObject, handles
 from ..envobj import EnvsObj, SymTable
 from ...dsl import ir, ast
 import typing as tp
@@ -70,7 +69,7 @@ class ResolveBoundVars(Transform):
     def _(self, use):
         # find binder in stack from the end
         for depth_from_end, binder in enumerate(reversed(self.stack)):
-            if binder is use:
+            if binder == use:
                 return ir.BoundVar(idx=depth_from_end)
         # if we get here, no binder in scope
         raise ValueError(f"Unbound placeholder {use} (stack={self.stack})")
@@ -79,6 +78,15 @@ class ResolveBoundVars(Transform):
 class VarMap(AnalysisObject):
     def __init__(self, sid_to_T):
         self.sid_to_T = sid_to_T
+
+#class FreeVarRefine(Analysis):
+#    requires = ()
+#    produces = (VarMap,)
+#    name = "free_var_refine"
+#
+#    def run(self, root: ir.Node, ctx: Context):
+#        self.n_to_doms = {}
+#        self.ru
 
 # This will replace _VarPlaceHolder
 class ResolveFreeVars(Transform):
@@ -95,9 +103,8 @@ class ResolveFreeVars(Transform):
     @handles(ir.VarHOAS)
     def _(self, v: ir.VarHOAS):
         new_T, = self.visit_children(v)
-        sid = self.sym.new_var(v.name, v.metadata)
+        sid = self.sym.new_or_get(v.name, v.metadata)
         return ir.VarRef(new_T, sid, v.name)
-
 
 def close_bound_vars(root: ir.Node, bv: ir.BoundVarHOAS) -> ir.Node:
     ctx = Context()

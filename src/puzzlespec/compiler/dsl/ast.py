@@ -846,7 +846,8 @@ class DomainExpr(Expr):
     @property
     def _bv(self):
         bv = self.T.carT._bound_var()
-        return bv.refine(self)
+        #return bv.refine(self)
+        return bv
 
     def __iter__(self):
         yield self._bv

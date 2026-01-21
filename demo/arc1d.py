@@ -1,4 +1,4 @@
-from puzzlespec import make_enum, fin, var, func_var, Unit, Int, U, PuzzleSpecBuilder, VarSetter
+from puzzlespec import make_enum, var, func_var, Unit, Int, U, PuzzleSpecBuilder, VarSetter
 from puzzlespec.libs import std, nd
 
 p: PuzzleSpecBuilder = PuzzleSpecBuilder()
@@ -11,7 +11,7 @@ Color, colors = make_enum('ABC')
 # Raw inputs #
 ##############
 Ni = var(nd.range(1, max_dim), name='Ni')
-Gi = func_var(dom=fin(Ni), codom=Color, name='Gi')
+Gi = func_var(dom=nd.fin(Ni), codom=Color, name='Gi')
 
 ###############
 # Raw outputs #

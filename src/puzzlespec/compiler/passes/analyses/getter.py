@@ -22,6 +22,7 @@ class VarGetter(Analysis):
     name = 'var_getter'
 
     def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
+        self.nmap = {}
         return VarSet(self.visit(root))
 
     def visit(self, node: ir.Node):
@@ -33,7 +34,9 @@ class VarGetter(Analysis):
 
     @handles(ir.VarRef)
     def _(self, node: ir.VarRef):
-        return set([node])
+        if node.sid not in self.nmap:
+            self.nmap[node.sid] = ir.VarRef(node.T.rawT, node.sid, node.name)
+        return set([self.nmap[node.sid]])
 
 def get_closed_vars(node: ir.Node):
     ctx = Context()

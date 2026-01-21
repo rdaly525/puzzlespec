@@ -132,6 +132,16 @@ class AlgebraicSimplificationPass(Transform):
             return children[0]
         return node.replace(T, *children)
 
+    @handles(ir.Intersection)
+    def _(self, node: ir.Intersection) -> ir.Node:
+        T, *doms = self.visit_children(node)
+        new_doms = []
+        for dom in doms:
+            if isinstance(dom, ir.Universe) and not isinstance(dom.T, ir.RefT):
+                continue
+            new_doms.append(dom)
+        return node.replace(T, *new_doms)
+
     @handles(ir.Div)
     def _(self, node: ir.Div) -> ir.Node:
         T, a, b = self.visit_children(node)
@@ -159,7 +169,7 @@ class AlgebraicSimplificationPass(Transform):
     @handles(ir.Eq)
     def _(self, node: ir.Eq) -> ir.Node:
         T, a, b = self.visit_children(node)
-        if a is b:
+        if a == b:
             return ir.Lit(T, True)
         match (a, b):
             case (ir.Lit(T=ir.BoolT(), val=val), b):
@@ -192,7 +202,7 @@ class AlgebraicSimplificationPass(Transform):
     @handles(ir.Match)
     def _(self, node: ir.Match):
         T, scrut, *cases = self.visit_children(node)
-        assert isinstance(scrut.T, ir.SumT)
+        #assert isinstance(scrut.T, ir.SumT)
         if isinstance(scrut, ir.Inj):
             idx = scrut.idx
             assert isinstance(idx, int)
