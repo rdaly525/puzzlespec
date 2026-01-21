@@ -1,18 +1,18 @@
 from __future__ import annotations
 from functools import singledispatchmethod, singledispatch
-from multiprocessing import Value
 import typing as tp
 from typing import TYPE_CHECKING
 from abc import ABC, abstractmethod
 import inspect
 
-from puzzlespec.compiler.dsl.ir import LambdaHOAS
+from puzzlespec.compiler.dsl.ir import LambdaHOAS, Node
 
 if TYPE_CHECKING:
     from ..dsl import ir
 
 class AnalysisObject(ABC):
     persistent = False
+    gen_pass = None
 
 class Context:
     def __init__(self, *args):
@@ -128,6 +128,8 @@ class Analysis(Pass):
     enable_memoization=True
     
     def __call__(self, root: ir.Node, ctx: 'Context', cache = {}) -> ir.Node:
+        if not isinstance(root, Node):
+            raise ValueError(f"Can only analyze nodes, got {root}")
         if self.enable_memoization:
             self._cache = cache
         if self._debug:
@@ -179,11 +181,11 @@ class Analysis(Pass):
         # Define custom visit function to do caching
         def visit(self, node: ir.Node):
             if self._debug:
-                print("|  "*self._dindent + f"{node.__class__.__name__}: {str(id(node))[-5:]}", end="")
+                print("|  "*self._dindent + f"{node.__class__.__name__}: {str(node._hash)[-5:]} (", end="")
             if self.enable_memoization:
                 if node in self._cache:
                     if self._debug:
-                        print(" (cached)")
+                        print(" (cached) )")
                     return self._cache[node]
             if self._debug:
                 print("")
@@ -197,6 +199,7 @@ class Analysis(Pass):
                 self._cache[node] = new_val
             if self._debug:
                 self._dindent -= 1
+                print("|  "*self._dindent + ")")
             return new_val
         setattr(cls, "visit", visit)
 
@@ -206,6 +209,8 @@ class Transform(Pass):
     cse=False
     
     def __call__(self, root: ir.Node, ctx: 'Context', cache = {}) -> ir.Node:
+        if not isinstance(root, Node):
+            raise ValueError(f"Can only transform nodes, got {root}")
         if self.enable_memoization:
             self._cache = cache
         if self._debug:
@@ -266,18 +271,18 @@ class Transform(Pass):
         # Define custom visit function that creates new keys
         def visit(self, node: ir.Node):
             if self._debug:
-                print("|  "*self._dindent + f"{node.__class__.__name__}: {str(id(node))[-5:]}", end="(")
+                print("|  "*self._dindent + f"{node.__class__.__name__}: {str(node._hash)[-5:]}", end="(")
             if self.enable_memoization:
                 if isinstance(node, ir.BoundVar):
-                    cache_key = (self._bframes[-(node.idx+1)], node._key)
+                    cache_key = (self._bframes[-(node.idx+1)], node)
                 else:
-                    cache_key = node._key
+                    cache_key = node
                 if cache_key in self._cache:
                     if self._debug:
-                        print(" (cached)")
+                        print(" (cached) )")
                     return self._cache[cache_key]
-                if isinstance(node, (ir.Lambda, ir.PiT)):
-                    self._bframes.append(node._key)
+                if isinstance(node, (ir.Lambda, ir.LambdaT)):
+                    self._bframes.append(node)
             if self._debug:
                 print("")
                 self._dindent += 1
@@ -285,11 +290,11 @@ class Transform(Pass):
             new_node = dispatcher.__get__(self, type(self))(node)
 
             # Allows returning different instance of the value-same node
-            if not self.cse and new_node.eq(node):
+            if not self.cse and new_node == node:
                 new_node = node
  
             if self.enable_memoization:
-                if isinstance(node, (ir.Lambda, ir.PiT)):
+                if isinstance(node, (ir.Lambda, ir.LambdaT)):
                     self._bframes.pop()
                 # Add new node to cache
                 assert cache_key not in self._cache
@@ -301,22 +306,25 @@ class Transform(Pass):
         setattr(cls, "visit", visit)
 
 class PassManager:
-    def __init__(self, *passes: Pass, verbose=False, max_iter=5, analysis_map: tp.Mapping[tp.Type[AnalysisObject], Analysis] = {}):
+    def __init__(self, *passes: Pass, verbose: int=0, max_iter=5, analysis_map: tp.Mapping[tp.Type[AnalysisObject], Analysis] = {}):
         self.analysis_map = analysis_map
         self.passes = passes
-        self.verbose = verbose
+        self.verbose = int(verbose)
         self.max_iter = max_iter
 
     def run(self, root: ir.Node, ctx: tp.Optional[Context] = None, fixed_point=False) -> ir.Node:
         if ctx is None:
             ctx = Context()
+        if self.verbose > 1:
+            print("Running passes on:")
+            print(root)
         if fixed_point:
             return self._run_fixed(root, self.passes, ctx)
         return self._run_passes(root, self.passes, ctx)
     
     def _run_pass(self, root: ir.Node, p: Pass, ctx: Context) -> ir.Node:
         if self.verbose:
-            print(f"P: {id(root)} {p.__class__.__name__}")
+            print(f"  {p.__class__.__name__}")
         for req_analysis in p.requires:
             if ctx.try_get(req_analysis) is None:
                 if req_analysis in self.analysis_map:
@@ -325,12 +333,17 @@ class PassManager:
                     anal_obj= analysis_pass(root, ctx)
                     ctx.add(anal_obj)
                     assert ctx.try_get(req_analysis) is not None
+                elif gen_pass := req_analysis.gen_pass:
+                    self._run_pass(root, gen_pass(), ctx)
+                    assert ctx.try_get(req_analysis) is not None
                 else:
                     raise ValueError(f"Analysis {req_analysis} not found in analysis map")
 
         if isinstance(p, Transform):
             new_root, aobjs = p(root, ctx)
-            if not new_root.eq(root):
+            if new_root != root:
+                if self.verbose > 1:
+                    print(new_root)
                 # Invalidate context
                 ctx.invalidate()
             for aobj in aobjs:
@@ -355,7 +368,7 @@ class PassManager:
     def _run_fixed(self, root: ir.Node, passes: tp.Iterable[Pass], ctx: 'Context') -> ir.Node:
         for _ in range(self.max_iter):
             new_root = self._run_passes(root, passes, ctx)
-            if new_root.eq(root):
+            if new_root == root:
                 return new_root
             root = new_root
         raise RuntimeError(f"Fixed point iteration did not converge in {self.max_iter} iterations")

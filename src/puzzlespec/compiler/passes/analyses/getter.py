@@ -22,6 +22,7 @@ class VarGetter(Analysis):
     name = 'var_getter'
 
     def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
+        self.nmap = {}
         return VarSet(self.visit(root))
 
     def visit(self, node: ir.Node):
@@ -33,25 +34,59 @@ class VarGetter(Analysis):
 
     @handles(ir.VarRef)
     def _(self, node: ir.VarRef):
-        return set([node])
+        if node.sid not in self.nmap:
+            self.nmap[node.sid] = ir.VarRef(node.T.rawT, node.sid, node.name)
+        return set([self.nmap[node.sid]])
 
-class VarPHGetter(Analysis):
-    requires = (EnvsObj,)
+def get_closed_vars(node: ir.Node):
+    ctx = Context()
+    varget = ClosedVarGetter()(node, ctx)
+    return varget.vars
+
+class ClosedVarGetter(Analysis):
+    requires = ()
     produces = (VarSet,)
-    name = 'phvar_getter'
+    name = 'closed_var_getter'
 
     def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
-        vars = self.visit(root)
-        var_map = {v:vs for v, vs in self._cache.items() if isinstance(v, ir.VarHOAS)}
-        return VarSet(var_map)
+        self.bvars = []
+        return VarSet(self.visit(root))
 
     def visit(self, node: ir.Node):
         vars: tp.List[tp.Set[ir.Node]] = self.visit_children(node)
-        if isinstance(node, ir.VarHOAS):
-            val = set([node])
-        else:
-            val = set()
+        val = set()
         for pset in vars:
             val |= pset
         return val       
+
+    @handles(ir.LambdaHOAS)
+    def _(self, node: ir.LambdaHOAS):
+        T_vars, bv_vars, body_vars = self.visit_children(node)
+        vars = (T_vars | body_vars | bv_vars) | set((node._children[1]))
+        return vars
+
+
+
+
+
+
+#class VarPHGetter(Analysis):
+#    requires = (EnvsObj,)
+#    produces = (VarSet,)
+#    name = 'phvar_getter'
+#
+#    def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
+#        vars = self.visit(root)
+#        var_map = {v:vs for v, vs in self._cache.items() if isinstance(v, ir.VarHOAS)}
+#        return VarSet(var_map)
+#
+#    def visit(self, node: ir.Node):
+#        vars: tp.List[tp.Set[ir.Node]] = self.visit_children(node)
+#        if isinstance(node, ir.VarHOAS):
+#            val = set([node])
+#        else:
+#            val = set()
+#        for pset in vars:
+#            val |= pset
+#        return val       
 

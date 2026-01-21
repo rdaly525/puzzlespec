@@ -29,7 +29,7 @@ class CanonicalizePass(Transform):
             else:
                 new_children.append(c)
         # Sort by keys
-        return vaOp(T, *sorted(new_children, key=lambda c: c._key))
+        return vaOp(T, *sorted(new_children))
 
     # associative and commutative operators
     @handles(ir.And, ir.Conj)
@@ -63,7 +63,7 @@ class CanonicalizePass(Transform):
     @handles
     def _(self, node: ir.Eq):
         children = self.visit_children(node)
-        return ir.Eq(children[0], *sorted(children[1:], key=lambda c: c._key))
+        return ir.Eq(children[0], *sorted(children[1:]))
 
     # Change all comparisons to Lt, LtEq
     @handles

@@ -1,8 +1,9 @@
 import typing as tp
 
 from puzzlespec.compiler.passes.analyses.ast_printer import AstPrinterPass, PrintedAST
-from puzzlespec.compiler.passes.analyses.kind_check import KindCheckingPass
+from puzzlespec.compiler.passes.analyses.type_check import TypeCheckingPass
 from puzzlespec.compiler.passes.analyses.pretty_printer import PrettyPrinterPass, pretty
+from puzzlespec.compiler.passes.analyses.bound_var_check import CheckBoundVars
 from puzzlespec.compiler.passes.transforms.resolve_vars import ResolveBoundVars, ResolveFreeVars, VarMap
 from . import ast, ir
 from .envs import SymTable, TypeEnv
@@ -177,9 +178,9 @@ class PuzzleSpecBuilder:
     #    self._rules = ir.TupleLit(*new_rules)
  
     def _add_rules(self, *new_rules: ast.Expr):
-        print("Adding rules:")
-        for r in new_rules:
-            print(pretty(r.node))
+        #print("Adding rules:")
+        #for r in new_rules:
+        #    print(pretty(r.node))
         self._rules += [r.node for r in new_rules]
 
     def __iadd__(self, other: tp.Union[ast.BoolExpr, tp.Iterable[ast.BoolExpr]]) -> tp.Self:
@@ -200,19 +201,18 @@ class PuzzleSpecBuilder:
         return ast.TupleExpr.make(tuple(self._rules))
 
     # Freezes the spec and makes it immutable 
-    def build(self, name: str) -> PuzzleSpec:
+    def build(self, name: str, opt=True) -> PuzzleSpec:
         # 1: Resolve Placeholders (for bound bars/lambdas)
         ctx = Context()
-        pm = PassManager(KindCheckingPass(), ResolveBoundVars(), verbose=True)
+        #pm = PassManager(TypeCheckingPass(), ResolveBoundVars(), verbose=True)
+        pm = PassManager(TypeCheckingPass(), CheckBoundVars(), verbose=True)
         rules_node = ir.TupleLit(ir.TupleT(*(ir.BoolT() for _ in self._rules)), *self._rules)
         new_rules_node = pm.run(rules_node, ctx=ctx)
-        print(pretty(new_rules_node))
 
         # Populate sym table and type environment
         sym = SymTable()
         ctx = Context(EnvsObj(sym))
-        #pm = PassManager(KindCheckingPass(), AstPrinterPass(), ResolveFreeVars(), AstPrinterPass(), verbose=True)
-        pm = PassManager(KindCheckingPass(), ResolveFreeVars(), verbose=True)
+        pm = PassManager(TypeCheckingPass(), ResolveFreeVars(), verbose=True)
         new_rules_node = pm.run(new_rules_node, ctx=ctx)
         env = ctx.get(EnvsObj)
         new_sym = env.sym
@@ -223,14 +223,6 @@ class PuzzleSpecBuilder:
         )
         #spec_obls = spec.extract_obligations()
         # 3: Optimize/canonicalize
-        spec_opt = spec.optimize()
-        return spec_opt
-
-    #def print(self, rules_node=None):
-    #    if rules_node is None:
-    #        rules_node = ir.TupleLit(ir.TupleT(*(ir.BoolT() for _ in self._rules)), *self._rules)
-    #    ctx = Context()
-    #    pm = PassManager([AstPrinterPass()], verbose=True)
-    #    pm.run(rules_node, ctx)
-    #    a = ctx.get(PrintedAST)
-    #    print(a.text)
+        if opt:
+            spec = spec.optimize()
+        return spec

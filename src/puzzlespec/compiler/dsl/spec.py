@@ -6,13 +6,14 @@ from . import ir
 from ..passes.analyses.pretty_printer import PrettyPrinterPass, PrettyPrintedExpr, pretty_spec
 from .envs import SymTable
 from ..passes.pass_base import PassManager, Context, Pass
-from ..passes.transforms.beta_reduction import BetaReductionPass
+from ..passes.transforms.beta_reduction import BetaReductionPass, BetaReductionHOAS
 from ..passes.transforms import CanonicalizePass, ConstFoldPass, AlgebraicSimplificationPass, DomainSimplificationPass
 from ..passes.transforms.refine import RefineSimplify
 from ..passes.transforms.cse import CSE
+from ..passes.transforms.ord import OrdSimplificationPass
 #from ..passes.analyses.constraint_categorizer import ConstraintCategorizer, ConstraintCategorizerVals
 from ..passes.analyses.getter import VarGetter, VarSet, get_vars
-from ..passes.analyses.kind_check import KindCheckingPass, TypeMap 
+from ..passes.analyses.type_check import TypeCheckingPass, TypeMap 
 #from ..passes.analyses.ast_printer import AstPrinterPass, PrintedAST
 from ..passes.pass_base import AnalysisObject, Analysis
 class PuzzleSpec:
@@ -34,12 +35,12 @@ class PuzzleSpec:
         else:
             assert isinstance(obls, ir.TupleLit)
         self._spec = ir.Spec(cons=rules, obls=obls)
-        self._ph_check()
-        self._kind_check()
+        #self._ph_check()
+        self.type_check()
 
     def _ph_check(self):
         def check(node: ir.Node):
-            if isinstance(node, (ir.BoundVarHOAS, ir.LambdaHOAS, ir.PiTHOAS, ir.VarHOAS)):
+            if isinstance(node, (ir.BoundVarHOAS, ir.LambdaHOAS, ir.LambdaTHOAS, ir.VarHOAS)):
                 raise ValueError(f"Found placeholder node {node} in rules")
             for c in node._children:
                 check(c)
@@ -62,21 +63,22 @@ class PuzzleSpec:
         pm.run(node, ctx)
         return ctx
 
-    def _kind_check(self):
+    def type_check(self):
         ctx = Context(self.envs_obj)
-        self.analyze([KindCheckingPass()], ctx=ctx)
+        self.analyze([TypeCheckingPass()], ctx=ctx)
 
     # applies passes, copies the sym table, returns a new spec
     def transform(
         self,
         *passes: Pass,
         ctx: Context = None,
-        verbose=True,
+        verbose=0,
         analysis_map: tp.Mapping[tp.Type[AnalysisObject], Analysis] = {},
+        max_iter=20
     ) -> 'PuzzleSpec':
         if ctx is None:
             ctx = Context()
-        pm = PassManager(*passes, verbose=verbose, max_iter=10, analysis_map=analysis_map)
+        pm = PassManager(*passes, verbose=verbose, max_iter=max_iter, analysis_map=analysis_map)
         new_spec_node = pm.run(self._spec, ctx=ctx)
         if new_spec_node == self._spec:
             return self
@@ -101,7 +103,7 @@ class PuzzleSpec:
     def optimize(self) -> 'PuzzleSpec':
         ctx = Context(self.envs_obj)
         analysis_map = {
-            TypeMap: KindCheckingPass()
+            TypeMap: TypeCheckingPass()
         }
 
         opt_passes = [
@@ -109,17 +111,21 @@ class PuzzleSpec:
             AlgebraicSimplificationPass(),
             ConstFoldPass(),
             DomainSimplificationPass(),
-            RefineSimplify(),
-            BetaReductionPass(),
+            #RefineSimplify(),
+            BetaReductionHOAS(),
             #CSE(),
         ]
 
-        opt = self.transform(opt_passes, ctx=ctx, analysis_map=analysis_map)
+        #opt = self.transform(opt_passes, OrdSimplificationPass(), opt_passes, ctx=ctx, analysis_map=analysis_map, max_iter=5)
+        opt = self.transform(opt_passes, ctx=ctx, analysis_map=analysis_map, max_iter=5)
         return opt
     
     def pretty(self) -> str:
-        self._kind_check()
+        self.type_check()
         return pretty_spec(self._spec, self.sym)
+
+    def __str__(self):
+        return self.pretty()
 
     def pretty_print(self):
         print(self.pretty())

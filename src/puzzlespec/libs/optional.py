@@ -9,8 +9,8 @@ def optional_dom(dom: ast.DomainExpr) -> ast.DomainExpr:
     if not isinstance(dom, ast.DomainExpr):
         raise ValueError(f"Expected DomainExpr, got {type(dom)}")
     # domT = Universe(Unit) | dom
-    T = ir.DomT.make(carT=optional(dom.T.carT).node, fin=dom.T.fin, ord=dom.T.ord)
-    unitDom = ir.Universe(ir.DomT.make(carT=ir.UnitT(), fin=True, ord=True))
+    T = ir.DomT(carT=optional(dom.T.carT).node)
+    unitDom = ir.Universe(ir.DomT(carT=ir.UnitT()))
     node = ir.DisjUnion(T, unitDom, dom.node)
     expr = ast.wrap(node)
     assert isinstance(expr, ast.DomainExpr)
@@ -29,6 +29,7 @@ def fold(val: ast.SumExpr, on_none: ast.Expr, on_some: tp.Callable[[ast.Expr], a
 def count_some(func: ast.FuncExpr) -> ast.IntExpr:
     if not isinstance(func, ast.FuncExpr):
         raise ValueError(f"Expected FuncExpr, got {type(func)}")
-    _check_optT(func.T.piT.resT.node)
+    arrT = func.T._rawT
+    _check_optT(arrT.resT)
     some_dom = func.domain.restrict(lambda i: func(i).match(lambda _: False, lambda _: True))
     return some_dom.size

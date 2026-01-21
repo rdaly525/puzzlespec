@@ -2,7 +2,7 @@ from __future__ import annotations
 import math
 
 from ..pass_base import Transform, Context, handles
-from ...dsl import ir
+from ...dsl import ir, ast
 import typing as tp
 
 
@@ -31,13 +31,20 @@ class AlgebraicSimplificationPass(Transform):
 
     # Arithmetic
 
-    # Simple -(-x) => x
     @handles(ir.Neg)
     def _(self, node: ir.Neg) -> ir.Node:
         T, a, = self.visit_children(node)
+        
+        # -(-x) => x
         match (a):
             case (ir.Neg(_, b)):
                 return b
+            case (ir.Sum(terms)):
+                return ir.Sum(
+                    ir.IntT(),
+                    *(ir.Neg(ir.IntT(), t) for t in terms[1:])
+                )
+
         return node.replace(T, a)
 
     @handles(ir.Add, ir.Sum)
@@ -73,6 +80,11 @@ class AlgebraicSimplificationPass(Transform):
         # simplify all literals
         const_children, non_const_children = _partition(children, lambda c: isinstance(c, ir.Lit))
         const_val = math.prod([c.val for c in const_children])
+        # Extract all the negatives and put it on the const_val
+        #num_negs = sum(isinstance(c, ir.Neg) for c in non_const_children)
+        #non_const_children = [c._children[1] if isinstance(c, ir.Neg) else c for c in non_const_children]
+        #if num_negs%2==1:
+        #    const_val = -const_val
         match const_val:
             case 0:
                 return ir.Lit(T, 0)
@@ -120,10 +132,20 @@ class AlgebraicSimplificationPass(Transform):
             return children[0]
         return node.replace(T, *children)
 
+    @handles(ir.Intersection)
+    def _(self, node: ir.Intersection) -> ir.Node:
+        T, *doms = self.visit_children(node)
+        new_doms = []
+        for dom in doms:
+            if isinstance(dom, ir.Universe) and not isinstance(dom.T, ir.RefT):
+                continue
+            new_doms.append(dom)
+        return node.replace(T, *new_doms)
+
     @handles(ir.Div)
     def _(self, node: ir.Div) -> ir.Node:
         T, a, b = self.visit_children(node)
-        if ir.Node.equals(a,b):
+        if a==b:
             return ir.Lit(T, 1)
         match (a, b):
             case (_, ir.Lit(val=1)):
@@ -147,7 +169,7 @@ class AlgebraicSimplificationPass(Transform):
     @handles(ir.Eq)
     def _(self, node: ir.Eq) -> ir.Node:
         T, a, b = self.visit_children(node)
-        if a is b:
+        if a == b:
             return ir.Lit(T, True)
         match (a, b):
             case (ir.Lit(T=ir.BoolT(), val=val), b):
@@ -180,7 +202,7 @@ class AlgebraicSimplificationPass(Transform):
     @handles(ir.Match)
     def _(self, node: ir.Match):
         T, scrut, *cases = self.visit_children(node)
-        assert isinstance(scrut.T, ir.SumT)
+        #assert isinstance(scrut.T, ir.SumT)
         if isinstance(scrut, ir.Inj):
             idx = scrut.idx
             assert isinstance(idx, int)
@@ -207,8 +229,8 @@ class AlgebraicSimplificationPass(Transform):
                 val_map[idx_lit._key] = i
             # Create FuncLit with Fin domain
             layout = ir._DenseLayout(val_map=val_map)
-            piT = ir.PiT(ir.IntT(), T)
-            funcT = ir.FuncT(fin_dom, piT)
+            lamT = ir.LambdaT(ir.IntT(), T)
+            funcT = ir.FuncT(fin_dom, lamT)
             func_lit = ir.FuncLit(funcT, fin_dom, *func_elems, layout=layout)
             # Apply the function to tag
             return ir.ApplyFunc(T, func_lit, tag)
@@ -217,48 +239,30 @@ class AlgebraicSimplificationPass(Transform):
     @handles(ir.ApplyFunc)
     def _(self, node: ir.ApplyFunc):
         T, func, arg = self.visit_children(node)
-        # TODO Add obligation for arg being in func's domain
         if isinstance(func, ir.Map):
-            _, _, lam = func._children
-            return ir.Apply(T, lam, arg)
+            _, dom, lam = func._children
+            from ...dsl import ast
+            node = ir.Apply(T, lam, arg)
+            return ast.wrap(node).refine(lambda _: ast.wrap(dom).contains(ast.wrap(arg))).node
         return node.replace(T, func, arg)
 
-    @handles(ir.Slice)
-    def _(self, node: ir.Slice):
-        T, dom, lo, hi = self.visit_children(node)
-        if isinstance(lo, ir.Lit) and isinstance(hi, ir.Lit):
-            lo_val, hi_val = lo.val, hi.val
-            assert lo_val < hi_val
-            elems = [ir.ElemAt(T.carT, dom, ir.Lit(ir.IntT(), val=i)) for i in range(lo_val, hi_val)]
-            return ir.DomLit(T, *elems)
-        return node.replace(T, dom, lo, hi)
+    @handles(ir.Proj)
+    def _(self, node: ir.Proj):
+        T, tup = self.visit_children(node)
+        if isinstance(tup, ir.TupleLit):
+            elems = tup._children[1:]
+            assert node.idx < len(elems)
+            return elems[node.idx]
+        return node.replace(T, tup)
 
-    @handles(ir.ElemAt)
-    def _(self, node: ir.ElemAt):
-        T, dom, idx = self.visit_children(node)
-        if isinstance(idx, ir.Lit):
-            idx_val = idx.val
-            if isinstance(dom, ir.Fin):
-                return idx
-            if isinstance(dom, ir.Range):
-                _, lo, hi = dom._children
-                return ir.Add(ir.IntT(), lo, idx)
-            if isinstance(dom, ir.Slice):
-                _, slice_dom, lo, hi = dom._children
-                return ir.ElemAt(T, slice_dom, ir.Add(ir.IntT(), lo, idx))
-            if isinstance(dom, ir.DomLit):
-                _, *elems = dom._children
-                return elems[idx_val]
-            if isinstance(dom, ir.RestrictEq):
-                assert idx.val==0
-                _, _, v = dom._children
-                return v
-            if isinstance(dom, ir.CartProd):
-                cart_doms = dom._children[1:]
-                sizes = [ir.Card(ir.IntT(), d) for d in cart_doms]
-                strides = [ir.Prod(ir.IntT(), *sizes[j+1:]) for j in range(len(sizes))]
-                indices = [ir.Mod(ir.IntT(), ir.Div(ir.IntT(), idx, stride), size) for stride, size in zip(strides, sizes)]
-                return ir.TupleLit(dom.T.carT, *[ir.ElemAt(d.T.carT, d, i) for d, i in zip(cart_doms, indices)])
-            if isinstance(dom, ir.DisjUnion):
-                raise NotImplementedError("ElemAt of disj union not implemented")
-        return node.replace(T, dom, idx)
+    #(proj(bv,0), proj(bv,1))
+    @handles(ir.TupleLit)
+    def _(self, node: ir.TupleLit):
+        T, *elems = self.visit_children(node)
+        if len(elems)>0 and all(isinstance(e, ir.Proj) and e.idx==i for i, e in enumerate(elems)):
+            v0 = elems[0]._children[1]
+            if all(v0==e._children[1] for e in elems):
+                #Make sure that the proj value has the correct size
+                if len(ast.wrap(v0).T)==len(elems):
+                    return v0
+        return node.replace(T, *elems)

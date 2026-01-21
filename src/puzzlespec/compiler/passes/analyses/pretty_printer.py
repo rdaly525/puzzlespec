@@ -3,47 +3,57 @@ from ..pass_base import Analysis, AnalysisObject, Context, handles
 from ...dsl import ir, utils
 from ..envobj import EnvsObj, SymTable
 from .getter import get_vars
+import typing as tp
 
 def pretty(node: ir.Node) -> str:
     ctx = Context()
     pexpr = PrettyPrinterPass().run(node, ctx)
     return pexpr.text
 
-def pretty_spec(spec: ir.Spec, sym: SymTable) -> str:
+def pretty_spec(spec: ir.Spec, sym: SymTable, just_vars=True) -> str:
     ctx = Context(EnvsObj(sym))
     free_vars = get_vars(spec)
     cons_text = pretty(spec.cons)
     obls_text = pretty(spec.obls)
-    p_to_T = {}
-    g_to_T = {}
-    d_to_T = {}
-    for (sid, e) in sym.entries.items():
-        if e.invalid:
-            i_str = " (OLD)"
-        else:
-            i_str = ""
-        T_str = ""
+    if just_vars:
+        s = "Free Variables:\n"
         for v in free_vars:
-            if isinstance(v, ir.VarHOAS):
-                raise NotImplementedError()
-            if v.sid == sid:
-                T_str = pretty(v.T)
-        if e.get('role') == 'P':
-            p_to_T[e.name] = T_str + i_str
-        elif e.get('role') == 'G':
-            g_to_T[e.name] = T_str + i_str
-        elif e.get('role') == 'D':
-            d_to_T[e.name] = T_str + i_str
-    s = "Params:\n"        
-    for pname, T in p_to_T.items():
-        s += f"    {pname}: {T}\n"
-    s += "Gen vars:\n"
-    for gname, T in g_to_T.items():
-        s += f"    {gname}: {T}\n"
-    s += "Decision vars:\n"
-    for dname, T in d_to_T.items():
-        s += f"    {dname}: {T}\n"
-    s += f"Spec:\n  Constraints:\n{cons_text}\n  Obligations:\n{obls_text}\n"
+            s += f"    {v.name} : {pretty(v.T)}\n"
+        s += "Constraints:\n"
+        s += cons_text
+        return s
+
+    else:
+        p_to_T = {}
+        g_to_T = {}
+        d_to_T = {}
+        for (sid, e) in sym.entries.items():
+            if e.invalid:
+                i_str = " (OLD)"
+            else:
+                i_str = ""
+            T_str = ""
+            for v in free_vars:
+                if isinstance(v, ir.VarHOAS):
+                    raise NotImplementedError()
+                if v.sid == sid:
+                    T_str = pretty(v.T)
+            if e.get('role') == 'P':
+                p_to_T[e.name] = T_str + i_str
+            elif e.get('role') == 'G':
+                g_to_T[e.name] = T_str + i_str
+            elif e.get('role') == 'D':
+                d_to_T[e.name] = T_str + i_str
+        s = "Params:\n"        
+        for pname, T in p_to_T.items():
+            s += f"    {pname}: {T}\n"
+        s += "Gen vars:\n"
+        for gname, T in g_to_T.items():
+            s += f"    {gname}: {T}\n"
+        s += "Decision vars:\n"
+        for dname, T in d_to_T.items():
+            s += f"    {dname}: {T}\n"
+        s += f"Spec:\n  Constraints:\n{cons_text}\n  Obligations:\n{obls_text}\n"
     return s
 
 class PrettyPrintedExpr(AnalysisObject):
@@ -119,49 +129,46 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.TupleT)
     def _(self, node: ir.TupleT) -> str:
         elem_strs = self.visit_children(node)
-        return "⨯".join(elem_strs)
+        return "(" + "⨯".join(elem_strs) + ",)"
+        #return "⨯".join(elem_strs)
 
     @handles(ir.SumT)
     def _(self, node: ir.SumT) -> str:
         elem_strs = self.visit_children(node)
-        return "⊎".join(elem_strs)
+        return "(" + "⊎".join(elem_strs) + ")"
 
-    #@handles(ir.ArrowT)
-    #def _(self, node: ir.ArrowT) -> str:
-    #    arg_str, res_str = self.visit_children(node)
-    #    return f"{arg_str} -> {res_str}"
+    @handles(ir.ArrowT)
+    def _(self, node: ir.ArrowT) -> str:
+        arg_str, res_str = self.visit_children(node)
+        return f"{arg_str} -> {res_str}"
 
     @handles(ir.DomT)
     def _(self, node: ir.DomT) -> str:
-        factor_strs = self.visit_children(node)
-        if len(factor_strs) == 1:
-            car_str = factor_strs[0]
-        else:
-            car_str = "⨯".join(factor_strs)
-        return f"Dom[{car_str}]"
+        carT_str, = self.visit_children(node)
+        return f"Dom[{carT_str}]"
     
-    def _new_elem_name(self, t: bool=False) -> str:
+    @handles(ir.NDDomT)
+    def _(self, node: ir.NDDomT) -> str:
+        #factors = self.visit_children(node)
+        factors = node._children
+        shape_Ts = [factors[a].carT for a in node.axes]
+        shape_s = self.visit(ir.TupleT(*shape_Ts))
+        base_s = self.visit(ir.TupleT(*(f.carT for f in factors)))
+        return f"NDDom[{shape_s} -> {base_s}]"
         
-        # count existing element binders in the env
+
+    def _new_bv_name(self, t: bool=False) -> str:
         if t:
-            p = 't'
+            p = 'i'
         else:
             p = 'x'
         name = f"{p}{self.cnt}"
         self.cnt+=1
         return name
-        #k = sum(1 for n in self.b_names if n.startswith(p))
-        #name = f"{p}{k}"
-        #assert name not in self.b_names
-        #return name
-
-    def _new_col_name(self, t: bool=False) -> str:
-        return self._new_elem_name()
-        k = sum(1 for n in self.b_names if n.startswith("X"))
-        return f"X{k}"
     
-    @handles(ir.PiT)
-    def _(self, node: ir.PiT) -> str:
+    def _lambdaT(self, node: ir.LambdaT | ir.LambdaTHOAS) -> tp.Tuple[str, str]:
+        if isinstance(node, ir.LambdaTHOAS):
+            return self.visit_children(node)
         argT, resT = node._children
         is_col = isinstance(argT, (ir.FuncT, ir.DomT))
         if is_col:
@@ -175,20 +182,22 @@ class PrettyPrinterPass(Analysis):
         assert name == bv_name
         return bv_name, resT_str
 
-    @handles(ir.PiTHOAS)
-    def _(self, node: ir.PiTHOAS) -> str:
-        bv_name, resT_str = self.visit_children(node)
-        return (bv_name, resT_str)
+    @handles(ir.LambdaT, ir.LambdaTHOAS)
+    def _(self, node: ir.Node) -> str:
+        argT = self.visit(node._children[0].T)
+        bv, resT = self._lambdaT(node)
+        return f"({bv} : {argT}) -> {resT}"
 
     @handles(ir.FuncT)
     def _(self, node: ir.FuncT):
-        dom_str, (bv_name, resT_str) = self.visit_children(node)
-        return f"Func[{dom_str} -> {bv_name}: {resT_str}]"
+        dom, lamT = node._children
+        dom_str, (bv_name, resT_str) = self.visit(dom), self._lambdaT(lamT)
+        return f"({bv_name} : {self.visit(lamT.argT)} ∈ {dom_str}) -> {resT_str}"
     
     @handles(ir.RefT)
     def _(self, node: ir.RefT):
         T_str, dom_str = self.visit_children(node)
-        return f"Ref[{T_str} | {dom_str}]"
+        return f"{{{T_str} | {dom_str}}}"
 
     ##############################
     ## Core-level IR Value nodes (Used throughout entire compiler flow)
@@ -198,36 +207,54 @@ class PrettyPrinterPass(Analysis):
     def _(self, node: ir.VarRef) -> str:
         if hasattr(self, 'sym'):
             return self.sym.get_name(node.sid)
-        return f"v{node.sid}"
+        return f"{node.name}"
+
+    @handles(ir.VarHOAS)
+    def _(self, node: ir.VarHOAS) -> str:
+        T, = self.visit_children(node)
+        if node.name is None:
+            return f"_var"
+        return f"{node.name}"
 
     @handles(ir.BoundVar)
     def _(self, node: ir.BoundVar) -> str:
         #return f"{self.b_names[-(node.idx+1)]}_#{node.idx}"
         return f"{self.b_names[-(node.idx+1)]}"
+    
+    @handles(ir.BoundVarHOAS)
+    def _(self, node: ir.BoundVarHOAS) -> str:
+        T, = self.visit_children(node)
+        return node.name
 
     @handles(ir.Unit)
     def _(self, node: ir.Unit) -> str:
         return "tt"
 
-    @handles(ir.Lambda)
-    def _(self, node: ir.Lambda) -> str:
-        paramT = node.T.argT
-        is_col = isinstance(paramT, (ir.FuncT, ir.DomT))
-        if is_col:
-            bv_name = self._new_col_name()
+    def _lambda(self, node: ir.LambdaHOAS | ir.Lambda) -> tp.Tuple[str, str]:
+        if isinstance(node, ir.LambdaHOAS):
+            T, bv, body = node._children
+            bv_name, body_txt = self.visit(bv), self.visit(body)
         else:
-            bv_name = self._new_elem_name()
-        self.b_names.append(bv_name)
-        _, body_txt = self.visit_children(node)  # Skip type at index 0
-        # pop the stack
-        name = self.b_names.pop()
-        assert name == bv_name
-        return bv_name, body_txt
+            T, body = node._children
+            bv_name = self._new_bv_name()
+            self.b_names.append(bv_name)
+            body_txt = self.visit(body)
+            # pop the stack
+            self.b_names.pop()
+        param_txt = self.visit(T.argT)
+        return param_txt, bv_name, body_txt
+
+    @handles(ir.Lambda, ir.LambdaHOAS)
+    def _(self, node: ir.Value) -> str:
+        T, bv, body = self._lambda(node)
+        return f"({bv} : {T}) -> {body}"
 
     @handles(ir.Lit)
     def _(self, node: ir.Lit) -> str:
         if isinstance(node.T, ir.BoolT):
             return '𝕋' if node.val else '𝔽'
+        if isinstance(node.T, ir.EnumT):
+            return f"{node.T.name}.{node.val}"
         return str(node.val)
 
     @handles(ir.Eq)
@@ -376,19 +403,24 @@ class PrettyPrinterPass(Analysis):
         carT_str = self.visit(node.T.carT)
         return f"𝕌({carT_str})"
 
+    @handles(ir.Empty)
+    def _(self, node: ir.Empty) -> str:
+        return "∅"
+
+    @handles(ir.Singleton)
+    def _(self, node: ir.Singleton) -> str:
+        _, val_expr = self.visit_children(node)
+        return f"{{{val_expr}}}"
+
+    @handles(ir.Unique)
+    def _(self, node: ir.Unique) -> str:
+        _, dom_expr = self.visit_children(node)  # Skip type at index 0
+        return f"ι({dom_expr})"
+
     @handles(ir.Fin)
     def _(self, node: ir.Fin) -> str:
         _, n_expr = self.visit_children(node)  # Skip type at index 0
         return f"Fin({n_expr})"
-
-    @handles(ir.Range)
-    def _(self, node: ir.Range) -> str:
-        _, lo_expr, hi_expr = self.visit_children(node)  # Skip type at index 0
-        return f"{{{lo_expr}:{hi_expr}}}"
-
-    @handles(ir.EnumLit)
-    def _(self, node: ir.EnumLit) -> str:
-        return f"{node.T.name}.{node.label}"
 
     @handles(ir.DomLit)
     def _(self, node: ir.DomLit) -> str:
@@ -412,20 +444,40 @@ class PrettyPrinterPass(Analysis):
         _, domain_expr, val_expr = self.visit_children(node)  # Skip type at index 0
         return f"({val_expr} ∈ {domain_expr})"
 
-    @handles(ir.ElemAt)
-    def _(self, node: ir.ElemAt) -> str:
-        _, domain_expr, idx_expr = self.visit_children(node)  # Skip type at index 0
-        return f"{domain_expr}[{idx_expr}]"
+    @handles(ir.Subset)
+    def _(self, node: ir.Subset) -> str:
+        _, domA_expr, domB_expr = self.visit_children(node)  # Skip type at index 0
+        return f"({domA_expr} ⊆ {domB_expr})"
+
+    @handles(ir.ProperSubset)
+    def _(self, node: ir.ProperSubset) -> str:
+        _, domA_expr, domB_expr = self.visit_children(node)  # Skip type at index 0
+        return f"({domA_expr} ⊂ {domB_expr})"
+
+    @handles(ir.Union)
+    def _(self, node: ir.Union) -> str:
+        _, domA_expr, domB_expr = self.visit_children(node)  # Skip type at index 0
+        return f"({domA_expr} ∪ {domB_expr})"
+
+    @handles(ir.Intersection)
+    def _(self, node: ir.Intersection) -> str:
+        _, domA_expr, domB_expr = self.visit_children(node)  # Skip type at index 0
+        return f"({domA_expr} ∩ {domB_expr})"
 
     ## Cartesian Products
     @handles(ir.CartProd)
     def _(self, node: ir.CartProd) -> str:
         doms = self.visit_children(node)[1:]  # Skip type at index 0
-        return "(" + "×".join(doms) + ")"
+        return "(" + "×".join(doms) + ",)"
+        #return "×".join(doms)
+
+    #@handles(ir.Gather)
+    #def _(self, node: ir.Gather) -> str:
+    #    T, dom, base_dom = self.visit_children(node)
+    #    return dom
 
     @handles(ir.DomProj)
     def _(self, node: ir.DomProj) -> str:
-        # TODO: Determine how to pretty print DomProj
         _, dom_expr = self.visit_children(node)  # Skip type at index 0
         return f"π{subscript(node.idx)}⟦{dom_expr}⟧"
 
@@ -433,8 +485,8 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.TupleLit)
     def _(self, node: ir.TupleLit) -> str:
         elements = self.visit_children(node)[1:]  # Skip type at index 0
-        if utils._is_concrete(node):
-            return "(" + ", ".join(es for es in elements) + ")"
+        if utils._is_concrete(node) or len(elements)<3:
+            return "(" + ", ".join(es for es in elements) + ",)"
         return self._format_variadic_multiline(
             elements, 
             prefix="(", 
@@ -468,13 +520,13 @@ class PrettyPrinterPass(Analysis):
         _, scrut_node, *branches = node._children
         scrut_expr = self.visit(scrut_node)
         assert all(isinstance(branch, (ir.Lambda, ir.LambdaHOAS)) for branch in branches)
-        branch_exprs = [self.visit(branch) for branch in branches]
+        branch_exprs = [self._lambda(branch) for branch in branches]
         branch_argTs = []
         for branch_lam in branches:
             argT = self.visit(branch_lam.T.argT)
             branch_argTs.append(argT)
         #branch_exprs_str = ", ".join(f"(λ {var_name}. {body})" for var_name, body in branch_exprs)
-        branch_strs = [f"{var_name}: {argT} = {body}" for argT, (var_name, body) in zip(branch_argTs, branch_exprs)]
+        branch_strs = [f"{var_name}: {argT} = {body}" for argT, (_, var_name, body) in zip(branch_argTs, branch_exprs)]
         return f"match {scrut_expr}:\n" + "\n".join(self._indent_expr(bs) for bs in branch_strs) + "\n"
 
     @handles(ir.Restrict)
@@ -484,7 +536,7 @@ class PrettyPrinterPass(Analysis):
         if isinstance(func_node, ir.Map):
             funcT, dom, lam = func_node._children
             domain_expr = self.visit(dom)
-            (var_name, pred_expr) = self.visit(lam)
+            _, var_name, pred_expr = self._lambda(lam)
             return f"{{{var_name} ∈ {domain_expr} | {pred_expr}}}"
         else:
             # Fallback for other func types (FuncLit, VarRef, etc.)
@@ -499,7 +551,7 @@ class PrettyPrinterPass(Analysis):
         if isinstance(func_node, ir.Map):
             funcT, dom, lam = func_node._children
             domain_expr = self.visit(dom)
-            (var_name, body_expr) = self.visit(lam)
+            (_, var_name, body_expr) = self._lambda(lam)
             # Multi-line format: context on first line, body indented on next line
             # If body_expr is multi-line (e.g., nested Forall/Exists), indent all lines
             body_formatted = self._indent_expr(body_expr)
@@ -516,7 +568,7 @@ class PrettyPrinterPass(Analysis):
         if isinstance(func_node, ir.Map):
             funcT, dom, lam = func_node._children
             domain_expr = self.visit(dom)
-            (var_name, body_expr) = self.visit(lam)
+            (_, var_name, body_expr) = self._lambda(lam)
             # Multi-line format: context on first line, body indented on next line
             # If body_expr is multi-line (e.g., nested Forall/Exists), indent all lines
             body_formatted = self._indent_expr(body_expr)
@@ -531,12 +583,11 @@ class PrettyPrinterPass(Analysis):
     def _(self, node: ir.Map) -> str:
         funcT, dom, lam = node._children
         dom_expr = self.visit(dom)
-        (var_name, body_str) = self.visit(lam)
+        (_, var_name, body_str) = self._lambda(lam)
 
-        # Lambda returns (var_name, body_str) tuple
         body_formatted = self._indent_expr(body_str)
-        return f"Map {var_name} ∈ {dom_expr}: [\n{body_formatted}\n]"
-        #return f"[{body_str} | {var_name} ∈ {dom_expr}]"
+        #return f"({var_name} ∈ {dom_expr}) -> [\n{body_formatted}\n]"
+        return f"Map({var_name} ∈ {dom_expr} -> [\n{body_formatted}\n])"
 
     @handles(ir.FuncLit)
     def _(self, node: ir.FuncLit) -> str:
@@ -549,7 +600,8 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.Image)
     def _(self, node: ir.Image) -> str:
         _, func_expr = self.visit_children(node)  # Skip type at index 0
-        return f"{func_expr}[𝕏]"
+        #return f"{func_expr}[𝕏]"
+        return f"Img[{func_expr}]"
 
     @handles(ir.ApplyFunc)
     def _(self, node: ir.ApplyFunc) -> str:
@@ -559,6 +611,14 @@ class PrettyPrinterPass(Analysis):
         #return f"App(\n{func_expr},\n{arg_expr}\n)"
         return f"{func_expr}({arg_expr})"
 
+    @handles(ir.Apply)
+    def _(self, node: ir.Apply) -> str:
+        _, lam_expr, arg_expr = self.visit_children(node)  # Skip type at index 0
+        #func_expr = self._indent_expr(func_expr)
+        #arg_expr = self._indent_expr(arg_expr)
+        #return f"App(\n{func_expr},\n{arg_expr}\n)"
+        return f"({lam_expr})({arg_expr})"
+
     @handles(ir.Fold)
     def _(self, node: ir.Fold) -> str:
         # Fold signature: func: Func, fun: Lambda, init: value
@@ -566,16 +626,6 @@ class PrettyPrinterPass(Analysis):
         # Lambda returns (var_name, body_str) tuple
         # TODO: Determine how to pretty print Fold - may need better formatting
         return f"fold({func_expr}, λ{var_name}.{body_str}, {init_expr})"
-
-    @handles(ir.Slice)
-    def _(self, node: ir.Slice) -> str:
-        _, dom_expr, lo_expr, hi_expr = self.visit_children(node)  # Skip type at index 0
-        return f"{dom_expr}[{lo_expr}:{hi_expr}]"
-
-    @handles(ir.RestrictEq)
-    def _(self, node: ir.RestrictEq) -> str:
-        _, dom_expr, idx_expr = self.visit_children(node)  # Skip type at index 0
-        return f"{{{idx_expr}}}"
 
     ##############################
     ## Surface-level IR nodes (Used for analysis, but can be collapsed)
@@ -652,28 +702,29 @@ class PrettyPrinterPass(Analysis):
         _, vals_expr = self.visit_children(node)  # Skip type at index 0
         return f"same({vals_expr})"
 
+    @handles(ir.ElemAt)
+    def _(self, node: ir.ElemAt) -> str:
+        _, dom_expr, idx_expr = self.visit_children(node)
+        return f"{dom_expr}[{idx_expr}]"
+
+    @handles(ir.Slice)
+    def _(self, node: ir.Slice) -> str:
+        _, dom_expr, lo_expr, hi_expr, step_expr = self.visit_children(node)
+        return f"{dom_expr}[{lo_expr}:{hi_expr}:{step_expr}]"
+
+    @handles(ir.Range)
+    def _(self, node: ir.Range) -> str:
+        _, lo_expr, hi_expr, step_expr = self.visit_children(node)
+        return f"{{{lo_expr}:{hi_expr}:{step_expr}}}"
+
+    @handles(ir.Enumerate)
+    def _(self, node: ir.Enumerate) -> str:
+        _, dom_expr = self.visit_children(node)
+        return f"enum({dom_expr})"
+
     ##############################
     ## Constructor-level IR nodes (Used for construction but immediately gets transformed for spec)
     ##############################
-
-    @handles(ir.BoundVarHOAS)
-    def _(self, node: ir.BoundVarHOAS) -> str:
-        T, = self.visit_children(node)
-        if node in self.bvhoas_names:
-            return self.bvhoas_names[node]
-        bv_name = self._new_elem_name()
-        self.bvhoas_names[node] = bv_name
-        return bv_name
-
-    @handles(ir.LambdaHOAS)
-    def _(self, node: ir.LambdaHOAS) -> str:
-        T, bv, body = self.visit_children(node)
-        return bv, body
-
-    @handles(ir.VarHOAS)
-    def _(self, node: ir.VarHOAS) -> str:
-        T, = self.visit_children(node)
-        return f"{node.name}"
 
 #"⊎" disjoint union
 #"×"cartesian product

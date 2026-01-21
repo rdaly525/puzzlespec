@@ -1,14 +1,26 @@
-from ..dsl import ir, ast, ir_types as irT
-from .pass_base import PassManager
+from ..dsl import ir
+from .pass_base import PassManager, Context
+from .analyses.type_check import TypeCheckingPass, TypeMap
+from .transforms import CanonicalizePass, DomainSimplificationPass
+from .transforms.beta_reduction import BetaReductionHOAS, BetaReductionPass
+from .transforms.refine import RefineSimplify
 from .transforms import ConstFoldPass, AlgebraicSimplificationPass
-# Context Free optimization (i.e., no need for environments)
+from .transforms.resolve_vars import ResolveBoundVars
+from .transforms.ord import OrdSimplificationPass
 
-
-def printAST(node: ir.Node, l=0):
-    field_str = ",".join([f"{k}={v}" for k,v in node.field_dict.items()])
-    if field_str:
-        field_str = f"[{field_str}]"
-    indent = "|   "*l
-    child_strs = "".join([printAST(c, l+1) for c in node._children])
-    return f"{indent}{node.__class__.__name__}{field_str}: {id(node)%255}\n{child_strs}"
- 
+def simplify(node: ir.Node, hoas: bool=False, verbose: int = 0) -> ir.Node:
+    opt_passes = [
+        TypeCheckingPass(),
+        [
+            CanonicalizePass(),
+            ConstFoldPass(),
+            AlgebraicSimplificationPass(),
+            DomainSimplificationPass(),
+            OrdSimplificationPass(),
+            #RefineSimplify(),
+            BetaReductionHOAS() if hoas else BetaReductionPass()
+        ],
+    ]
+    ctx = Context()
+    pm = PassManager(*opt_passes, verbose=verbose)
+    return pm.run(node, ctx)

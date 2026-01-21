@@ -30,7 +30,10 @@ def t0():
 
 #t0()
 def t1():
-    Unruly.pretty()
+    Unruly.pretty_print()
+    print("*"*70)
+    opt = Unruly.optimize()
+    opt.pretty_print()
     #Sudoku.pretty()
 
     print("SETTING PARAMETERS")
@@ -54,15 +57,15 @@ def t1():
     # 0 X 0 X
     # 0 X X X
     # X X X X
+    return
     print("SETTING CLUES")
     cs = ps.VarSetter(unruly44)
     clues = "WW..B.B.B......."
     # clue setter mode has access to all the gen_var variables as attributes
     # initialize all the given_vals to be 0 and given_mask to be false
     cs.num_clues = 5
-    BW_dom, BW = ps.enum('B', 'W')
-    optBW = opt.optional_dom(BW_dom)
-    optT = optBW.T.carT
+    BW_dom, BW = ps.make_enum('B', 'W')
+    optT = BW_dom.T.carT
     def _get(rc: tp.Tuple[int, int]):
         r, c = rc
         idx = r*4+c
@@ -78,7 +81,8 @@ def t1():
     cs.givens.set_lam(_get)
     instance = cs.build()
     instance.pretty()
-    print("GENERATING SMT")
-    backend = SMTBackend(instance)
-    smt = backend.generate()
+
+    #print("GENERATING SMT")
+    #backend = SMTBackend(instance)
+    #smt = backend.generate()
 t1()

@@ -61,11 +61,16 @@ class SymTable:
             sid=self._sid
         )
 
-    def new_var(self, name: str, metadata: tp.FrozenSet[tp.Tuple[str, tp.Any]]):
+    def new_var(self, name: str, metadata: tp.FrozenSet[tp.Tuple[str, tp.Any]]) -> int:
         sid = self._sid
         self._sid += 1
         self.add_var(sid, name, metadata)
         return sid
+    
+    def new_or_get(self, name: str, metadata: tp.FrozenSet[tp.Tuple[str, tp.Any]]) -> int:
+        if (sid := self.get_sid(name)) is not None:
+            return sid
+        return self.new_var(name, metadata)
 
     def add_var(self, sid: int, name: str, metadata: tp.FrozenSet[tp.Tuple[str, tp.Any]]):
         if name in self._name_to_sid:
@@ -73,7 +78,8 @@ class SymTable:
         if sid in self.entries:
             raise ValueError(f"Cannot add var {name} to sid {sid} because it already exists")
         mdict = dict(metadata)
-        entry = SymEntry(name, **mdict)
+        mdict['name'] = name
+        entry = SymEntry(**mdict)
         self.entries[sid] = entry
         self._name_to_sid[name] = sid
   

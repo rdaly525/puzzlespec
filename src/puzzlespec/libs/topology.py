@@ -1,6 +1,9 @@
-from ..compiler.dsl import ast, ir
+from ..compiler.dsl import ast, ast_nd, ir
+from . import nd as nd_lib
 import typing as tp
 from abc import abstractmethod
+
+fin = nd_lib.fin
 
 class Topology:
     pass
@@ -13,19 +16,19 @@ class Grid2D(Topology):
         self.nC = nC
 
     # Cells
-    def cells(self) -> ast.NDSeqDomainExpr:
-        return self.nR.fin() * self.nC.fin()
+    def cells(self) -> ast_nd.NDDomainExpr:
+        return fin(self.nR) * fin(self.nC)
 
-    def vertices(self) -> ast.NDSeqDomainExpr:
-        return (self.nR+1).fin() * (self.nC+1).fin()
+    def vertices(self) -> ast_nd.NDDomainExpr:
+        return fin(self.nR+1) * fin(self.nC+1)
 
     # Vertical edges
-    def edgesV(self) -> ast.NDSeqDomainExpr:
-        return self.nR.fin() * (self.nC+1).fin()
+    def edgesV(self) -> ast_nd.NDDomainExpr:
+        return fin(self.nR) * fin(self.nC+1)
 
     # Horizontal edges
-    def edgesH(self) -> ast.NDSeqDomainExpr:
-        return (self.nR+1).fin() * self.nC.fin()
+    def edgesH(self) -> ast_nd.NDDomainExpr:
+        return fin(self.nR+1) * fin(self.nC)
 
     # Disjoint union of vertical and horizontal edges
     def edges(self) -> ast.DomainExpr:
@@ -54,7 +57,7 @@ class Grid2D(Topology):
     ## relations among cells, vertices, edges
 
     #relation for 2 cells adjacent (4 means orthogonal, 8 means diagonal)
-    def cell_adjacent(self, n: ast.IntOrExpr, c1: 'CellIdxT', c2:'CellIdxT') -> ast.BoolExpr:
+    def cell_adjacent(self,c1: 'CellIdxT', c2:'CellIdxT', n: int=8) -> ast.BoolExpr:
         if type(c1.T) != type(self.CellIdxT) or type(c2.T) != type(self.CellIdxT):
             raise ValueError(f"c1 and c2 must be of type {self.CellIdxT}, got {c1.T} and {c2.T}")
         if n==4:

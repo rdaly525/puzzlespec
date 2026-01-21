@@ -10,8 +10,9 @@ from abc import abstractmethod
 def _make_var(T: ir.Type, path: tp.Tuple):
     if isinstance(T, (ir.BoolT, ir.IntT)):
         return SetterBase(T, path)
-    if isinstance(T, ir.FuncT):
+    if isinstance(T, (ir.FuncT)):
         return SetterFunc(T, path)
+    return None
     raise NotImplementedError(f"{type(T)}")
 
 class VarSetter:
@@ -40,7 +41,7 @@ class VarSetter:
         # Add as constraints
         subs: tp.List[tp.Tuple[int, ast.Expr]] = []
         for name, varSet in vars.items():
-            if not varSet._is_set:
+            if varSet is None or not varSet._is_set:
                 continue
             sid = spec.sym.get_sid(name)
             subs.append((sid, varSet._get_val()))
@@ -103,10 +104,9 @@ class SetterBase(_Setter):
 class SetterFunc(_Setter):
     def __post_init__(self):
         # Check if it depends on any variable
-        assert isinstance(self.T, ast.FuncType)
+        assert isinstance(self.T, (ast.FuncType, ast.ArrowType))
         self.concrete = utils._is_concrete(self.T.domain.node)
         self.val = None
-        ...
 
     @property
     def _is_set(self):

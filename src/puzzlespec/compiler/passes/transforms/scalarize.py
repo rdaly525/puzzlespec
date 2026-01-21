@@ -53,7 +53,7 @@ class Scalarize(Transform):
                 elems.append(self.make_var(elemT, f"{prefix}_S{i}", e))
             return ir.SumLit(T, tag_var, *elems)
         if isinstance(T, ir.FuncT):
-            dom, piT = T._children
+            dom, lamT = T._children
             dom_size = utils._dom_size(dom)
             if dom_size is None:
                 raise ValueError(f"Expected finite domain, got {dom}")
@@ -63,7 +63,7 @@ class Scalarize(Transform):
                 if dval is None:
                     raise ValueError(f"Expected domain element, got {dval}")
 
-                appT = ir.ApplyT(piT, dval)
+                appT = ir.ApplyT(lamT, dval)
                 resT = beta_reduce(appT)
                 new_var = self.make_var(resT, f"{prefix}_F{i}", e)
                 val_map[dval._key] = i

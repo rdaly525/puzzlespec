@@ -2,7 +2,6 @@ from __future__ import annotations
 
 from ..pass_base import Transform, Context, handles
 from ...dsl import ir, utils, ast
-from ..analyses.kind_check import TypeMap
 import math
 import typing as tp
 
@@ -13,12 +12,11 @@ class ConstFoldPass(Transform):
     Leaves non-constant structures intact.
     """
 
-    requires: tp.Tuple[type, ...] = (TypeMap,)
+    requires: tp.Tuple[type, ...] = ()
     produces: tp.Tuple[type, ...] = ()
     name = "const_prop"
 
     def run(self, root: ir.Node, ctx: Context):
-        self.Tmap: TypeMap = ctx.get(TypeMap).Tmap
         return self.visit(root)
 
     _binops = {
@@ -87,13 +85,8 @@ class ConstFoldPass(Transform):
     @handles(ir.IsMember)
     def _(self, node: ir.IsMember):
         T, domain, val = self.visit_children(node)
-        if isinstance(domain, ir.Universe) and domain.T.fin:
-            assert val in self.Tmap
-            assert domain in self.Tmap
-            valT = self.Tmap[val]
-            domT = self.Tmap[domain]
-            if valT.eq(domT.carT):
-                return ir.Lit(ir.BoolT(), val=True)
+        if isinstance(domain, ir.Universe):
+            return ir.Lit(ir.BoolT(), val=True)
 
         #T, domain, val = self.visit_children(node)
         #if utils._is_concrete(val):
