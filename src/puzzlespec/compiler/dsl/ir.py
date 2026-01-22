@@ -44,7 +44,9 @@ class Node:
 
     @ft.cached_property
     def field_dict(self):
-        return {f: getattr(self, f) for f in self._fields}
+        fd = {f: getattr(self, f) for f in self._fields}
+        assert all(not isinstance(v, Node) for v in fd.values())
+        return fd
 
     @property
     def field_vals(self):
@@ -252,26 +254,17 @@ class NDDomT(_DomT):
     def ord(self) -> bool:
         return all(f.ord for f in self.factors)
 
-class LambdaTHOAS(Type):
-    _fields = ('inj',)
-    _numc = 2
-    def __init__(self, bound_var: Value, resT: Type, inj=False):
-        self.inj = inj
-        super().__init__(bound_var, resT)
-
+class _LambdaT(Type):
     @property
-    def bv(self):
-        return self._children[0]
-
-    @property
-    def argT(self):
-        return self.bv.T
+    def argT(self) -> Type:
+        raise NotImplementedError()
 
     @property
     def resT(self) -> Type:
-        return self._children[1]
+        raise NotImplementedError()
 
-class LambdaT(Type):
+
+class PiT(_LambdaT):
     _numc = 2
     def __init__(self, argT: Type, resT: Type):
         super().__init__(argT, resT)
@@ -284,11 +277,24 @@ class LambdaT(Type):
     def argT(self) -> Type:
         return self._children[0]
 
+class ArrowT(_LambdaT):
+    _numc = 2
+    def __init__(self, argT: Type, resT: Type):
+        super().__init__(argT, resT)
+
+    @property
+    def argT(self) -> Type:
+        return self._children[0]
+
+    @property
+    def resT(self) -> Type:
+        return self._children[1]
+
 
 class FuncT(Type):
     _numc = 2
     def __init__(self, dom: Value, lamT: Type):
-        assert isinstance(lamT, (LambdaT, LambdaTHOAS))
+        assert isinstance(lamT, (PiT, PiTHOAS, ArrowT))
         super().__init__(dom, lamT)
 
     @property
@@ -296,7 +302,7 @@ class FuncT(Type):
         return self._children[0]
     
     @property
-    def lamT(self) -> LambdaT:
+    def lamT(self) -> PiT:
         return self._children[1]
 
     #def __repr__(self):
@@ -304,19 +310,6 @@ class FuncT(Type):
 
     def eq(self, other):
         return isinstance(other, FuncT) and self.dom.eq(other.dom) and self.lamT.eq(other.lamT)
-
-class ArrowT(Type):
-    _numc = 2
-    def __init__(self, argT: Type, resT: Type):
-        super().__init__(argT, resT)
-
-    @property
-    def argT(self) -> Type:
-        return self._children[0]
-
-    @property
-    def resT(self) -> Type:
-        return self._children[1]
 
 class RefT(Type):
     _numc = 2
@@ -341,10 +334,10 @@ def _is_value(v: Node) -> bool:
 
 class ApplyT(Type):
     _numc = 2
-    def __init__(self, lamT: LambdaT, arg: Value):
+    def __init__(self, lamT: PiT, arg: Value):
         assert _is_value(arg)
-        if not isinstance(lamT, (LambdaT, LambdaTHOAS)):
-            raise ValueError(f"ApplyT must be a LambdaT, got {lamT}")
+        if not isinstance(lamT, (PiT, PiTHOAS)):
+            raise ValueError(f"ApplyT must be a PiT, got {lamT}")
         super().__init__(lamT, arg)
 
     def __repr__(self):
@@ -353,51 +346,6 @@ class ApplyT(Type):
     @property
     def arg(self) -> Value:
         return self._children[1]
-
-# Previous implementation:
-# in DomT I stored the base domTs along with the fin/ord of each domT, and set of axes used.
-# Current implementation
-# I sotre the original base domTs and a set of shape DomTs along with a function from shape DomT to base DomT.
-# This seems like overkill. 
-# How would I compute something like dot product of (A,B,C) * (B, D) -> 
-#
-#
-#
-#class NDDomT(Type):
-#    _numc = -1
-#    _fields = ('base_rank',)
-#    def __init__(self,
-#        embed: Value, # S -> B (BOTH IN TUPLE FORM) # Lambda
-#        elem: Value, # B -> E (B IN TUPLE FORM) # Lambda
-#        *doms: Value, # base_rank base_doms (B), + rank shape_doms (S)
-#        base_rank: int
-#    ):
-#        self.base_rank = base_rank
-#        super().__init__(embed, elem, *doms)
-#
-#    @property
-#    def rank(self) -> int:
-#        return len(self._children)-2-self.base_rank
-#
-#    @property
-#    def base_doms(self):
-#        return tuple(self._children[2:self.base_rank+2])
-#
-#    @property
-#    def shape_doms(self):
-#        return tuple(self._children[2+self.base_rank:])
-#
-#    @property
-#    def embed(self):
-#        return self._children[0]
-#
-#    @property
-#    def elem(self):
-#        return self._children[1]
-#
-#    @property
-#    def carT(self):
-#        return self.elem.T.resT
 
 ##############################
 ## Core-level IR Value nodes (Used throughout entire compiler flow)
@@ -417,20 +365,18 @@ class Value(Node):
         return self._children[0]
 
 class VarRef(Value):
-    _fields = ("sid", "name")
+    _fields = ("sid",)
     _numc = 1
-    def __init__(self, T: Type, sid: int, name:str):
+    def __init__(self, T: Type, sid: int):
         self.sid = sid
-        self.name = name
         super().__init__(T)
 
-
-class BoundVar(Node):
+class BoundVar(Value):
     _fields = ('idx',) # De Bruijn index
-    _numc = 0
-    def __init__(self, idx: int):
+    _numc = 1
+    def __init__(self, T: Type, idx: int):
         self.idx = idx
-        super().__init__()
+        super().__init__(T)
 
 
 class Unit(Value):
@@ -442,7 +388,7 @@ class Unit(Value):
 class Lambda(Value):
     _numc = 2
     def __init__(self, T: Type, body: Value):
-        assert isinstance(T, LambdaT)
+        assert isinstance(T, PiT)
         super().__init__(T, body)
 
 ### Int/Bool 
@@ -785,32 +731,7 @@ class Spec(Node):
     def obls(self):
         return self._children[1]
     
-class And(Value):
-    _numc = 3
-    def __init__(self, T: Type, a: Value, b: Value):
-        super().__init__(T, a, b)
-
 class Implies(Value):
-    _numc = 3
-    def __init__(self, T: Type, a: Value, b: Value):
-        super().__init__(T, a, b)
-
-class Or(Value):
-    _numc = 3
-    def __init__(self, T: Type, a: Value, b: Value):
-        super().__init__(T, a, b)
-
-class Add(Value):
-    _numc = 3
-    def __init__(self, T: Type, a: Value, b: Value):
-        super().__init__(T, a, b)
-
-class Sub(Value):
-    _numc = 3
-    def __init__(self, T: Type, a: Value, b: Value):
-        super().__init__(T, a, b)
-
-class Mul(Value):
     _numc = 3
     def __init__(self, T: Type, a: Value, b: Value):
         super().__init__(T, a, b)
@@ -819,28 +740,6 @@ class Abs(Value):
     _numc = 2
     def __init__(self, T: Type, a: Value):
         super().__init__(T, a)
-
-class Gt(Value):
-    _numc = 3
-    def __init__(self, T: Type, a: Value, b: Value):
-        super().__init__(T, a, b)
-
-class GtEq(Value):
-    _numc = 3
-    def __init__(self, T: Type, a: Value, b: Value):
-        super().__init__(T, a, b)
-
-# Represents fin(N).map(a*x + b)
-#class Affine(Value):
-#    _numc = 4
-#    def __init__(self, T: Type, dom: Value, a: Value, b: Value):
-#        super().__init__(T, dom, a, b)
-
-#class Gather(Value):
-#    _numc = 3
-#    def __init__(self, T: Type, dom: Value, base_dom: Value):
-#        super().__init__(T, dom, base_dom)
-
 
 # Common Fold Values
 class SumReduce(Value):
@@ -895,7 +794,7 @@ class BoundVarHOAS(Value):
     _fields = ('closed', 'name')
     _numc = 1
     _cnt = 0
-    def __init__(self, T: RefT, closed: bool, name: tp.Optional[str]=None):
+    def __init__(self, T: Type, closed: bool, name: tp.Optional[str]=None):
         if name is None:
             name = f"b{self._cnt}"
             BoundVarHOAS._cnt +=1
@@ -907,12 +806,30 @@ class BoundVarHOAS(Value):
     def T(self) -> RefT:
         return self._children[0]
 
+class PiTHOAS(_LambdaT):
+    _fields = ('bv_name', 'inj',)
+    _numc = 2
+    def __init__(self, argT: Value, resT: Type, bv_name: str, inj=False):
+        self.bv_name = bv_name
+        self.inj = inj
+        super().__init__(argT, resT)
+
+    @property
+    def argT(self):
+        return self._children[0]
+
+    @property
+    def resT(self) -> Type:
+        return self._children[1]
+
+
 class LambdaHOAS(Value):
-    _fields = ('inj',) #True -> Known to be injective
-    _numc = 3
-    def __init__(self, T: Type, bound_var: Value, body: Value, inj: bool):
+    _fields = ('bv_name', 'inj',) #True -> Known to be injective
+    _numc = 2
+    def __init__(self, T: Type, body: Value, bv_name: str, inj: bool):
+        self.bv_name = bv_name
         self.inj=inj
-        super().__init__(T, bound_var, body)
+        super().__init__(T, body)
 
 class VarHOAS(Value):
     _fields = ('name', 'metadata')
@@ -925,88 +842,105 @@ class VarHOAS(Value):
     def __repr__(self):
         return f"VarHOAS[{self.name}]"
 
-# TODO separate this out by 'kind'
-# Mapping from Value classes to a priority integer.
-# This is probably way overengineered and there are probably better priorities
+# Mapping from Nodes to a priority integer. Used for canonicalization among commutative operations
+# Commutative ops: Prod, Sum, Conj, Disj, Intersect, Union, DomLit, 
 NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
-    Spec: -3,
-    UnitT: -2,
-    BoolT: -2,
-    IntT: -2,
-    EnumT: -2,
-    TupleT: -2,
-    SumT: -2,
-    DomT: -2,
-    NDDomT: -2,
-    FuncT: -2,
-    ArrowT: -2,
-    LambdaTHOAS: -2,
-    LambdaT: -2,
-    RefT: -2,
-    ApplyT: -2,
-    Unit: -1,
-    Lit: 0,
-    VarRef: 1,
-    VarHOAS: 1,
-    BoundVar: 2,
-    BoundVarHOAS: 2,
-    Not: 3,
-    Neg: 3,
-    And: 4,
-    Or: 4,
-    Implies: 5,
-    Add: 4,
-    Sub: 4,
-    Mul: 5,
-    Div: 5,
-    Mod: 5,
-    Abs: 5,
-    Eq: 6,
-    Gt: 7,
-    GtEq: 7,
-    Lt: 7,
-    LtEq: 7,
-    Ite: 8,
-    Conj: 8,
-    Disj: 8,
-    Sum: 8,
-    Prod: 8,
-    Universe: 9,
-    Empty: 9,
-    Singleton: 9,
-    Unique: 9,
-    DomLit: 9,
-    Fin: 9,
-    #Affine: 9,
-    Card: 9,
-    IsMember: 9,
-    Subset: 9,
-    ProperSubset: 9,
-    Union: 9,
-    Intersection: 9,
-    CartProd: 9,
-    DomProj: 9,
-    TupleLit: 9,
-    Proj: 9,
-    DisjUnion: 9,
-    DomInj: 9,
-    Inj: 9,
-    SumLit: 9,
-    Match: 9,
-    Restrict: 9,
-    Map: 10,
-    FuncLit: 10,
-    Image: 10,
-    ApplyFunc: 10,
-    Apply: 10,
-    Lambda: 12,
-    LambdaHOAS: 12,
-    Fold: 13,
-    SumReduce: 14,
-    ProdReduce: 14,
-    Forall: 14,
-    Exists: 14,
-    AllDistinct: 14,
-    AllSame: 14,
+    # Types
+    UnitT: 0,
+    BoolT: 0,
+    IntT: 0,
+    EnumT: 0,
+    TupleT: 0,
+    SumT: 0,
+    DomT: 0,
+    NDDomT: 0,
+    FuncT: 0,
+    ArrowT: 0,
+    PiTHOAS: 0,
+    PiT: 0,
+    ApplyT: 0,
+    RefT: 0,
+    
+    # Spec
+    Spec: 0,
+    # UnitT
+    Unit: 10,
+    
+    # Bool/Int/Enum
+    Lit: 20,
+    
+    # Any Type
+    VarRef: 30,
+    VarHOAS: 31,
+    BoundVar: 40,
+    BoundVarHOAS: 41,
+    
+    ApplyFunc: 800,
+    Apply: 801,
+    ElemAt: 802,
+    Proj: 803,
+    Ite: 810,
+    Match: 811,
+    Fold: 812,
+    Unique: 813,
+
+    # Bool
+    Not: 100,
+    Eq: 101,
+    Lt: 102,
+    LtEq: 103,
+    Implies: 104,
+    IsMember: 110,
+    Subset: 111,
+    ProperSubset: 112,
+    Conj: 120,
+    Disj: 121,   
+    AllDistinct: 130,
+    AllSame: 131,   
+    Forall: 140,
+    Exists: 141,
+
+    # Int
+    Neg: 200,
+    Abs: 201,
+    Sum: 210,
+    Prod: 211,
+    Div: 220,
+    Mod: 221,
+    Card: 230,
+    SumReduce: 240,
+    ProdReduce: 241,
+
+    # Domains
+    Empty: 300,
+    Universe: 301,
+    Singleton: 302,
+    Fin: 310,
+    Range: 311,
+    DomLit: 320,
+    Restrict: 330,
+    Slice: 331,
+    Image: 332,
+    DomProj: 333,
+    DomInj: 334,
+    CartProd: 340,
+    DisjUnion: 341,
+    Intersection: 350,
+    Union: 351,
+
+    # Tuples
+    # Sums
+    # Funcs
+    TupleLit: 400,
+    SumLit: 410,
+    FuncLit: 420,
+    Inj: 430,
+    Map: 440,
+    Enumerate: 450, 
+
+    # Lambdas
+    Lambda: 500,
+    LambdaHOAS: 501,
+
 }
 

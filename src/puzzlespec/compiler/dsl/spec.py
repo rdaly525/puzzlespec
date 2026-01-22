@@ -11,6 +11,7 @@ from ..passes.transforms import CanonicalizePass, ConstFoldPass, AlgebraicSimpli
 from ..passes.transforms.refine import RefineSimplify
 from ..passes.transforms.cse import CSE
 from ..passes.transforms.ord import OrdSimplificationPass
+from ..passes.transforms.arrow_simp import LamSimplification
 #from ..passes.analyses.constraint_categorizer import ConstraintCategorizer, ConstraintCategorizerVals
 from ..passes.analyses.getter import VarGetter, VarSet, get_vars
 from ..passes.analyses.type_check import TypeCheckingPass, TypeMap 
@@ -113,11 +114,12 @@ class PuzzleSpec:
             DomainSimplificationPass(),
             #RefineSimplify(),
             BetaReductionHOAS(),
+            LamSimplification(),
             #CSE(),
         ]
 
         #opt = self.transform(opt_passes, OrdSimplificationPass(), opt_passes, ctx=ctx, analysis_map=analysis_map, max_iter=5)
-        opt = self.transform(opt_passes, ctx=ctx, analysis_map=analysis_map, max_iter=5)
+        opt = self.transform(opt_passes, ctx=ctx, analysis_map=analysis_map, max_iter=8)
         return opt
     
     def pretty(self) -> str:

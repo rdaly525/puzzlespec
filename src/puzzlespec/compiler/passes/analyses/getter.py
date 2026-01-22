@@ -34,9 +34,10 @@ class VarGetter(Analysis):
 
     @handles(ir.VarRef)
     def _(self, node: ir.VarRef):
-        if node.sid not in self.nmap:
-            self.nmap[node.sid] = ir.VarRef(node.T.rawT, node.sid, node.name)
-        return set([self.nmap[node.sid]])
+        return set([node])
+        #if node.sid not in self.nmap:
+        #    self.nmap[node.sid] = ir.VarRef(node.T.rawT, node.sid, node.name)
+        #return set([self.nmap[node.sid]])
 
 def get_closed_vars(node: ir.Node):
     ctx = Context()

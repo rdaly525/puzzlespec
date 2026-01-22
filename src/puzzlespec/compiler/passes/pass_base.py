@@ -23,6 +23,7 @@ class Context:
     def add(self, result: object, replace=True):
         if not replace and type(result) in self._store:
             raise ValueError(f"Context already contains {type(result)}")
+        assert isinstance(result, AnalysisObject)
         self._store[type(result)] = result
 
     def get(self, cls: tp.Type[AnalysisObject], *args) -> AnalysisObject:
@@ -281,7 +282,7 @@ class Transform(Pass):
                     if self._debug:
                         print(" (cached) )")
                     return self._cache[cache_key]
-                if isinstance(node, (ir.Lambda, ir.LambdaT)):
+                if isinstance(node, (ir.Lambda, ir.PiT)):
                     self._bframes.append(node)
             if self._debug:
                 print("")
@@ -294,7 +295,7 @@ class Transform(Pass):
                 new_node = node
  
             if self.enable_memoization:
-                if isinstance(node, (ir.Lambda, ir.LambdaT)):
+                if isinstance(node, (ir.Lambda, ir.PiT)):
                     self._bframes.pop()
                 # Add new node to cache
                 assert cache_key not in self._cache

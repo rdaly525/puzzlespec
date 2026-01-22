@@ -128,9 +128,66 @@ class DomainSimplificationPass(Transform):
 
     @handles(ir.LambdaHOAS)
     def _(self, node: ir.LambdaHOAS):
-        T, bv, body = self.visit_children(node)
+        T, body = self.visit_children(node)
         inj = node.inj
-        if bv == body:
+        bv_name = node.bv_name
+        if isinstance(body, ir.BoundVarHOAS) and body.name==bv_name:
             self.ids.add(node)
             inj = True
-        return node.replace(T, bv, body, inj=inj)
+        return node.replace(T, body, inj=inj)
+
+    @handles(ir.Restrict)
+    def _(self, node: ir.Restrict):
+        T, func = self.visit_children(node)
+        if isinstance(func, ir.Map):
+            T_f, dom, lam = func._children
+            if isinstance(dom, ir.Restrict):
+                T_i, func_i = dom._children
+                new_func = ast.wrap(func_i).imap(lambda i, v: ast.wrap(lam)(i) & v)
+                return ir.Restrict(T, new_func.node)
+        return node.replace(T, func)
+
+    @handles(ir.Intersection)
+    def _(self, node: ir.Intersection) -> ir.Node:
+        T, *doms = self.visit_children(node)
+        if len(doms)==0:
+            return ir.Universe(T)
+        if len(doms)==1:
+            return doms[0]
+        new_doms = []
+        for dom in doms:
+            if isinstance(dom, ir.Universe) and not isinstance(dom.T, ir.RefT):
+                continue
+            elif isinstance(dom, ir.Intersection):
+                new_doms.extend(dom._children[1:])
+            else:
+                new_doms.append(dom)
+        _new_doms = []
+        for i, dom in enumerate(new_doms):
+            if dom in new_doms[i+1:]:
+                continue
+            _new_doms.append(dom)
+        rdoms = []
+        nrdoms = []
+        for dom in _new_doms:
+            if isinstance(dom, ir.Restrict):
+                rdoms.append(dom)
+            else:
+                nrdoms.append(dom)
+        if len(rdoms) > 1:
+            doms = []
+            lams = []
+            for rdom in rdoms:
+                T, func = rdom._children
+                _, dom, lam = func._children
+                doms.append(ast.wrap(dom))
+                lams.append(ast.wrap(lam))
+            def lam(e, lams=lams):
+                res = 1
+                for lam in lams:
+                    res &= lam(e)
+                return res
+            rdom = doms[0].intersect(*doms[1:]).restrict(lam)
+            _new_doms = nrdoms + [rdom.node]
+        return node.replace(T, *_new_doms)
+

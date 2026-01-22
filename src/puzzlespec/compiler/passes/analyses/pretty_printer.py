@@ -5,20 +5,22 @@ from ..envobj import EnvsObj, SymTable
 from .getter import get_vars
 import typing as tp
 
-def pretty(node: ir.Node) -> str:
+def pretty(node: ir.Node, sym: SymTable=None) -> str:
     ctx = Context()
+    if sym is not None:
+        ctx.add(EnvsObj(sym))
     pexpr = PrettyPrinterPass().run(node, ctx)
     return pexpr.text
 
 def pretty_spec(spec: ir.Spec, sym: SymTable, just_vars=True) -> str:
     ctx = Context(EnvsObj(sym))
     free_vars = get_vars(spec)
-    cons_text = pretty(spec.cons)
-    obls_text = pretty(spec.obls)
+    cons_text = pretty(spec.cons, sym)
+    obls_text = pretty(spec.obls, sym)
     if just_vars:
         s = "Free Variables:\n"
         for v in free_vars:
-            s += f"    {v.name} : {pretty(v.T)}\n"
+            s += f"    {pretty(v, sym)} : {pretty(v.T, sym)}\n"
         s += "Constraints:\n"
         s += cons_text
         return s
@@ -37,7 +39,7 @@ def pretty_spec(spec: ir.Spec, sym: SymTable, just_vars=True) -> str:
                 if isinstance(v, ir.VarHOAS):
                     raise NotImplementedError()
                 if v.sid == sid:
-                    T_str = pretty(v.T)
+                    T_str = pretty(v.T, sym)
             if e.get('role') == 'P':
                 p_to_T[e.name] = T_str + i_str
             elif e.get('role') == 'G':
@@ -166,33 +168,38 @@ class PrettyPrinterPass(Analysis):
         self.cnt+=1
         return name
     
-    def _lambdaT(self, node: ir.LambdaT | ir.LambdaTHOAS) -> tp.Tuple[str, str]:
-        if isinstance(node, ir.LambdaTHOAS):
-            return self.visit_children(node)
-        argT, resT = node._children
-        is_col = isinstance(argT, (ir.FuncT, ir.DomT))
-        if is_col:
-            bv_name = self._new_col_name(True)
-        else:
-            bv_name = self._new_elem_name(True)
-        self.b_names.append(bv_name)
-        resT_str = self.visit(resT)
-        # pop the stack
-        name = self.b_names.pop()
-        assert name == bv_name
-        return bv_name, resT_str
+    def _lambdaT(self, node: ir._LambdaT) -> tp.Tuple[str, str]:
+        if isinstance(node, ir.PiT):
+            bv_name = self._new_bv_name(True)
+            self.b_names.append(bv_name)
+        argT, resT = self.visit_children(node)
+        if isinstance(node, ir.PiTHOAS):
+            bv_name = node.bv_name
+        if isinstance(node, ir.ArrowT):
+            bv_name = None
+        if isinstance(node, ir.PiT):
+            name = self.b_names.pop()
+            assert name == bv_name
+        return bv_name, argT, resT
 
-    @handles(ir.LambdaT, ir.LambdaTHOAS)
-    def _(self, node: ir.Node) -> str:
-        argT = self.visit(node._children[0].T)
-        bv, resT = self._lambdaT(node)
-        return f"({bv} : {argT}) -> {resT}"
+    @handles(ir.PiTHOAS)
+    def _(self, node: ir.PiTHOAS) -> str:
+        argT, resT = self.visit_children(node)
+        return f"({node.bv_name} : {argT}) -> {resT}"
+
+    @handles(ir.ArrowT)
+    def _(self, node: ir.ArrowT) -> str:
+        argT, resT = self.visit_children(node)
+        return f"{argT} -> {resT}"
 
     @handles(ir.FuncT)
     def _(self, node: ir.FuncT):
         dom, lamT = node._children
-        dom_str, (bv_name, resT_str) = self.visit(dom), self._lambdaT(lamT)
-        return f"({bv_name} : {self.visit(lamT.argT)} ∈ {dom_str}) -> {resT_str}"
+        dom_str, (bv_name, argT_str, resT_str) = self.visit(dom), self._lambdaT(lamT)
+        if bv_name is None:
+            return f"{dom_str} -> {resT_str}"
+        else:
+            return f"(({bv_name} : {argT_str}) ∈ {dom_str}) -> {resT_str}"
     
     @handles(ir.RefT)
     def _(self, node: ir.RefT):
@@ -207,7 +214,7 @@ class PrettyPrinterPass(Analysis):
     def _(self, node: ir.VarRef) -> str:
         if hasattr(self, 'sym'):
             return self.sym.get_name(node.sid)
-        return f"{node.name}"
+        return f"V<{node.sid}>"
 
     @handles(ir.VarHOAS)
     def _(self, node: ir.VarHOAS) -> str:
@@ -231,11 +238,10 @@ class PrettyPrinterPass(Analysis):
         return "tt"
 
     def _lambda(self, node: ir.LambdaHOAS | ir.Lambda) -> tp.Tuple[str, str]:
+        T, body = node._children
         if isinstance(node, ir.LambdaHOAS):
-            T, bv, body = node._children
-            bv_name, body_txt = self.visit(bv), self.visit(body)
+            bv_name, body_txt = node.bv_name, self.visit(body)
         else:
-            T, body = node._children
             bv_name = self._new_bv_name()
             self.b_names.append(bv_name)
             body_txt = self.visit(body)
@@ -370,16 +376,16 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.Conj)
     def _(self, node: ir.Conj) -> str:
         children_strs = self.visit_children(node)[1:]  # Skip type at index 0
-        if len(children_strs) == 2:
-            return f"({children_strs[0]} ∧ {children_strs[1]})"
-        return self._format_variadic_multiline(children_strs, "∩", empty_default='𝕋')
+        if len(children_strs) <=3:
+            return f"(" + " ∧ ".join(f"{c}" for c in children_strs) + ")"
+        return self._format_variadic_multiline(children_strs, "∧", empty_default='𝕋')
 
     @handles(ir.Disj)
     def _(self, node: ir.Disj) -> str:
         children_strs = self.visit_children(node)[1:]  # Skip type at index 0
         if len(children_strs) == 2:
             return f"({children_strs[0]} ∨ {children_strs[1]})"
-        return self._format_variadic_multiline(children_strs, "∪", empty_default='𝔽')
+        return self._format_variadic_multiline(children_strs, "∨", empty_default='𝔽')
 
     @handles(ir.Sum)
     def _(self, node: ir.Sum) -> str:
@@ -461,8 +467,10 @@ class PrettyPrinterPass(Analysis):
 
     @handles(ir.Intersection)
     def _(self, node: ir.Intersection) -> str:
-        _, domA_expr, domB_expr = self.visit_children(node)  # Skip type at index 0
-        return f"({domA_expr} ∩ {domB_expr})"
+        _, *dom_exprs = self.visit_children(node)  # Skip type at index 0
+        if len(dom_exprs)==2:
+            return f"({dom_exprs[0]} ∩ {dom_exprs[1]})"
+        return self._format_variadic_multiline(dom_exprs, "∩", empty_default=f'{{}}')
 
     ## Cartesian Products
     @handles(ir.CartProd)
@@ -637,50 +645,15 @@ class PrettyPrinterPass(Analysis):
         obls_expr = self.visit(node.obls)
         return cons_expr, obls_expr
 
-    @handles(ir.And)
-    def _(self, node: ir.And) -> str:
-        _, left, right = self.visit_children(node)  # Skip type at index 0
-        return f"({left} ∧ {right})"
-
     @handles(ir.Implies)
     def _(self, node: ir.Implies) -> str:
         _, left, right = self.visit_children(node)  # Skip type at index 0
         return f"({left} → {right})"
 
-    @handles(ir.Or)
-    def _(self, node: ir.Or) -> str:
-        _, left, right = self.visit_children(node)  # Skip type at index 0
-        return f"({left} ∨ {right})"
-
-    @handles(ir.Add)
-    def _(self, node: ir.Add) -> str:
-        _, ltext, rtext = self.visit_children(node)  # Skip type at index 0
-        return f"({ltext} + {rtext})"
-
-    @handles(ir.Sub)
-    def _(self, node: ir.Sub) -> str:
-        _, left, right = self.visit_children(node)  # Skip type at index 0
-        return f"({left} - {right})"
-
-    @handles(ir.Mul)
-    def _(self, node: ir.Mul) -> str:
-        _, left, right = self.visit_children(node)  # Skip type at index 0
-        return f"({left} * {right})"
-
     @handles(ir.Abs)
     def _(self, node: ir.Abs) -> str:
         _, child = self.visit_children(node)  # Skip type at index 0
         return f"|{child}|"
-
-    @handles(ir.Gt)
-    def _(self, node: ir.Gt) -> str:
-        _, left, right = self.visit_children(node)  # Skip type at index 0
-        return f"({left} > {right})"
-
-    @handles(ir.GtEq)
-    def _(self, node: ir.GtEq) -> str:
-        _, left, right = self.visit_children(node)  # Skip type at index 0
-        return f"({left} ≥ {right})"
 
     @handles(ir.SumReduce)
     def _(self, node: ir.SumReduce) -> str:

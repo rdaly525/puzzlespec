@@ -24,7 +24,7 @@ class ResolveBoundVars(Transform):
         return new_root
 
     def _check_no_hoas(self, node):
-        if isinstance(node, (ir.BoundVarHOAS, ir.LambdaHOAS, ir.LambdaTHOAS)):
+        if isinstance(node, (ir.BoundVarHOAS, ir.LambdaHOAS, ir.PiTHOAS)):
             raise ValueError(f"Failed resolve bound, found {node}")
         for c in node._children:
             self._check_no_hoas(c)
@@ -47,23 +47,23 @@ class ResolveBoundVars(Transform):
         self.stack.pop()
         return ir.Lambda(new_T, new_body)
 
-    @handles(ir.LambdaTHOAS)
+    @handles(ir.PiTHOAS)
     def _(self, node):
         bv, bodyT = node._children
         bv_T = self.visit(bv.T)
         self.stack.append(bv)
         new_bodyT = self.visit(bodyT)
         self.stack.pop()
-        return ir.LambdaT(bv_T, new_bodyT)
+        return ir.PiT(bv_T, new_bodyT)
 
-    @handles(ir.LambdaT)
+    @handles(ir.PiT)
     def _(self, node):
         argT, bodyT = node._children
         new_argT = self.visit(argT)
         self.stack.append(None)
         new_bodyT = self.visit(bodyT)
         self.stack.pop()
-        return ir.LambdaT(new_argT, new_bodyT)
+        return ir.PiT(new_argT, new_bodyT)
 
     @handles(ir.BoundVarHOAS)
     def _(self, use):
@@ -104,7 +104,7 @@ class ResolveFreeVars(Transform):
     def _(self, v: ir.VarHOAS):
         new_T, = self.visit_children(v)
         sid = self.sym.new_or_get(v.name, v.metadata)
-        return ir.VarRef(new_T, sid, v.name)
+        return ir.VarRef(new_T, sid)
 
 def close_bound_vars(root: ir.Node, bv: ir.BoundVarHOAS) -> ir.Node:
     ctx = Context()
@@ -135,8 +135,8 @@ class CloseBoundVars(Transform):
             return ir.BoundVarHOAS(T, closed=True, name=node.name)
         return node.replace(*self.visit_children(node))
 
-    @handles(ir.Lambda, ir.LambdaT)
-    def _(self, node: ir.Lambda | ir.LambdaT):
+    @handles(ir.Lambda, ir.PiT)
+    def _(self, node: ir.Lambda | ir.PiT):
         raise ValueError("Lambda should not be in the AST")
 
     @handles(ir.LambdaHOAS)
@@ -146,8 +146,8 @@ class CloseBoundVars(Transform):
             raise ValueError("Same binder in scope")
         return node.replace(*self.visit_children(node))
 
-    @handles(ir.LambdaTHOAS)
-    def _(self, node: ir.LambdaTHOAS):
+    @handles(ir.PiTHOAS)
+    def _(self, node: ir.PiTHOAS):
         bv, bodyT = node._children
         if bv._key == self.bv._key:
             raise ValueError("Same binder in scope")

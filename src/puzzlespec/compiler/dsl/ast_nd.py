@@ -23,6 +23,8 @@ class OrdDomainType(ast.DomainType):
 
 def _make_slice(N: ast.IntExpr, s: slice):
     lo, hi, step = s.start, s.stop, s.step
+    if lo is None and hi is None and step is None:
+        return None
     if lo is None:
         lo = 0
     if hi is None:
@@ -73,8 +75,10 @@ class OrdDomainExpr(ast.DomainExpr):
     
     def __getitem__(self, idx: tp.Any) -> OrdDomainExpr | ast.IntExpr:
         if isinstance(idx, slice):
-            lo, hi, step = _make_slice(self.size, idx)
-            return self.slice(lo, hi, step)
+            lhs = _make_slice(self.size, idx)
+            if lhs is None:
+                return self
+            return self.slice(*lhs)
         elif isinstance(idx, (int, ast.IntExpr)):
             idx = ast.IntExpr.make(idx)
             return self.elemAt(idx)

@@ -47,7 +47,7 @@ class AlgebraicSimplificationPass(Transform):
 
         return node.replace(T, a)
 
-    @handles(ir.Add, ir.Sum)
+    @handles(ir.Sum)
     def _(self, node: ir.Node) -> ir.Node:
         children = self.visit_children(node)
         T = children[0]
@@ -72,7 +72,7 @@ class AlgebraicSimplificationPass(Transform):
             return children[0]
         return node.replace(T, *children)
 
-    @handles(ir.Mul, ir.Prod)
+    @handles(ir.Prod)
     def _(self, node: ir.Node) -> ir.Node:
         children = self.visit_children(node)
         T = children[0]
@@ -98,7 +98,7 @@ class AlgebraicSimplificationPass(Transform):
             return children[0]
         return node.replace(T, *children)
 
-    @handles(ir.Conj, ir.And)
+    @handles(ir.Conj)
     def _(self, node: ir.Node) -> ir.Node:
         children = self.visit_children(node)
         T = children[0]
@@ -113,9 +113,14 @@ class AlgebraicSimplificationPass(Transform):
                 return ir.Lit(T, False)
         if len(children) == 1:
             return children[0]
-        return node.replace(T, *children)
+        new_children = []
+        for i, c in enumerate(children):
+            if c in children[i+1:]:
+                continue
+            new_children.append(c)
+        return node.replace(T, *new_children)
 
-    @handles(ir.Or, ir.Disj)
+    @handles(ir.Disj)
     def _(self, node: ir.Node) -> ir.Node:
         children = self.visit_children(node)
         T = children[0]
@@ -131,16 +136,6 @@ class AlgebraicSimplificationPass(Transform):
         if len(children) == 1:
             return children[0]
         return node.replace(T, *children)
-
-    @handles(ir.Intersection)
-    def _(self, node: ir.Intersection) -> ir.Node:
-        T, *doms = self.visit_children(node)
-        new_doms = []
-        for dom in doms:
-            if isinstance(dom, ir.Universe) and not isinstance(dom.T, ir.RefT):
-                continue
-            new_doms.append(dom)
-        return node.replace(T, *new_doms)
 
     @handles(ir.Div)
     def _(self, node: ir.Div) -> ir.Node:

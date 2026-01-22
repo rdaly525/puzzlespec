@@ -35,6 +35,8 @@ class SymEntry:
         self._metadata = kwargs
     
     def get(self, key: str) -> tp.Any:
+        if key=='name':
+            return self.name
         return self._metadata.get(key, None)
 
 class SymTable:
@@ -69,6 +71,7 @@ class SymTable:
     
     def new_or_get(self, name: str, metadata: tp.FrozenSet[tp.Tuple[str, tp.Any]]) -> int:
         if (sid := self.get_sid(name)) is not None:
+            assert all(self.entries[sid].get(k)==v for k,v in metadata)
             return sid
         return self.new_var(name, metadata)
 
