@@ -8,7 +8,6 @@ from .envs import SymTable
 from ..passes.pass_base import PassManager, Context, Pass
 from ..passes.transforms.beta_reduction import BetaReductionPass, BetaReductionHOAS
 from ..passes.transforms import CanonicalizePass, ConstFoldPass, AlgebraicSimplificationPass, DomainSimplificationPass
-from ..passes.transforms.refine import RefineSimplify
 from ..passes.transforms.cse import CSE
 from ..passes.transforms.ord import OrdSimplificationPass
 from ..passes.transforms.arrow_simp import LamSimplification

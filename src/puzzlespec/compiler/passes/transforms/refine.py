@@ -56,12 +56,8 @@ class FreeVarRefineA(Analysis):
             self.sid_to_rdoms[node.sid].append(dom)
 
 
-
-
-
-
-class RefineSimplify(Transform):
-    """simplifies refinements
+class RefineAdd(Transform):
+    """Adds appropriate refinements
     """
     name = "refine_simplify"
 
