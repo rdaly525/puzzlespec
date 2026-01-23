@@ -19,25 +19,26 @@ class CheckBoundVars(Analysis):
         return BVCheck()
 
     @handles(ir.LambdaHOAS)
-    def _(self, node):
-        T, bv, body = node._children
-        if bv.name in self.bv_stack:
-            raise ValueError(f"Should not see {bv}")
+    def _(self, node: ir.LambdaHOAS):
+        T, body = node._children
+        bv_name = node.bv_name
+        if bv_name in self.bv_stack:
+            raise ValueError(f"Should not see {bv_name}")
         self.visit(T)
-        self.visit(bv.T)
-        self.bv_stack.add(bv.name)
+        self.bv_stack.add(bv_name)
         self.visit(body)
-        self.bv_stack.remove(bv.name)
+        self.bv_stack.remove(bv_name)
 
-    @handles(ir.LambdaTHOAS)
-    def _(self, node):
-        bv, bodyT = node._children
-        if bv.name in self.bv_stack:
-            raise ValueError(f"Should not see {bv}")
-        self.visit(bv.T)
-        self.bv_stack.add(bv.name)
-        self.visit(bodyT)
-        self.bv_stack.remove(bv.name)
+    @handles(ir.PiTHOAS)
+    def _(self, node: ir.PiTHOAS):
+        argT, resT = node._children
+        bv_name = node.bv_name
+        if bv_name in self.bv_stack:
+            raise ValueError(f"Should not see {bv_name}")
+        self.visit(argT)
+        self.bv_stack.add(bv_name)
+        self.visit(resT)
+        self.bv_stack.remove(bv_name)
 
     @handles(ir.BoundVarHOAS)
     def _(self, bv: ir.BoundVarHOAS):

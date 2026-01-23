@@ -42,14 +42,15 @@ def func_var(
             T = ir.RefT(codom.T.carT.node, codom.node)
             return T
         else:
-            bv_uni = next(iter(dom))
+            bv_uni = dom._bv
             new_bvs = bvs + (bv_uni,)
             new_tupT = ast.wrapT(ir.TupleT(*tupT._node.elemTs, bv_uni.T._node))
             T = ir.FuncT(
                 dom=dom.node,
-                lamT = ir.LambdaTHOAS(
-                    bv_uni.node,
-                    make_sort(doms[1:], new_bvs, new_tupT)
+                lamT = ir.PiTHOAS(
+                    bv_uni.T.node,
+                    make_sort(doms[1:], new_bvs, new_tupT),
+                    bv_name=bv_uni.node.name
                 )
             )
         return T

@@ -124,8 +124,8 @@ class TypeCheckingPass(Analysis):
         self.Tmap[node] = T
         return T
 
-    @handles(ir.LambdaT)
-    def _(self, node: ir.LambdaT):
+    @handles(ir.PiT)
+    def _(self, node: ir.PiT):
         argT, resT = node._children
         # Verify T is a type
         if not _is_type(argT):
@@ -142,8 +142,8 @@ class TypeCheckingPass(Analysis):
         self.Tmap[node] = T
         return T
 
-    @handles(ir.LambdaTHOAS)
-    def _(self, node: ir.LambdaTHOAS):
+    @handles(ir.PiTHOAS)
+    def _(self, node: ir.PiTHOAS):
         argT, resT = self.visit_children(node)
         # Verify T is a type
         if not _is_type(argT):
@@ -866,7 +866,7 @@ class TypeCheckingPass(Analysis):
         if not _is_kind(funcT, ir.FuncT):
             raise TypeError(f"Fold expects FuncT function, got {funcT}")
         # Verify fun argument is a Lambda with LambdaT type
-        if not _is_kind(funT, (ir.LambdaT, ir.LambdaTHOAS)):
+        if not _is_kind(funT, (ir.PiT, ir.PiTHOAS)):
             raise TypeError(f"Fold expects Lambda with LambdaT type, got {funT}")
         # Fold signature: Func(Dom(A)->B) -> ((A,B) -> B) -> B -> B
         # So fun should be (elemT, resT) -> resT where elemT = funcT.piT.resT
@@ -908,20 +908,6 @@ class TypeCheckingPass(Analysis):
         self.Tmap[node] = T
         return T
 
-    @handles(ir.And)
-    def _(self, node: ir.And):
-        T, aT, bT = self.visit_children(node)
-        # Verify type is BoolT
-        if not _is_kind(T, ir.BoolT):
-            raise TypeError(f"And must have BoolT type, got {T}")
-        # Verify operands are Bool
-        if not _is_kind(aT, ir.BoolT):
-            raise TypeError(f"And operand a must be Bool, got {aT}")
-        if not _is_kind(bT, ir.BoolT):
-            raise TypeError(f"And operand b must be Bool, got {bT}")
-        self.Tmap[node] = T
-        return T
-
     @handles(ir.Implies)
     def _(self, node: ir.Implies):
         T, aT, bT = self.visit_children(node)
@@ -936,62 +922,6 @@ class TypeCheckingPass(Analysis):
         self.Tmap[node] = T
         return T
 
-    @handles(ir.Or)
-    def _(self, node: ir.Or):
-        T, aT, bT = self.visit_children(node)
-        # Verify type is BoolT
-        if not _is_kind(T, ir.BoolT):
-            raise TypeError(f"Or must have BoolT type, got {T}")
-        # Verify operands are Bool
-        if not _is_kind(aT, ir.BoolT):
-            raise TypeError(f"Or operand a must be Bool, got {aT}")
-        if not _is_kind(bT, ir.BoolT):
-            raise TypeError(f"Or operand b must be Bool, got {bT}")
-        self.Tmap[node] = T
-        return T
-
-    @handles(ir.Add)
-    def _(self, node: ir.Add):
-        T, aT, bT = self.visit_children(node)
-        # Verify type is IntT
-        if not _is_kind(T, ir.IntT):
-            raise TypeError(f"Add must have IntT type, got {T}")
-        # Verify operands are Int
-        if not _is_kind(aT, ir.IntT):
-            raise TypeError(f"Add operand a must be Int, got {aT}")
-        if not _is_kind(bT, ir.IntT):
-            raise TypeError(f"Add operand b must be Int, got {bT}")
-        self.Tmap[node] = T
-        return T
-
-    @handles(ir.Sub)
-    def _(self, node: ir.Sub):
-        T, aT, bT = self.visit_children(node)
-        # Verify type is IntT
-        if not _is_kind(T, ir.IntT):
-            raise TypeError(f"Sub must have IntT type, got {T}")
-        # Verify operands are Int
-        if not _is_kind(aT, ir.IntT):
-            raise TypeError(f"Sub operand a must be Int, got {aT}")
-        if not _is_kind(bT, ir.IntT):
-            raise TypeError(f"Sub operand b must be Int, got {bT}")
-        self.Tmap[node] = T
-        return T
-
-    @handles(ir.Mul)
-    def _(self, node: ir.Mul):
-        T, aT, bT = self.visit_children(node)
-        # Verify type is IntT
-        if not _is_kind(T, ir.IntT):
-            raise TypeError(f"Mul must have IntT type, got {T}")
-        # Verify operands are Int
-        if not _is_kind(aT, ir.IntT):
-            raise TypeError(f"Mul operand a must be Int, got {aT}")
-        if not _is_kind(bT, ir.IntT):
-            raise TypeError(f"Mul operand b must be Int, got {bT}")
-        self.Tmap[node] = T
-        return T
-
     @handles(ir.Abs)
     def _(self, node: ir.Abs):
         T, aT = self.visit_children(node)
@@ -1001,34 +931,6 @@ class TypeCheckingPass(Analysis):
         # Verify operand is Int
         if not _is_kind(aT, ir.IntT):
             raise TypeError(f"Abs operand must be Int, got {aT}")
-        self.Tmap[node] = T
-        return T
-
-    @handles(ir.Gt)
-    def _(self, node: ir.Gt):
-        T, aT, bT = self.visit_children(node)
-        # Verify type is BoolT
-        if not _is_kind(T, ir.BoolT):
-            raise TypeError(f"Gt must have BoolT type, got {T}")
-        # Verify operands are Int
-        if not _is_kind(aT, ir.IntT):
-            raise TypeError(f"Gt operand a must be Int, got {aT}")
-        if not _is_kind(bT, ir.IntT):
-            raise TypeError(f"Gt operand b must be Int, got {bT}")
-        self.Tmap[node] = T
-        return T
-
-    @handles(ir.GtEq)
-    def _(self, node: ir.GtEq):
-        T, aT, bT = self.visit_children(node)
-        # Verify type is BoolT
-        if not _is_kind(T, ir.BoolT):
-            raise TypeError(f"GtEq must have BoolT type, got {T}")
-        # Verify operands are Int
-        if not _is_kind(aT, ir.IntT):
-            raise TypeError(f"GtEq operand a must be Int, got {aT}")
-        if not _is_kind(bT, ir.IntT):
-            raise TypeError(f"GtEq operand b must be Int, got {bT}")
         self.Tmap[node] = T
         return T
 
@@ -1152,9 +1054,7 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.LambdaHOAS)
     def _(self, node: ir.LambdaHOAS):
-        (argT, resT), boundVarT, bodyT = self.visit_children(node)
-        if not _is_same_kind(boundVarT, argT):
-            raise TypeError(f"LambdaHOAS bound variable type {boundVarT} does not match LambdaT argument type {T.argT}")
+        (argT, resT), bodyT = self.visit_children(node)
         if not _is_same_kind(resT, bodyT):
             raise TypeError(f"LambdaHOAS body type {bodyT} does not match LambdaT result type {resT}")
         T = ir.ArrowT(argT, resT)
@@ -1228,16 +1128,15 @@ class StripType(Analysis):
         carT = self.visit(node.carT)
         return ir.DomT(carT, ord=True)
 
-    @handles(ir.LambdaT)
-    def _(self, node: ir.LambdaT):
+    @handles(ir.PiT)
+    def _(self, node: ir.PiT):
         argT, resT = self.visit_children(node)
         T = ir.ArrowT(argT, resT)
         return T
 
-    @handles(ir.LambdaTHOAS)
-    def _(self, node: ir.LambdaTHOAS):
-        argT = self.visit(node.bv.T)
-        resT = self.visit(node.resT)
+    @handles(ir.PiTHOAS)
+    def _(self, node: ir.PiTHOAS):
+        argT, resT = self.visit_children(node)
         T = ir.ArrowT(argT, resT)
         return T
 

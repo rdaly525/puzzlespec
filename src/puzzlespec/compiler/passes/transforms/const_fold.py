@@ -21,19 +21,12 @@ class ConstFoldPass(Transform):
 
     _binops = {
         ir.Neg: lambda a: -a,
-        ir.Add: lambda a,b: a+b,
-        ir.Sub: lambda a,b: a-b,
-        ir.Mul: lambda a,b: a*b,
         ir.Div: lambda a,b: a//b,
         ir.Mod: lambda a,b: a%b,
-        ir.Gt: lambda a,b: a>b,
-        ir.GtEq: lambda a,b: a>=b,
         ir.Lt: lambda a,b: a<b,
         ir.LtEq: lambda a,b: a<=b,
         ir.Eq: lambda a,b: a==b,
         ir.Not: lambda a: not a,
-        ir.And: lambda a,b: a and b,
-        ir.Or: lambda a,b: a or b,
         ir.Implies: lambda a,b: (not a) or b,
     } 
 
@@ -43,8 +36,8 @@ class ConstFoldPass(Transform):
         ir.Sum: lambda *args: sum(args),
         ir.Prod: lambda *args: math.prod(args),
     }
-    _bool_ops = set([ir.And, ir.Or, ir.Implies, ir.Not, ir.Eq, ir.Gt, ir.GtEq, ir.Lt, ir.LtEq, ir.Conj, ir.Disj])
-    _int_ops = set([ir.Add, ir.Sub, ir.Mul, ir.Div, ir.Mod, ir.Neg, ir.Sum, ir.Prod])
+    _bool_ops = set([ir.Implies, ir.Not, ir.Eq, ir.Lt, ir.LtEq, ir.Conj, ir.Disj])
+    _int_ops = set([ir.Div, ir.Mod, ir.Neg, ir.Sum, ir.Prod])
 
     # Binary operations
     @handles(*_binops.keys())

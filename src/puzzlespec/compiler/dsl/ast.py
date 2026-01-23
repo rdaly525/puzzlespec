@@ -152,11 +152,11 @@ class SumType(TExpr):
         return self.elemT(i)
 
 
-class LambdaType(TExpr):
+class PiType(TExpr):
     def __post_init__(self):
         super().__post_init__()
-        if not isinstance(self._node, ir.LambdaTHOAS):
-            raise ValueError(f"Expected LambdaType, got {self.node}")
+        if not isinstance(self._node, ir.PiTHOAS):
+            raise ValueError(f"Expected PiType, got {self.node}")
 
     @property
     def inj_known(self):
@@ -223,7 +223,7 @@ class FuncType(TExpr):
         return wrap(self.node.dom)
 
     @property
-    def lamT(self) -> LambdaType:
+    def lamT(self) -> PiType:
         return wrapT(self._node.lamT)
 
 def wrapT(T: ir.Type):
@@ -247,8 +247,8 @@ def wrapT(T: ir.Type):
             return TupleType(T)
         case ir.SumT:
             return SumType(T)
-        case ir.LambdaTHOAS:
-            return LambdaType(T)
+        case ir.PiTHOAS:
+            return PiType(T)
         case ir.DomT:
             if _T.ord:
                 return nd.OrdDomainType(T)
@@ -386,13 +386,13 @@ class BoolExpr(Expr):
 
     def __and__(self, other: BoolExpr) -> BoolExpr:
         other = BoolExpr.make(other)
-        node = ir.And(ir.BoolT(), self.node, other.node)
+        node = ir.Conj(ir.BoolT(), self.node, other.node)
         return BoolExpr(node)
 
     __rand__ = __and__
 
     def __or__(self, other: BoolExpr) -> BoolExpr:
-        node = ir.Or(ir.BoolT(), self.node, other.node)
+        node = ir.Disj(ir.BoolT(), self.node, other.node)
         return BoolExpr(node)
 
     __ror__ = __or__
@@ -446,13 +446,11 @@ class IntExpr(Expr):
 
     def __add__(self, other: IntOrExpr) -> IntExpr:
         other = IntExpr.make(other)
-        node = ir.Add(ir.IntT(), self.node, other.node)
+        node = ir.Sum(ir.IntT(), self.node, other.node)
         return IntExpr(node)
 
     def __sub__(self, other: IntOrExpr) -> IntExpr:
-        other = IntExpr.make(other)
-        node = ir.Sub(ir.IntT(), self.node, other.node)
-        return IntExpr(node)
+        return self + (-other)
 
     def __neg__(self) -> IntExpr:
         node = ir.Neg(ir.IntT(), self.node)
@@ -464,7 +462,7 @@ class IntExpr(Expr):
 
     def __mul__(self, other: IntOrExpr) -> IntExpr:
         other = IntExpr.make(other)
-        node = ir.Mul(ir.IntT(), self.node, other.node)
+        node = ir.Prod(ir.IntT(), self.node, other.node)
         return IntExpr(node)
 
     def __pow__(self, other: int):
@@ -493,13 +491,11 @@ class IntExpr(Expr):
 
     def __gt__(self, other: IntOrExpr) -> BoolExpr:
         other = IntExpr.make(other)
-        node = ir.Gt(ir.BoolT(), self.node, other.node)
-        return BoolExpr(node)
+        return other < self
 
     def __ge__(self, other: IntOrExpr) -> BoolExpr:
         other = IntExpr.make(other)
-        node = ir.GtEq(ir.BoolT(), self.node, other.node)
-        return BoolExpr(node)
+        return other <= self
 
     def __lt__(self, other: IntOrExpr) -> BoolExpr:
         other = IntExpr.make(other)
@@ -629,8 +625,8 @@ class SumExpr(Expr):
 class LambdaExpr(Expr):
     def __post_init__(self):
         super().__post_init__()
-        if not isinstance(self._T, LambdaType):
-            raise ValueError(f"Expected LambdaType, got {self._T}")
+        if not isinstance(self._T, PiType):
+            raise ValueError(f"Expected PiType, got {self._T}")
 
     @classmethod
     def make(cls, fn: tp.Callable, bv: Expr|TExpr, inj=False) -> LambdaExpr:
@@ -642,8 +638,8 @@ class LambdaExpr(Expr):
         return _make_lambda(bv, body_expr, inj)
 
     @property
-    def T(self) -> LambdaType:
-        return tp.cast(LambdaType, super().T)
+    def T(self) -> PiType:
+        return tp.cast(PiType, super().T)
 
     # Function composition
     # self: B->C @ f: A -> B
@@ -703,14 +699,8 @@ def _make_lambda(bv: Expr, body: Expr, inj=False) -> LambdaExpr:
     assert isinstance(bv.node, ir.BoundVarHOAS)
     bv.node.closed=True
     retT = body.T.node
-    ## Close the 'bv's in both the return type and the body
-    #retT = close_bound_vars(retT, bv.node)
-    #body_node = close_bound_vars(body.node, bv.node)
-    #bv_closed = ir.BoundVarHOAS(bv.node.T, closed=True, name=bv.node.name)
-    #lamT = ir.LambdaTHOAS(bv_closed, retT)
-    #lambda_node = ir.LambdaHOAS(lamT, bv_closed, body_node, inj=inj)
-    lamT = ir.LambdaTHOAS(bv.node, retT, inj=inj)
-    lambda_node = ir.LambdaHOAS(lamT, bv.node, body.node, inj=inj)    
+    lamT = ir.PiTHOAS(bv.T.node, retT, bv_name=bv.node.name, inj=inj)
+    lambda_node = ir.LambdaHOAS(lamT, body.node, bv_name=bv.node.name, inj=inj)    
     return LambdaExpr(lambda_node)
 
 def cartprod(*doms: DomainExpr) -> DomainExpr:
@@ -815,14 +805,15 @@ class DomainExpr(Expr):
         node = ir.Union(self.T._node, self.node, other.node)
         return DomainExpr(node)
 
-    def intersection(self, other: DomainExpr) -> DomainExpr:
-        if self.T.carT != other.T.carT:
-            raise ValueError(f"Cannot intersect domains with different carrier types: {self.T.carT} != {other.T.carT}")
-        node = ir.Intersection(self.T._node, self.node, other.node)
+    def intersect(self, *others: DomainExpr) -> DomainExpr:
+        for other in others:
+            if self.T.carT != other.T.carT:
+                raise ValueError(f"Cannot intersect domains with different carrier types: {self.T.carT} != {other.T.carT}")
+        node = ir.Intersection(self.T._node, self.node, *(other.node for other in others))
         return DomainExpr(node)
 
     def __and__(self, other: DomainExpr) -> DomainExpr:
-        return self.intersection(other)
+        return self.intersect(other)
 
     def __or__(self, other: DomainExpr) -> DomainExpr:
         return self.union(other)
@@ -1090,7 +1081,7 @@ def wrap(node: ir.Node) -> Expr:
         return IntExpr(node)
     if isinstance(T, EnumType):
         return EnumExpr(node)
-    if isinstance(T, LambdaType):
+    if isinstance(T, PiType):
         return LambdaExpr(node)
     if isinstance(T, TupleType):
         return TupleExpr(node)
