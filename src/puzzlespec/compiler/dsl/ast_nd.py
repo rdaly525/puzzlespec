@@ -10,7 +10,7 @@ def fin(n: ast.IntOrExpr):
     n = ast.IntExpr.make(n)
     T = ir.DomT(carT=ir.IntT(), ord=True)
     node = ir.Fin(T, n.node)
-    return OrdDomainExpr(node)
+    return OrdDomainExpr(node).guard(n >=0)
 
 # ND Types
 class OrdDomainType(ast.DomainType):
@@ -48,7 +48,7 @@ class OrdDomainExpr(ast.DomainExpr):
     def elemAt(self, idx: ast.IntOrExpr) -> ast.IntExpr:
         idx = ast.IntExpr.make(idx)
         node = ir.ElemAt(self.T.carT._node, self.node, idx.node)
-        return ast.wrap(node)
+        return ast.wrap(node).guard(fin(self.size).contains(idx))
 
     # Exact windows
     def windows(self, size: ast.IntOrExpr, stride: ast.IntOrExpr=1, _exact=True) -> OrdDomainExpr:
@@ -64,13 +64,13 @@ class OrdDomainExpr(ast.DomainExpr):
         else:
             dom = fin((self.size+1-(size-stride))//stride)
         wins = dom.map(
-            lambda i: self.slice(lo=i*stride, hi=i*stride+size, step=1), _inj=True
+            lambda i: self.slice(lo=i*stride, hi=i*stride+size, step=1), inj=True
         ).image
         assert isinstance(wins.T.carT, ast.DomainType)
         return wins
 
-    def map(self, fn: tp.Callable, _inj=False) -> NDArrayExpr:
-        func = super().map(fn, _inj=_inj)
+    def map(self, fn: tp.Callable, inj=False) -> NDArrayExpr:
+        func = super().map(fn, inj=inj)
         return ArrayExpr(func.node)
     
     def __getitem__(self, idx: tp.Any) -> OrdDomainExpr | ast.IntExpr:
@@ -97,7 +97,7 @@ class ArrayExpr(ast.FuncExpr):
 
     def windows(self, size: ast.IntOrExpr, stride: ast.IntOrExpr=1) -> ArrayExpr:
         wins = self.domain.windows(size, stride) # Array[Array]
-        return wins.map(lambda win: win.map(lambda i: self[i]))
+        return wins.map(lambda win: self[win])
 
     def __getitem__(self, k: tp.Any) -> ast.Expr:
         if isinstance(k, (int, ast.IntExpr)):
@@ -105,7 +105,7 @@ class ArrayExpr(ast.FuncExpr):
             return self.apply(self.domain.elemAt(k))
         else:
             dom = self.domain[k]
-            return dom.map(lambda i: self(i), _inj=True)
+            return dom.map(lambda i: self(i), inj=True)
 
 
 class NDDomainType(ast.DomainType):
@@ -240,9 +240,9 @@ class NDArrayExpr(ast.FuncExpr):
     def rank(self):
         return self.domain.rank
 
-    @cached_property
-    def domain(self) -> NDDomainExpr:
-        return NDDomainExpr(self.T._node.dom)
+    #@cached_property
+    #def domain(self) -> NDDomainExpr:
+    #    return NDDomainExpr(super().domain.node)
 
     def __getitem__(self, val: tp.Any) -> NDArrayExpr:
         dom = self.domain[val]

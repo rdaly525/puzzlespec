@@ -8,13 +8,7 @@ def optional(T: ast.TExpr) -> ast.TExpr:
 def optional_dom(dom: ast.DomainExpr) -> ast.DomainExpr:
     if not isinstance(dom, ast.DomainExpr):
         raise ValueError(f"Expected DomainExpr, got {type(dom)}")
-    # domT = Universe(Unit) | dom
-    T = ir.DomT(carT=optional(dom.T.carT).node)
-    unitDom = ir.Universe(ir.DomT(carT=ir.UnitT()))
-    node = ir.DisjUnion(T, unitDom, dom.node)
-    expr = ast.wrap(node)
-    assert isinstance(expr, ast.DomainExpr)
-    return expr
+    return ast.Unit.U + dom
 
 def _check_optT(T: ir.Type):
     if not utils._is_kind(T, ir.SumT):

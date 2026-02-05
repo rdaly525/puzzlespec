@@ -28,7 +28,7 @@ class DomainSimplificationPass(Transform):
         if len(doms)==0:
             domT = ir.DomT(ir.TupleT())
             return ir.Singleton(domT, ir.TupleLit(ir.TupleT()))
-        if all(dom.T.is_singleton for dom in doms):
+        if all(ast.wrap(dom).T.is_singleton for dom in doms):
             assert T.is_singleton
             elems = [ir.Unique(dom.T.carT, dom) for dom in doms]
             return ir.Singleton(T, ir.TupleLit(T.carT, *elems))
@@ -49,7 +49,7 @@ class DomainSimplificationPass(Transform):
             cart_doms = dom._children[1:]
             assert node.idx < len(cart_doms)
             new_dom = cart_doms[node.idx]
-            assert T==new_dom.T
+            assert ast.wrapT(T)==ast.wrapT(new_dom.T)
             return new_dom
         return node.replace(T, dom)
 
@@ -83,10 +83,9 @@ class DomainSimplificationPass(Transform):
             return ir.Sum(ir.IntT(), *(ir.Card(ir.IntT(), d) for d in doms))
         if isinstance(dom, ir.Image):
             _, func = dom._children
-            if isinstance(func, ir.Map):
-                _, dom, lam = func._children
-                if lam.T.inj:
-                    return ir.Card(ir.IntT(), dom)
+            func_ast = ast.wrap(func)
+            if func_ast.T.inj_known:
+                return func_ast.domain.size.node
         return node.replace(T, dom)
 
     @handles(ir.Unique)
@@ -100,51 +99,40 @@ class DomainSimplificationPass(Transform):
     @handles(ir.Image)
     def _(self, node: ir.Image):
         T, func = self.visit_children(node)
-        if isinstance(func, ir.Map):
-            T_map, dom, lam = func._children
-            if lam in self.ids:
+        if isinstance(func, ir._Lambda):
+            func_ast = ast.FuncExpr(func)
+            dom = func_ast.domain.node
+            if func in self.ids:
                 return dom
             if isinstance(dom, ir.Singleton):
-                return ir.Singleton(
-                    T,
-                    ir.Apply(T.carT, lam, dom._children[1])
-                )
+                return func_ast.apply(func_ast.domain.unique_elem).as_singleton.node
             if isinstance(dom, ir.Image):
                 _, func2 = dom._children
-                if isinstance(func2, ir.Map):
-                    _, dom2, lam2 = func2._children
-                    le1 = ast.LambdaExpr(lam)
-                    le2 = ast.LambdaExpr(lam2)
-                    new_lam = (le1 @ le2).node
-                    return ir.Image(
-                        T,
-                        ir.Map(
-                            T_map,
-                            dom2,
-                            new_lam,
-                        )
-                    )
+                if isinstance(func2, ir._Lambda):
+                    func2_ast = ast.wrap(func2)
+                    return (func_ast @ func2_ast).image.node
         return node.replace(T, func)
 
     @handles(ir.LambdaHOAS)
     def _(self, node: ir.LambdaHOAS):
         T, body = self.visit_children(node)
-        inj = node.inj
         bv_name = node.bv_name
         if isinstance(body, ir.BoundVarHOAS) and body.name==bv_name:
             self.ids.add(node)
-            inj = True
-        return node.replace(T, body, inj=inj)
+        return node.replace(T, body)
 
     @handles(ir.Restrict)
     def _(self, node: ir.Restrict):
         T, func = self.visit_children(node)
-        if isinstance(func, ir.Map):
-            T_f, dom, lam = func._children
-            if isinstance(dom, ir.Restrict):
-                T_i, func_i = dom._children
-                new_func = ast.wrap(func_i).imap(lambda i, v: ast.wrap(lam)(i) & v)
-                return ir.Restrict(T, new_func.node)
+        if isinstance(func, ir._Lambda):
+            piT, body = func._children
+            argT, resT = piT._children
+            if isinstance(argT, ir.RefT):
+                _, dom = argT._children
+                if isinstance(dom, ir.Restrict):
+                    T_i, func_i = dom._children
+                    new_func = ast.wrap(func_i).imap(lambda i, v: ast.wrap(func)(i) & v)
+                    return ir.Restrict(T, new_func.node)
         return node.replace(T, func)
 
     @handles(ir.Intersection)
@@ -156,6 +144,8 @@ class DomainSimplificationPass(Transform):
             return doms[0]
         new_doms = []
         for dom in doms:
+            if isinstance(dom, ir.Empty):
+                return dom
             if isinstance(dom, ir.Universe) and not isinstance(dom.T, ir.RefT):
                 continue
             elif isinstance(dom, ir.Intersection):
@@ -176,18 +166,26 @@ class DomainSimplificationPass(Transform):
                 nrdoms.append(dom)
         if len(rdoms) > 1:
             doms = []
-            lams = []
+            funcs = []
             for rdom in rdoms:
                 T, func = rdom._children
-                _, dom, lam = func._children
-                doms.append(ast.wrap(dom))
-                lams.append(ast.wrap(lam))
-            def lam(e, lams=lams):
+                func_ast = ast.wrap(func)
+                dom = func_ast.domain
+                doms.append(dom)
+                funcs.append(func_ast)
+            def lam(e, funcs=funcs):
                 res = 1
-                for lam in lams:
-                    res &= lam(e)
+                for func in funcs:
+                    res &= func(e)
                 return res
             rdom = doms[0].intersect(*doms[1:]).restrict(lam)
             _new_doms = nrdoms + [rdom.node]
         return node.replace(T, *_new_doms)
 
+    @handles(ir.IsMember)
+    def _(self, node: ir.IsMember):
+        T, dom, val = self.visit_children(node)
+        if isinstance(val.T, ir.RefT):
+            _, refdom = val.T._children
+            return (ast.wrap(refdom) <= ast.wrap(dom)).node
+        return node.replace(T, dom, val)

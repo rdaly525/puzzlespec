@@ -10,7 +10,7 @@ from abc import abstractmethod
 def _make_var(T: ir.Type, path: tp.Tuple):
     if isinstance(T, (ir.BoolT, ir.IntT)):
         return SetterBase(T, path)
-    if isinstance(T, (ir.FuncT)):
+    if isinstance(T, (ir._PiT)):
         return SetterFunc(T, path)
     return None
     raise NotImplementedError(f"{type(T)}")
@@ -104,7 +104,7 @@ class SetterBase(_Setter):
 class SetterFunc(_Setter):
     def __post_init__(self):
         # Check if it depends on any variable
-        assert isinstance(self.T, (ast.FuncType, ast.ArrowType))
+        assert isinstance(self.T, ast.FuncType)
         self.concrete = utils._is_concrete(self.T.domain.node)
         self.val = None
 

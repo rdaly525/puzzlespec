@@ -7,7 +7,7 @@ def test_basic():
     g = nd.fin(5)*nd.fin(3)
     h = g.map(lambda i, j: i+j)
     print(h)
-    print(h.simplify)
+    print(h.simplify())
 
 #test_basic()
 
@@ -17,12 +17,12 @@ def test_vars():
     m = var(Int, name='m')
     f0 = func_var(fin(n), fin(m), name='f0')
     print(f0.T)
-    print(f0.T.simplify)
+    print(f0.T.simplify())
     f1 = func_var(fin(n), lambda i: fin(m+i), name='f1')
-    print(f1.T.simplify)
+    print(f1.T.simplify())
     f2 = func_var(fin(n), lambda i: fin(m+i), lambda i, j: fin(i+j) + fin(j), name='f2')
-    print(f2.T.simplify)
-    print(f2(3)(4).T.simplify)
+    print(f2.T.simplify())
+    print(f2(3)(4).T.simplify())
     print(f2(m)(n).T._rawT)
 
 #test_vars()
@@ -35,17 +35,17 @@ def test_1d():
         print("*"*20)
         print(f)
         v0 = f[3]
-        print(v0.simplify)
+        print(v0.simplify())
         v1 = f[3:5]
-        print(v1.simplify)
+        print(v1.simplify())
         wins = f.windows(3, 3)
-        print(wins.simplify)
+        print(wins.simplify())
         win1 = wins[n]
-        print(win1.simplify)
+        print(win1.simplify())
         g = f.map(lambda i: i*i)
-        print(g.simplify)
+        print(g.simplify())
         g0 = g[n:n+3][2]
-        print(g0.simplify)
+        print(g0.simplify())
 
 #test_1d()
 
@@ -55,45 +55,46 @@ def test_nd():
     d = nd.fin(n) * nd.fin(m)
     g = d[2:5, 3]
     print(g)
-    print(g.simplify)
+    print(g.simplify())
     rows = nd.rows(d)
-    print(rows.simplify)
+    print(rows.simplify())
     row5 = rows[5]
     print(row5)
-    print(row5.simplify)
+    print(row5.simplify())
     tiles = nd.tiles(d, (2,2), (2,2))
     print(tiles)
-    print(tiles.simplify)
-    f = d.map(lambda i, j: i*2+j, _inj=True)
+    tiles.type_check()
+    print(tiles.simplify())
+    f = d.map(lambda i, j: i*2+j, inj=True)
     print(f)
-    print(f.simplify)
-    print(f[1,2].simplify)
+    print(f.simplify())
+    print(f[1,2].simplify())
     rows = nd.rows(f)
     print(rows)
     print("*"*30)
-    print(rows.simplify)
+    print(rows.simplify())
     tiles = nd.tiles(f, (2,2), (2,2))
     print(tiles)
     a = tiles.forall(lambda vals: std.distinct(vals))
-    print(a.simplify)
+    print(a.simplify())
 
 test_nd()
 
 def test_nd_vars():
     n = var(Int, name='n')
     #m = var(nd.fin(n).unwrap(), name='m')
-    #print(m.simplify)
+    #print(m.simplify())
     #f0 = func_var(nd.fin(n), lambda i: nd.fin(m)[i[0]:3], name='f0')
     #f0 = func_var(nd.fin(n).unwrap(), nd.fin(m).unwrap(), name='f0')
     #f0 = func_var(nd.fin(n)*nd.fin(n), nd.fin(m), Int, name='f0')
     f0 = func_var(nd.fin(n)*nd.fin(8), Int, name='f0')
-    #print(f0[2,3].simplify)
+    #print(f0[2,3].simplify())
     rows = nd.rows(f0)
     print(rows.type_check())
     print("*"*30)
     print(rows)
     print("*"*30)
-    rs = rows.simplify
+    rs = rows.simplify()
     print(rs)
     print(rs.type_check())
     assert 0
@@ -102,7 +103,7 @@ def test_nd_vars():
     print("*"*30)
     print(b)
     print("*"*30)
-    print(b.simplify)
+    print(b.simplify())
 
 #test_nd_vars()
 
@@ -142,7 +143,7 @@ def test_grid():
     # Can define domains in terms of variables
     cells = ps.fin(nR) * ps.fin(nC)
     print(cells[2,1:])
-    print(cells[2,1:].simplify)
+    print(cells[2,1:].simplify())
 
     # can define quantified constraints over domains
     e_con = finR.exists(lambda i: i % 2 == 3)
@@ -159,7 +160,7 @@ def test_grid():
     # Can do arbitrarily nested quanitification
     func_con = func.forall(lambda dom: dom.forall(lambda i: i < nC))
     print(func_con)
-    print(func_con.simplify)
+    print(func_con.simplify())
     refv = ps.var(dom=finR, name='refv')
     print(refv.T)
 
@@ -167,24 +168,24 @@ def test_grid():
     print(refv2.T)
     print(refv2)
     cells = ps.fin(nR) * ps.fin(nC)
-    print(cells[1,2].simplify)
+    print(cells[1,2].simplify())
     print(cells[1,2:])
-    print(cells[1,2:].simplify)
+    print(cells[1,2:].simplify())
 
     a = ps.func_var(dom=ps.fin(3), codom=ps.fin(4), name='V')
     print(a)
     e = a.forall(lambda i: i==2)
     print(e)
-    print(e.simplify)
+    print(e.simplify())
 
 
     print("+"*50)
     print(cells.rows()[3:])
-    print(cells.rows()[:8][2:3].simplify)
+    print(cells.rows()[:8][2:3].simplify())
     print(finR.windows(2))
-    print(finR.windows(2).simplify)
+    print(finR.windows(2).simplify())
     print(cells.tiles((2,3), (4,5)))
-    print(cells.tiles((2,3), (4,5)).simplify)
+    print(cells.tiles((2,3), (4,5)).simplify())
     #spec = ps.PuzzleSpecBuilder()
     #
     ## Can add constraints to the spec

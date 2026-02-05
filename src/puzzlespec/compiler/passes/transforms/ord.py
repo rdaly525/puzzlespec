@@ -4,7 +4,7 @@ import typing as tp
 
 from ..pass_base import Transform, AnalysisObject, Context, handles
 from ..analyses.ord import gen_enumerate
-from ...dsl import ir, ast
+from ...dsl import ir, ast, ast_nd
 from ..envobj import EnvsObj
 
 
@@ -34,18 +34,18 @@ class OrdSimplificationPass(Transform):
             new_hi = r_lo + r_step * s_hi
             new_step = r_step * s_step
             return ir.Range(T, new_lo.node, new_hi.node, new_step.node)
-        if isinstance(dom, ir.Image):
-            T_I, func = dom._children
-            if isinstance(func, ir.Map):
-                _, dom_f, lam_f = func._children
-                assert lam_f.T.inj
+        #if isinstance(dom, ir.Image):
+        #    T_I, func = dom._children
+        #    if isinstance(func, ir.Map):
+        #        _, dom_f, lam_f = func._children
+        #        assert lam_f.T.inj
         return node.replace(T, dom, lo, hi, step)
 
     @handles(ir.Forall)
     def _(self, node: ir.Forall):
         T, func = self.visit_children(node)
         f: ast.FuncExpr = ast.wrap(func)
-        if f.domain.T.is_ord:
+        if f.domain.T.is_ord and not isinstance(f.domain.T, ast_nd.NDDomainType):
             e = gen_enumerate(f.domain.node)
             return e.forall(lambda elem: f(elem)).node
         return node.replace(T, func)

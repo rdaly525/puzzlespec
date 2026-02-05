@@ -254,17 +254,16 @@ class NDDomT(_DomT):
     def ord(self) -> bool:
         return all(f.ord for f in self.factors)
 
-class _LambdaT(Type):
-    @property
-    def argT(self) -> Type:
-        raise NotImplementedError()
-
+class _PiT(Type):
     @property
     def resT(self) -> Type:
         raise NotImplementedError()
 
+    @property
+    def argT(self) -> Type:
+        raise NotImplementedError()
 
-class PiT(_LambdaT):
+class PiT(_PiT):
     _numc = 2
     def __init__(self, argT: Type, resT: Type):
         super().__init__(argT, resT)
@@ -277,39 +276,6 @@ class PiT(_LambdaT):
     def argT(self) -> Type:
         return self._children[0]
 
-class ArrowT(_LambdaT):
-    _numc = 2
-    def __init__(self, argT: Type, resT: Type):
-        super().__init__(argT, resT)
-
-    @property
-    def argT(self) -> Type:
-        return self._children[0]
-
-    @property
-    def resT(self) -> Type:
-        return self._children[1]
-
-
-class FuncT(Type):
-    _numc = 2
-    def __init__(self, dom: Value, lamT: Type):
-        assert isinstance(lamT, (PiT, PiTHOAS, ArrowT))
-        super().__init__(dom, lamT)
-
-    @property
-    def dom(self) -> Value:
-        return self._children[0]
-    
-    @property
-    def lamT(self) -> PiT:
-        return self._children[1]
-
-    #def __repr__(self):
-    #    return f"Func[{self.dom.T}, {self.lamT}]"
-
-    def eq(self, other):
-        return isinstance(other, FuncT) and self.dom.eq(other.dom) and self.lamT.eq(other.lamT)
 
 class RefT(Type):
     _numc = 2
@@ -328,14 +294,19 @@ class RefT(Type):
     def cast_as(self, val: tp.Any):
         return self.T.cast_as(val)
 
+class GuardT(Type):
+    _numc = 2
+    def __init__(self, T: Type, pre: Value):
+        super().__init__(T, pre)
 
-def _is_value(v: Node) -> bool:
-    return isinstance(v, (Value, BoundVar, VarRef))
+    @property
+    def T(self):
+        return self._children[0]
 
 class ApplyT(Type):
     _numc = 2
     def __init__(self, lamT: PiT, arg: Value):
-        assert _is_value(arg)
+        #assert _is_value(arg)
         if not isinstance(lamT, (PiT, PiTHOAS)):
             raise ValueError(f"ApplyT must be a PiT, got {lamT}")
         super().__init__(lamT, arg)
@@ -364,12 +335,22 @@ class Value(Node):
     def T(self) -> Type:
         return self._children[0]
 
+class Guard(Value):
+    _numc = 3
+    def __init__(self, T: Type, val: Value, pre: Value):
+        super().__init__(T, val, pre)
+
 class VarRef(Value):
     _fields = ("sid",)
     _numc = 1
     def __init__(self, T: Type, sid: int):
         self.sid = sid
         super().__init__(T)
+
+class Choose(Value):
+    _numc=2
+    def __init__(self, T: Type, plam: Value):
+        super().__init__(T, plam)
 
 class BoundVar(Value):
     _fields = ('idx',) # De Bruijn index
@@ -385,7 +366,10 @@ class Unit(Value):
         super().__init__(T)
 
 # (lamda x:paramT body) -> (paramT -> type(body))
-class Lambda(Value):
+class _Lambda(Value):
+    pass
+
+class Lambda(_Lambda):
     _numc = 2
     def __init__(self, T: Type, body: Value):
         assert isinstance(T, PiT)
@@ -563,6 +547,9 @@ class TupleLit(Value):
     _numc = -1
     def __init__(self, T: Type, *vals: Value):
         super().__init__(T, *vals)
+    
+    def __len__(self):
+        return len(self.T)
 
 class Proj(Value):
     _fields = ('idx',)
@@ -628,11 +615,11 @@ class Exists(Value):
     def __init__(self, T: Type, func: Value):
         super().__init__(T, func)
 
-# Dom(A) -> (A->B) -> Func(Dom(A)->B)
-class Map(Value):
-    _numc=3
-    def __init__(self, T: Type, dom: Value, lam: Value):
-        super().__init__(T, dom, lam)
+## Dom(A) -> (A->B) -> Func(Dom(A)->B)
+#class Map(Value):
+#    _numc=3
+#    def __init__(self, T: Type, dom: Value, lam: Value):
+#        super().__init__(T, dom, lam)
 
 @dataclass(eq=True, frozen=True)
 class _FuncLitLayout:
@@ -679,34 +666,28 @@ class Image(Value):
     def __init__(self, T: Type, func: Value):
         super().__init__(T, func)
 
-# Image of a func known to be injective
-#class InjImage(Value):
-#    _numc = 2
-#    def __init__(self, T: Type, func: Value):
-#        super().__init__(T, func)
+## Func(Dom(A)->B) -> A -> B
+#class ApplyFunc(Value):
+#    _numc = 3
+#    def __init__(self, T: Type, func: Value, arg: Value):
+#        super().__init__(T, func, arg)
 
-# Func(Dom(A)->B) -> A -> B
-class ApplyFunc(Value):
+class Apply(Value):
     _numc = 3
     def __init__(self, T: Type, func: Value, arg: Value):
         super().__init__(T, func, arg)
 
-class Apply(Value):
-    _numc = 3
-    def __init__(self, T: Type, lam: Value, arg: Value):
-        super().__init__(T, lam, arg)
-
 # F: B -> C
-# G: A - B
+# G: A -> B
 # Compose == F o G
 class Compose(Value):
     _numc = 3
-    def __init__(self, T: Type, g: Value, f: Value):
-        super().__init__(T, g, f)
+    def __init__(self, T: Type, f: Value, g: Value):
+        super().__init__(T, f, g)
 
 
 # only used on Seq Funcs TODO maybe should have scan as the fundimental IR node
-# Seq[A] -> ((A,B) -> B) -> B -> B
+# OrdDom[A] -> ((A,B) -> B) -> B -> B
 class Fold(Value):
     _numc = 4
     def __init__(self, T: Type, func: Value, lam: Value, init: Value):
@@ -806,7 +787,7 @@ class BoundVarHOAS(Value):
     def T(self) -> RefT:
         return self._children[0]
 
-class PiTHOAS(_LambdaT):
+class PiTHOAS(_PiT):
     _fields = ('bv_name', 'inj',)
     _numc = 2
     def __init__(self, argT: Value, resT: Type, bv_name: str, inj=False):
@@ -822,13 +803,12 @@ class PiTHOAS(_LambdaT):
     def resT(self) -> Type:
         return self._children[1]
 
-
-class LambdaHOAS(Value):
-    _fields = ('bv_name', 'inj',) #True -> Known to be injective
+class LambdaHOAS(_Lambda):
+    _fields = ('bv_name',) #True -> Known to be injective
     _numc = 2
-    def __init__(self, T: Type, body: Value, bv_name: str, inj: bool):
+    def __init__(self, T: Type, body: Value, bv_name: str):
+        assert isinstance(T, PiTHOAS)
         self.bv_name = bv_name
-        self.inj=inj
         super().__init__(T, body)
 
 class VarHOAS(Value):
@@ -854,8 +834,6 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     SumT: 0,
     DomT: 0,
     NDDomT: 0,
-    FuncT: 0,
-    ArrowT: 0,
     PiTHOAS: 0,
     PiT: 0,
     ApplyT: 0,
@@ -872,10 +850,11 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     # Any Type
     VarRef: 30,
     VarHOAS: 31,
+    Choose: 32,
     BoundVar: 40,
     BoundVarHOAS: 41,
+    Guard: 42,
     
-    ApplyFunc: 800,
     Apply: 801,
     ElemAt: 802,
     Proj: 803,
@@ -935,12 +914,9 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     SumLit: 410,
     FuncLit: 420,
     Inj: 430,
-    Map: 440,
     Enumerate: 450, 
-
-    # Lambdas
-    Lambda: 500,
-    LambdaHOAS: 501,
+    Lambda: 460,
+    LambdaHOAS: 461,
 
 }
 

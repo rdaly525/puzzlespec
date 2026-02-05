@@ -30,8 +30,8 @@ def range(*args: ast.IntOrExpr) -> nd.NDDomainExpr:
 
 ArrOrDom = tp.Union[nd.NDDomainExpr, nd.NDArrayExpr]
 
-def windows(dom: ArrOrDom, size: ast.IntOrExpr, stride: ast.IntOrExpr=1) -> nd.NDArrayExpr:
-    return tiles(dom, (size,), (stride,))
+#def windows(dom: ArrOrDom, size: ast.IntOrExpr, stride: ast.IntOrExpr=1) -> nd.NDArrayExpr:
+#    return tiles(dom, (size,), (stride,))
 
 def tiles(ndom: ArrOrDom, size: tp.Tuple[ast.IntOrExpr, ...], stride: tp.Tuple[ast.IntOrExpr, ...]=None) -> nd.NDArrayExpr:
     if isinstance(ndom, nd.NDArrayExpr):
@@ -58,12 +58,12 @@ def tiles(ndom: ArrOrDom, size: tp.Tuple[ast.IntOrExpr, ...], stride: tp.Tuple[a
         for oi, size, stride in zip(oidx, sizes, strides):
             slices.append(slice(oi*stride, oi*stride+size))
         return ndom[*slices]
-    return odom.map(lam, _inj=True).image
+    return odom.map(lam, inj=True).image
 
 def slices(dom: ArrOrDom, i: int) -> nd.NDDomainExpr | nd.NDArrayExpr:
     if isinstance(dom, nd.NDArrayExpr):
         s = slices(dom.domain, i)
-        return s.map(lambda slice_dom: dom[slice_dom], _inj=True)
+        return s.map(lambda slice_dom: dom[slice_dom], inj=True)
     elif isinstance(dom, nd.NDDomainExpr):
         if i not in range_(dom.rank):
             raise ValueError("Invalid slices")
@@ -74,7 +74,7 @@ def slices(dom: ArrOrDom, i: int) -> nd.NDDomainExpr | nd.NDArrayExpr:
             slices[i] = idx
             slice_dom = dom[*slices]
             return slice_dom
-        dom = domk.map(lam, _inj=True).image
+        dom = domk.map(lam, inj=True).image
         return dom
 
 def rows(dom: ArrOrDom) -> nd.NDArrayExpr:

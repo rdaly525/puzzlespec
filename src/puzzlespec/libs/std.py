@@ -1,15 +1,52 @@
 from ..compiler.dsl import ast, ast_nd, ir
+from .var_def import var
 import typing as tp
 
+
+Nat = ast.Int.refine(lambda i: i>0)
+Nat0 = ast.Int.refine(lambda i: i>=0)
+
+def isqrt(v: ast.IntExpr, _name=None) -> ast.IntExpr:
+    return Nat0.choose(lambda i: i*i==v)
 
 def U(carT: ast.TExpr):
     return carT.U
 
-def sum(func: ast.FuncExpr) -> ast.IntExpr:
-    if not (isinstance(func, ast.FuncExpr) and isinstance(func.elemT, ir.IntT)):
-        raise ValueError(f"Expected FuncExpr[IntExpr], got {func}")
-    node = ir.SumReduce(ir.BoolT(), func.node)
-    return ast.IntExpr(node)
+def sum(func: ast.FuncExpr | tp.Iterable) -> ast.IntExpr:
+    if isinstance(func, ast.FuncExpr):
+        if not isinstance(func.T._raw_resT(), ir.IntT):
+            raise ValueError(f"Expected FuncExpr[IntExpr], got {func}")
+        return ast.IntExpr(ir.SumReduce(ir.IntT(), func.node))
+    assert isinstance(tp.Iterable)
+    vals = [ast.IntExpr.make(v).node for v in func]
+    return ast.IntExpr(ir.Sum(ir.IntT(), *vals))
+
+def prod(func: ast.FuncExpr | tp.Iterable) -> ast.IntExpr:
+    if isinstance(func, ast.FuncExpr):
+        if not isinstance(func.T._raw_resT(), ir.IntT):
+            raise ValueError(f"Expected FuncExpr[IntExpr], got {func}")
+        return ast.IntExpr(ir.ProdReduce(ir.IntT(), func.node))
+    assert isinstance(tp.Iterable)
+    vals = [ast.IntExpr.make(v).node for v in func]
+    return ast.IntExpr(ir.Prod(ir.IntT(), *vals))
+
+def all(func: ast.FuncExpr | tp.Iterable) -> ast.BoolExpr:
+    if isinstance(func, ast.FuncExpr):
+        if not isinstance(func.T._raw_resT(), ir.BoolT):
+            raise ValueError(f"Expected FuncExpr[BoolExpr], got {func}")
+        return func.forall()
+    assert isinstance(func, tp.Iterable)
+    vals = [ast.BoolExpr.make(v).node for v in func]
+    return ast.BoolExpr(ir.Conj(ir.BoolT(), *vals))
+
+def any(func: ast.FuncExpr | tp.Iterable) -> ast.BoolExpr:
+    if isinstance(func, ast.FuncExpr):
+        if not isinstance(func.T._raw_resT(), ir.BoolT):
+            raise ValueError(f"Expected FuncExpr[BoolExpr], got {func}")
+        return func.exists()
+    assert isinstance(func, tp.Iterable)
+    vals = [ast.BoolExpr.make(v).node for v in func]
+    return ast.BoolExpr(ir.Disj(ir.BoolT(), *vals))
 
 def distinct(func: ast.FuncExpr) -> ast.BoolExpr:
     if not isinstance(func, ast.FuncExpr):
@@ -47,9 +84,11 @@ def enumT(*labels: str, name: str=None) -> ast.EnumType:
     return ast.EnumType(enumT)
 
 def make_enum(*labels: str, name: str=None) -> tp.Tuple[ast.DomainExpr, _EnumAttrs]:
+    if len(labels)==1:
+        labels = [l for l in labels[0]]
     T = enumT(*labels, name=name)
     enum_attrs = _EnumAttrs(T.node)
-    dom_node = ir.Universe(ir.DomT(T.node))
+    dom_node = ir.Universe(ir.DomT(T.node, ord=False))
     dom = ast.DomainExpr(dom_node)
     return dom, enum_attrs
 

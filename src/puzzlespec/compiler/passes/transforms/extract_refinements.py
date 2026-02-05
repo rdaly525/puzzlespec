@@ -9,12 +9,12 @@ from ....libs import var_def, std
 from ..envobj import EnvsObj, SymTable
 
 
-# This is the 'bottom up' version of refine
-# a: Fin(5) + b: Fin(6) -> (a+b): Fin(10)
-class RefineBottomUp(Transform):
-    """Combines refinements
+# This removes refinements from non-bool operators
+# And adds extracts from bool operators
+class ExtractRefine(Transform):
+    """Extracts refinements
     """
-    name = "refine_bo"
+    name = "extract_refine"
 
     requires: tp.Tuple[type, ...] = ()
     produces: tp.Tuple[type, ...] = ()
@@ -23,28 +23,6 @@ class RefineBottomUp(Transform):
         new_root = self.visit(root)
         return new_root
 
-    def _get_dom(self, node: ir.Node) -> ast.DomainExpr | None:
-        return ast.wrap(node).T.ref_dom
-    #Not: 100,
-    @handles(ir.Not)
-    def _(self, node: ir.Not):
-        a, = self.visit_children(node)
-
-    #(a: (N > M) & b : domB)
-    # a in ()
-    #Eq: 101,
-    #Lt: 102,
-    #LtEq: 103,
-    #Implies: 104,
-    #IsMember: 110,
-    #Subset: 111,
-    #ProperSubset: 112,
-    #Conj: 120,
-    #Disj: 121,   
-    #AllDistinct: 130,
-    #AllSame: 131,   
-    #Forall: 140,
-    #Exists: 141,
     @handles(ir.Sum)
     def _(self, node: ir.Sum):
         T, *vals = self.visit_children(node)

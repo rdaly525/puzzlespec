@@ -231,15 +231,15 @@ class AlgebraicSimplificationPass(Transform):
             return ir.ApplyFunc(T, func_lit, tag)
         return node.replace(T, scrut, *cases)
 
-    @handles(ir.ApplyFunc)
-    def _(self, node: ir.ApplyFunc):
-        T, func, arg = self.visit_children(node)
-        if isinstance(func, ir.Map):
-            _, dom, lam = func._children
-            from ...dsl import ast
-            node = ir.Apply(T, lam, arg)
-            return ast.wrap(node).refine(lambda _: ast.wrap(dom).contains(ast.wrap(arg))).node
-        return node.replace(T, func, arg)
+    #@handles(ir.ApplyFunc)
+    #def _(self, node: ir.ApplyFunc):
+    #    T, func, arg = self.visit_children(node)
+    #    if isinstance(func, ir.Map):
+    #        _, dom, lam = func._children
+    #        from ...dsl import ast
+    #        node = ir.Apply(T, lam, arg)
+    #        return ast.wrap(node).refine(lambda _: ast.wrap(dom).contains(ast.wrap(arg))).node
+    #    return node.replace(T, func, arg)
 
     @handles(ir.Proj)
     def _(self, node: ir.Proj):
@@ -261,3 +261,10 @@ class AlgebraicSimplificationPass(Transform):
                 if len(ast.wrap(v0).T)==len(elems):
                     return v0
         return node.replace(T, *elems)
+
+    @handles(ir.Subset, ir.LtEq)
+    def _(self, node: ir.Node):
+        T, a, b = self.visit_children(node)
+        if a == b:
+            return ast.BoolExpr.make(True).node
+        return node.replace(T, a, b)
