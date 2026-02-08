@@ -16,44 +16,34 @@ def func_var(
         _name_cnt +=1
     metadata = frozenset(kwargs.items())
 
-    doms = [dom.U if isinstance(dom, ast.TExpr) else dom for dom in doms]
-    doms = [doms[0]] + [(lambda _,dom=dom: dom) if isinstance(dom, ast.DomainExpr) else (lambda indices,dom=dom: dom(*indices)) for dom in doms[1:]]
-    assert isinstance(doms[0], ast.DomainExpr)
-    assert all(isinstance(dom, tp.Callable) for dom in doms[1:])
     N = len(doms)
-    def make_sort(doms, bvs: tp.Tuple[ast.Expr, ...]=None, tupT: ast.TupleType=None):
+    def make_sort(doms, bvs: tp.Tuple[ast.Expr, ...]=None):
+        if len(doms)==0:
+            return None
         if bvs is None:
             bvs = ()
-        if tupT is None:
-            tupT = ast.wrapT(ir.TupleT())
-        dom = doms[0]
-        if len(bvs)==0:
-            assert len(doms)==N
-            assert isinstance(doms[0], ast.DomainExpr)
+        if isinstance(doms[0], (ast.TExpr, ast.DomainExpr)):
+            dom = doms[0]
         else:
-            assert len(bvs) == len(tupT)
-            bv_multi = tupT._bound_var()
-            assert isinstance(dom, tp.Callable)
-            lam_expr = ast.LambdaExpr.make(dom, bv_multi)
-            dom = lam_expr.apply(bvs)
-        if len(doms)==1:
-            codom = dom
-            assert isinstance(codom, ast.DomainExpr)
-            T = ir.RefT(codom.T.carT.node, codom.node)
-            return T
+            assert isinstance(doms[0], tp.Callable)
+            if len(bvs)==1:
+                bv_tup = bvs[0]
+            else:
+                bv_tup = ast.TupleExpr.make(tuple(bvs))
+            dom = ast._call_fn(doms[0], bv_tup)
+        if isinstance(dom, ast.DomainExpr):
+            T = dom.as_refT()
         else:
-            bv_uni = dom._bv
-            new_bvs = bvs + (bv_uni,)
-            new_tupT = ast.wrapT(ir.TupleT(*tupT._node.elemTs, bv_uni.T._node))
-            T = ir.FuncT(
-                dom=dom.node,
-                lamT = ir.PiTHOAS(
-                    bv_uni.T.node,
-                    make_sort(doms[1:], new_bvs, new_tupT),
-                    bv_name=bv_uni.node.name
-                )
-            )
-        return T
+            T = dom
+        bv = dom._bound_var()
+        resT = make_sort(doms[1:], (*bvs, bv))
+        if resT is None:
+            return T.node
+        return ir.PiTHOAS(
+            argT=T.node,
+            resT=resT,
+            bv_name=bv.node.name
+        )
     full_sort = make_sort(doms)
     var = ir.VarHOAS(full_sort, name=name, metadata=metadata)
     var = ast.wrap(var)

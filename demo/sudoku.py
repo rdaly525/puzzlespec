@@ -8,12 +8,7 @@ p: PuzzleSpecBuilder = PuzzleSpecBuilder()
 # Define Parameters as *Variables* #
 ####################################
 # Grid dim as N x N
-N = var(Int, name='N')
-
-# Box size as sqrt(N)
-#box_size = var(Int, name='box_size')
-# Constraints on parameters (N must be a perfect square)
-#p += [box_size*box_size == N, box_size >= 0]
+N = var(std.Nat, name='N')
 
 ##############################
 # Domains are typed *values* #
@@ -29,8 +24,9 @@ Digits = nd.range(1, N+1) # [1..N)
 # Supports refinement types # 
 #############################
 # Alternate definition of box_size:  {i: Int | i >=0 & i*i==N}
-refinement_dom = U(Int).restrict(lambda i: (i >= 0) & (i*i==N))
-box_size = var(dom=refinement_dom, name='bs')
+#refinement_dom = U(Int).restrict(lambda i: (i >= 0) & (i*i==N))
+#box_size = var(dom=refinement_dom, name='bs')
+box_size = std.isqrt(N)
 
 #########################
 # Functions are *total* #
@@ -52,12 +48,14 @@ cell_digits = func_var(Cells, Digits, name="cell_digits") # Cells -> Digits
 # Alternate syntax
 p += nd.rows(cell_digits).forall(lambda row_vals: std.distinct(row_vals))
 p += nd.cols(cell_digits).forall(lambda col_vals: std.distinct(col_vals))
-
-# Box constraint
+#
+## Box constraint
 p += nd.tiles(
     cell_digits,
     size=(box_size, box_size),
     stride=(box_size, box_size)
+    #size=(3, 3)
+    #stride=(3, 3),
 ).forall(lambda box_vals: std.distinct(box_vals))
 
 #####################
@@ -80,6 +78,7 @@ spec = p.build("Sudoku")
 #input()
 #print("OPTIMIZED SPEC")
 print(spec.optimize())
+exit()
 #input()
 print("SETTING N = 9")
 setter = VarSetter(spec)

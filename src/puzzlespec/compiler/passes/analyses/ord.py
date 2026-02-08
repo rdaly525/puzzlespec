@@ -4,13 +4,14 @@ import typing as tp
 
 from ..pass_base import Analysis, AnalysisObject, Context, handles
 from ...dsl import ir, ast, ast_nd
+from ....libs import std
 from ..envobj import EnvsObj
 
 def gen_enumerate(node: ir._DomT) -> ast.FuncExpr:
     dom = ast.wrap(node)
     dom_fin = ast_nd.fin(dom.size)
     lam = get_elem_lam(node)
-    return dom_fin.map(lam, _inj=True)
+    return dom_fin.map(lam, inj=True)
     #fin_dom = ir.Fin(ir.DomT(ir.IntT(), True, False), ir.Card(ir.IntT(), node))
     #T = ir.FuncT(
     #    fin_dom,
@@ -46,7 +47,7 @@ class OrdAnalysis(Analysis):
         self.visit_children(node)
         assert node.T.ord
         fin = ast.wrap(node)
-        lam = ast.LambdaExpr.make(lambda i: i.refine(fin), ast.Int)
+        lam = ast.FuncExpr.make(fin, lambda i: i)
         self.node_map[node] = lam
 
     @handles(ir.Range)
@@ -55,7 +56,8 @@ class OrdAnalysis(Analysis):
         assert node.T.ord
         T, lo, hi, step = node._children
         lo, hi, step = ast.IntExpr(lo), ast.IntExpr(hi), ast.IntExpr(step)
-        lam = ast.LambdaExpr.make(lambda i: (lo+i*step).refine(ast.wrap(node)), ast.Int)
+        fin = ast_nd.fin(ast.wrap(node).size)
+        lam = ast.FuncExpr.make(fin, lambda i: (lo+i*step), inj=True)
         self.node_map[node] = lam
 
     @handles(ir.Slice)
@@ -64,20 +66,24 @@ class OrdAnalysis(Analysis):
         T, dom, lo, hi, step = node._children
         assert dom in self.node_map
         lo, hi, step = ast.IntExpr(lo), ast.IntExpr(hi), ast.IntExpr(step)
-        lam_s = ast.LambdaExpr.make(lambda i: (lo+i*step), ast.Int)
+        fin = ast_nd.fin(ast.wrap(node).size)
+        lam_s = ast.FuncExpr.make(fin, lambda i: (lo+i*step), inj=True)
         lam = lam_s @ self.node_map[dom]
         self.node_map[node] = lam
+
     @handles(ir.Singleton)
     def _(self, node: ir.Singleton):
         self.visit_children(node)
         T, val = node._children
-        self.node_map[node] = ast.LambdaExpr.make(lambda i: ast.wrap(val), ast.Int)
+        self.node_map[node] = ast.FuncExpr.make(ast_nd.fin(1), lambda i: ast.wrap(node).unique_elem, inj=True)
 
     @handles(ir.CartProd)
     def _(self, node: ir.CartProd):
         self.visit_children(node)
         T, *doms = node._children
         for dom in doms:
+            if dom not in self.node_map:
+                raise ValueError(f"Dom {dom} not in node map")
             assert dom in self.node_map
         Ns: tp.List[ast.IntExpr] = [ast.wrap(dom).size for dom in doms]
         base_lams = [self.node_map[dom] for dom in doms]
@@ -88,20 +94,34 @@ class OrdAnalysis(Analysis):
                 i = i // N
             idxs = [base_lams[i](idx) for i, idx in enumerate(reversed(idxs))]
             return ast.TupleExpr.make(tuple(idxs))
-        self.node_map[node] = ast.LambdaExpr.make(lam, ast.Int)
+        fin = ast_nd.fin(ast.wrap(node).size)
+        self.node_map[node] = ast.FuncExpr.make(fin, lam, inj=True)
 
     @handles(ir.Image)
     def _(self, node: ir.Image):
         self.visit_children(node)
         T, func = node._children
         if T.ord:
-            if isinstance(func, ir.Map):
-                T_f, dom_f, lam_f = func._children
-                assert lam_f.T.inj
-                if dom_f not in self.node_map:
+            if isinstance(func, ir._Lambda):
+                piT, body = func._children
+                func_ast = ast.wrap(func)
+                assert func_ast.T.inj_known
+                dom = func_ast.domain.node
+                if dom not in self.node_map:
                     raise ValueError()
-                assert dom_f in self.node_map
-                lam = ast.wrap(lam_f) @ self.node_map[dom_f]
+                lam = func_ast @ self.node_map[dom]
                 self.node_map[node] = lam
+
+    #@handles(ir.DomProj)
+    #def _(self, node: ir.DomProj):
+    #    self.visit_children(node)
+    #    T, dom, idx = node._children
+    #    assert dom in self.node_map
+    #    prod_func = self.node_map[dom]
+    #    
+    #    assert dom in self.node_map
+    #    fin = ast_nd.fin(ast.wrap(node).size)
+    #    lam = ast.FuncExpr.make(fin, lambda i: ast.wrap(node)[i], inj=True)
+    #    self.node_map[node] = lam
 
 OrdMap.gen_pass = OrdAnalysis

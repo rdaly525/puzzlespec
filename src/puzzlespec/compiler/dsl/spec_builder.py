@@ -5,7 +5,8 @@ from puzzlespec.compiler.passes.analyses.type_check import TypeCheckingPass
 from puzzlespec.compiler.passes.analyses.pretty_printer import PrettyPrinterPass, pretty
 from puzzlespec.compiler.passes.analyses.bound_var_check import CheckBoundVars
 from puzzlespec.compiler.passes.transforms.resolve_vars import ResolveBoundVars, ResolveFreeVars, VarMap
-from puzzlespec.compiler.passes.transforms.refine import free_var_refine
+from puzzlespec.compiler.passes.transforms.add_refinements import free_var_refine, add_refinements
+from puzzlespec.compiler.passes.transforms.guard_opt import guard_opt
 from . import ast, ir
 from .envs import SymTable, TypeEnv
 from ..passes.pass_base import Context, PassManager
@@ -60,15 +61,22 @@ class PuzzleSpecBuilder:
         ctx = Context(EnvsObj(sym))
         pm = PassManager(TypeCheckingPass(), ResolveFreeVars(), verbose=True)
         new_rules_node = pm.run(new_rules_node, ctx=ctx)
-        new_rules_node = free_var_refine(new_rules_node)
+        #new_rules_node = guard_opt(new_rules_node)
+        if isinstance(new_rules_node, ir.Guard):
+            T, new_rules_node, p = new_rules_node._children
+            obls = ast.TupleExpr.make((ast.wrap(p),)).node
+        else:
+            obls = ast.TupleExpr.make(()).node
+        #new_rules_node = free_var_refine(new_rules_node)
+        #new_rules_node = add_refinements(new_rules_node)
         env = ctx.get(EnvsObj)
         new_sym = env.sym
         spec = PuzzleSpec(
             name=name,
             sym=new_sym,
-            rules=new_rules_node
+            rules=new_rules_node,
+            obls=obls
         )
-        #spec_obls = spec.extract_obligations()
         # 3: Optimize/canonicalize
         if opt:
             spec = spec.optimize()

@@ -10,7 +10,7 @@ from ..passes.transforms.beta_reduction import BetaReductionPass, BetaReductionH
 from ..passes.transforms import CanonicalizePass, ConstFoldPass, AlgebraicSimplificationPass, DomainSimplificationPass
 from ..passes.transforms.cse import CSE
 from ..passes.transforms.ord import OrdSimplificationPass
-from ..passes.transforms.arrow_simp import LamSimplification
+from ..passes.transforms.guard_opt import GuardOpt, GuardLift
 #from ..passes.analyses.constraint_categorizer import ConstraintCategorizer, ConstraintCategorizerVals
 from ..passes.analyses.getter import VarGetter, VarSet, get_vars
 from ..passes.analyses.type_check import TypeCheckingPass, TypeMap 
@@ -106,19 +106,19 @@ class PuzzleSpec:
             TypeMap: TypeCheckingPass()
         }
 
-        opt_passes = [
-            CanonicalizePass(),
-            AlgebraicSimplificationPass(),
-            ConstFoldPass(),
-            DomainSimplificationPass(),
-            #RefineSimplify(),
-            BetaReductionHOAS(),
-            LamSimplification(),
-            #CSE(),
+        base_opt = [
+                CanonicalizePass(),
+                AlgebraicSimplificationPass(),
+                ConstFoldPass(),
+                DomainSimplificationPass(),
+                BetaReductionHOAS(),
+                #GuardLift(),
         ]
+        opt_passes = [base_opt, OrdSimplificationPass(), base_opt]
+        #opt_passes = [GuardLift(), base_opt]
 
         #opt = self.transform(opt_passes, OrdSimplificationPass(), opt_passes, ctx=ctx, analysis_map=analysis_map, max_iter=5)
-        opt = self.transform(opt_passes, ctx=ctx, analysis_map=analysis_map, max_iter=8)
+        opt = self.transform(*opt_passes, ctx=ctx, analysis_map=analysis_map, max_iter=8, verbose=2)
         return opt
     
     def pretty(self) -> str:

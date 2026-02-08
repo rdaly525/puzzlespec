@@ -113,17 +113,6 @@ class TypeCheckingPass(Analysis):
         self.Tmap[node] = node
         return node
 
-    @handles(ir.ArrowT)
-    def _(self, node: ir.ArrowT):
-        argT, resT = self.visit_children(node)
-        if not _is_type(argT):
-            raise TypeError(f"ArrowT argT must be a type, got {argT}")
-        if not _is_type(resT):
-            raise TypeError(f"ArrowT resT must be a type, got {resT}")
-        T = ir.ArrowT(argT, resT)
-        self.Tmap[node] = T
-        return T
-
     @handles(ir.PiT)
     def _(self, node: ir.PiT):
         argT, resT = node._children
@@ -138,7 +127,7 @@ class TypeCheckingPass(Analysis):
             raise TypeError(f"LambdaT body must be a type, got {new_resT}")
         # Pop bound context
         self.bctx.pop()
-        T = ir.ArrowT(new_argT, new_resT)
+        T = ir.PiT(new_argT, new_resT)
         self.Tmap[node] = T
         return T
 
@@ -147,22 +136,10 @@ class TypeCheckingPass(Analysis):
         argT, resT = self.visit_children(node)
         # Verify T is a type
         if not _is_type(argT):
-            raise TypeError(f"LambdaT argT must be a type, got {argT}")
+            raise TypeError(f"PiT argT must be a type, got {argT}")
         if not _is_type(resT):
-            raise TypeError(f"LambdaT resT must be a type, got {resT}")
-        T = ir.ArrowT(argT, resT)
-        self.Tmap[node] = T
-        return T
-
-    @handles(ir.FuncT)
-    def _(self, node: ir.FuncT):
-        domT, arrT = self.visit_children(node)
-        if not _is_kind(domT, ir._DomT):
-            raise TypeError(f"FuncT domain must be a domain, got {domT}")
-        # Verify funcT domain carrier type matches lamT argument type
-        if not _is_same_kind(arrT.argT, domT.carT):
-            raise TypeError(f"LambdaT argument type {arrT.argT} does not match FuncT domain carrier type {domT.carT}")
-        T = arrT
+            raise TypeError(f"PiT resT must be a type, got {resT}")
+        T = node.replace(argT, resT)
         self.Tmap[node] = T
         return T
 
@@ -200,6 +177,28 @@ class TypeCheckingPass(Analysis):
             raise TypeError(f"BoundVar index {node.idx} has non-type type {T}")
         if not all(_is_type(t) for t in self.bctx):
             raise TypeError(f"Bound context must contain only types, got {self.bctx}")
+        self.Tmap[node] = T
+        return T
+
+    @handles(ir.Guard)
+    def _(self, node: ir.Guard):
+        T, valT, pT = self.visit_children(node)
+        if not _is_same_kind(valT, T):
+            raise TypeError(f"Guard value type {valT} does not match Guard type {T}")
+        if not _is_kind(pT, ir.BoolT):
+            raise TypeError(f"Guard predicate type {pT} is not a BoolT")
+        self.Tmap[node] = T
+        return T
+
+    @handles(ir.Choose)
+    def _(self, node: ir.Choose):
+        T, piT = self.visit_children(node)
+        if not _is_kind(piT, ir._PiT):
+            raise TypeError(f"Choose must have PiT type, got {piT}")
+        if not _is_same_kind(piT.argT, T):
+            raise TypeError(f"Choose argument type {piT.argT} does not match Choose type {T}")
+        if not _is_kind(piT.resT, ir.BoolT):
+            raise TypeError(f"Choose result type {piT.resT} is not a BoolT")
         self.Tmap[node] = T
         return T
 
@@ -328,8 +327,8 @@ class TypeCheckingPass(Analysis):
         self.Tmap[node] = T
         return T
 
-    @handles(ir.Div)
-    def _(self, node: ir.Div):
+    @handles(ir.FloorDiv)
+    def _(self, node: ir.FloorDiv):
         T, aT, bT = self.visit_children(node)
         # Verify type is IntT
         if not _is_kind(T, ir.IntT):
@@ -337,6 +336,30 @@ class TypeCheckingPass(Analysis):
         # Verify operands are Int
         if not (_is_kind(aT, ir.IntT) and _is_kind(bT, ir.IntT)):
             raise TypeError(f"Div expects Int operands, got {aT} and {bT}")
+        self.Tmap[node] = T
+        return T
+
+    @handles(ir.TrueDiv)
+    def _(self, node: ir.TrueDiv):
+        T, aT, bT = self.visit_children(node)
+        # Verify type is IntT
+        if not _is_kind(T, ir.IntT):
+            raise TypeError(f"Div must have IntT type, got {node.T}")
+        # Verify operands are Int
+        if not (_is_kind(aT, ir.IntT) and _is_kind(bT, ir.IntT)):
+            raise TypeError(f"Div expects Int operands, got {aT} and {bT}")
+        self.Tmap[node] = T
+        return T
+
+    @handles(ir.Isqrt)
+    def _(self, node: ir.Isqrt):
+        T, aT = self.visit_children(node)
+        # Verify type is IntT
+        if not _is_kind(T, ir.IntT):
+            raise TypeError(f"Isqrt must have IntT type, got {node.T}")
+        # Verify operands are Int
+        if not _is_kind(aT, ir.IntT):
+            raise TypeError(f"Isqrt expects Int operand, got {aT}")
         self.Tmap[node] = T
         return T
 
@@ -722,8 +745,8 @@ class TypeCheckingPass(Analysis):
         if len(branchesT) != len(scrutT.elemTs):
             raise TypeError(f"Match branches count {len(branchesT)} does not match sum type count {len(scrutT.elemTs)}")
         for i, (sum_elem_T, branch_T) in enumerate(zip(scrutT.elemTs, branchesT)):
-            if not _is_kind(branch_T, ir.ArrowT):
-                raise TypeError(f"Match branch {i} must be arrowT")
+            if not _is_kind(branch_T, ir._PiT):
+                raise TypeError(f"Match branch {i} must be PiT")
             # Verify branch argument type matches sum component
             if not _is_same_kind(branch_T.argT, sum_elem_T):
                 raise TypeError(f"Match branch {i} argument type {branch_T.argT} does not match sum component {sum_elem_T}")
@@ -734,34 +757,34 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Restrict)
     def _(self, node: ir.Restrict):
-        T, arrowT = self.visit_children(node)
+        T, piT = self.visit_children(node)
         # Verify type is DomT
         if not _is_kind(T, ir._DomT):
             raise TypeError(f"Restrict must have DomT type, got {T}")
-        # Verify function argument is a ArrowT
-        if not _is_kind(arrowT, ir.ArrowT):
-            raise TypeError(f"Restrict expects ArrowT argument, got {arrowT}")
+        # Verify function argument is a PiT
+        if not _is_kind(piT, ir._PiT):
+            raise TypeError(f"Restrict expects PiT argument, got {piT}")
         # Verify function returns Bool
-        if not _is_kind(arrowT.resT, ir.BoolT):
-            raise TypeError(f"Restrict expects ArrowT with Bool result type, got {arrowT.resT}")
+        if not _is_kind(piT.resT, ir.BoolT):
+            raise TypeError(f"Restrict expects PiT with Bool result type, got {piT.resT}")
         # Verify function argument type matches domain carrier type
-        if not _is_same_kind(arrowT.argT, T.carT):
-            raise TypeError(f"Restrict function argument type {arrowT.argT} does not match domain carrier type {T.carT}")
+        if not _is_same_kind(piT.argT, T.carT):
+            raise TypeError(f"Restrict function argument type {piT.argT} does not match domain carrier type {T.carT}")
         self.Tmap[node] = T
         return T
 
     @handles(ir.Forall)
     def _(self, node: ir.Forall):
-        T, arrowT = self.visit_children(node)
+        T, piT = self.visit_children(node)
         # Verify type is BoolT
         if not _is_kind(T, ir.BoolT):
             raise TypeError(f"Forall must have BoolT type, got {T}")
         # Verify function argument is a ArrowT
-        if not _is_kind(arrowT, ir.ArrowT):
-            raise TypeError(f"Forall expects ArrowT argument, got {arrowT}")
+        if not _is_kind(piT, ir._PiT):
+            raise TypeError(f"Forall expects PiT argument, got {piT}")
         # Verify function returns Bool
-        if not _is_kind(arrowT.resT, ir.BoolT):
-            raise TypeError(f"Forall expects FuncT with Bool result type, got {arrowT.resT}")
+        if not _is_kind(piT.resT, ir.BoolT):
+            raise TypeError(f"Forall expects PiT with Bool result type, got {piT.resT}")
         # Verify function argument type matches domain carrier type
         self.Tmap[node] = T
         return T
@@ -781,19 +804,19 @@ class TypeCheckingPass(Analysis):
         self.Tmap[node] = T
         return T
 
-    @handles(ir.Map)
-    def _(self, node: ir.Map):
-        T, domT, funT = self.visit_children(node)
-        # Verify T is the same as funT
-        if not _is_same_kind(T, funT):
-            raise TypeError(f"Map must have FuncT type, got {T}")
-        # Verify domain argument is a domain
-        if not _is_kind(domT, ir._DomT):
-            raise TypeError(f"Map expects domain argument, got {domT}")
-        if not _is_same_kind(funT.argT, domT.carT):
-            raise TypeError(f"Map function argument type {funT.argT} does not match domain carrier type {domT.carT}")
-        self.Tmap[node] = T
-        return T
+    #@handles(ir.Map)
+    #def _(self, node: ir.Map):
+    #    T, domT, funT = self.visit_children(node)
+    #    # Verify T is the same as funT
+    #    if not _is_same_kind(T, funT):
+    #        raise TypeError(f"Map must have FuncT type, got {T}")
+    #    # Verify domain argument is a domain
+    #    if not _is_kind(domT, ir._DomT):
+    #        raise TypeError(f"Map expects domain argument, got {domT}")
+    #    if not _is_same_kind(funT.argT, domT.carT):
+    #        raise TypeError(f"Map function argument type {funT.argT} does not match domain carrier type {domT.carT}")
+    #    self.Tmap[node] = T
+    #    return T
 
     @handles(ir.FuncLit)
     def _(self, node: ir.FuncLit):
@@ -819,43 +842,43 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Image)
     def _(self, node: ir.Image):
-        T, arrT = self.visit_children(node)
+        T, piT = self.visit_children(node)
         if not _is_kind(T, ir.DomT):
             raise TypeError(f"Image must have DomT type, got {T}")
-        if not _is_kind(arrT, ir.ArrowT):
-            raise TypeError(f"Image expects ArrowT argument, got {arrT}")
-        if not _is_same_kind(arrT.resT, T.carT):
-            raise TypeError(f"Image carrier type {T.carT} does not match function result type {arrT.resT}")
+        if not _is_kind(piT, ir._PiT):
+            raise TypeError(f"Image expects PiT argument, got {piT}")
+        if not _is_same_kind(piT.resT, T.carT):
+            raise TypeError(f"Image carrier type {T.carT} does not match function result type {piT.resT}")
         self.Tmap[node] = T
         return T
 
-    @handles(ir.ApplyFunc)
-    def _(self, node: ir.ApplyFunc):
-        T, arrowT, argT = self.visit_children(node)
-        # Verify function argument is a FuncT
-        if not _is_kind(arrowT, ir.ArrowT):
-            raise TypeError(f"ApplyFunc expects ArrowT function, got {arrowT}")
-        # Verify argument type matches function domain carrier type
-        if not _is_same_kind(argT, arrowT.argT):
-            raise TypeError(f"ApplyFunc argument type {argT} does not match function domain carrier type {arrowT.argT}")
-        # Verify result type matches function result type
-        if not _is_same_kind(T, arrowT.resT):
-            raise TypeError(f"ApplyFunc result type {T} does not match function result type {arrowT.resT}")
-        self.Tmap[node] = T
-        return T
+    #@handles(ir.ApplyFunc)
+    #def _(self, node: ir.ApplyFunc):
+    #    T, arrowT, argT = self.visit_children(node)
+    #    # Verify function argument is a FuncT
+    #    if not _is_kind(arrowT, ir.ArrowT):
+    #        raise TypeError(f"ApplyFunc expects ArrowT function, got {arrowT}")
+    #    # Verify argument type matches function domain carrier type
+    #    if not _is_same_kind(argT, arrowT.argT):
+    #        raise TypeError(f"ApplyFunc argument type {argT} does not match function domain carrier type {arrowT.argT}")
+    #    # Verify result type matches function result type
+    #    if not _is_same_kind(T, arrowT.resT):
+    #        raise TypeError(f"ApplyFunc result type {T} does not match function result type {arrowT.resT}")
+    #    self.Tmap[node] = T
+    #    return T
 
     @handles(ir.Apply)
     def _(self, node: ir.Apply):
-        T, arrowT, argT = self.visit_children(node)
+        T, piT, argT = self.visit_children(node)
         # Verify T is the same as arrowT
-        if not _is_kind(arrowT, ir.ArrowT):
-            raise TypeError(f"Apply must have ArrowT type, got {arrowT}")
-        # Verify argument type matches arrowT argument type
-        if not _is_same_kind(argT, arrowT.argT):
-            raise TypeError(f"Apply argument type {argT} does not match arrowT argument type {arrowT.argT}")
-        # Verify result type matches arrowT result type
-        if not _is_same_kind(T, arrowT.resT):
-            raise TypeError(f"Apply result type {T} does not match arrowT result type {arrowT.resT}")
+        if not _is_kind(piT, ir._PiT):
+            raise TypeError(f"Apply must have PiT type, got {piT}")
+        # Verify argument type matches piT argument type
+        if not _is_same_kind(argT, piT.argT):
+            raise TypeError(f"Apply argument type {argT} does not match piT argument type {piT.argT}")
+        # Verify result type matches piT result type
+        if not _is_same_kind(T, piT.resT):
+            raise TypeError(f"Apply result type {T} does not match piT result type {piT.resT}")
         self.Tmap[node] = T
         return T
 
@@ -964,25 +987,25 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.AllDistinct)
     def _(self, node: ir.AllDistinct):
-        T, arrowT = self.visit_children(node)
+        T, piT = self.visit_children(node)
         # Verify type is BoolT
         if not _is_kind(T, ir.BoolT):
             raise TypeError(f"AllDistinct must have BoolT type, got {T}")
         # Verify function argument is a Value with FuncT type
-        if not _is_kind(arrowT, ir.ArrowT):
-            raise TypeError(f"AllDistinct expects FuncT argument, got {funcT}")
+        if not _is_kind(piT, ir._PiT):
+            raise TypeError(f"AllDistinct expects PiT argument, got {piT}")
         self.Tmap[node] = T
         return T
 
     @handles(ir.AllSame)
     def _(self, node: ir.AllSame):
-        T, arrT = self.visit_children(node)
+        T, piT = self.visit_children(node)
         # Verify type is BoolT
         if not _is_kind(T, ir.BoolT):
             raise TypeError(f"AllSame must have BoolT type, got {T}")
-        # Verify function argument is a Value with FuncT type
-        if not _is_kind(arrT, ir.ArrowT):
-            raise TypeError(f"AllSame expects FuncT argument, got {arrT}")
+        # Verify function argument is a PiT type
+        if not _is_kind(piT, ir._PiT):
+            raise TypeError(f"AllSame expects PiT argument, got {piT}")
         self.Tmap[node] = T
         return T
 
@@ -1054,10 +1077,11 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.LambdaHOAS)
     def _(self, node: ir.LambdaHOAS):
-        (argT, resT), bodyT = self.visit_children(node)
-        if not _is_same_kind(resT, bodyT):
-            raise TypeError(f"LambdaHOAS body type {bodyT} does not match LambdaT result type {resT}")
-        T = ir.ArrowT(argT, resT)
+        T, bodyT = self.visit_children(node)
+        if not _is_kind(T, (ir.PiTHOAS, ir.PiT)):
+            raise TypeError(f"LambdaHOAS must have PiT type, got {T}")
+        if not _is_same_kind(T.resT, bodyT):
+            raise TypeError(f"LambdaHOAS body type {bodyT} does not match LambdaT result type {T.resT}")
         self.Tmap[node] = T
         return T
     
@@ -1131,23 +1155,21 @@ class StripType(Analysis):
     @handles(ir.PiT)
     def _(self, node: ir.PiT):
         argT, resT = self.visit_children(node)
-        T = ir.ArrowT(argT, resT)
-        return T
+        return node.replace(argT, resT)
 
     @handles(ir.PiTHOAS)
     def _(self, node: ir.PiTHOAS):
         argT, resT = self.visit_children(node)
-        T = ir.ArrowT(argT, resT)
-        return T
-
-    @handles(ir.ArrowT)
-    def _(self, node: ir.ArrowT):
-        argT, resT = self.visit_children(node)
         return node.replace(argT, resT)
 
-    @handles(ir.FuncT)
-    def _(self, node: ir.FuncT):
-        return self.visit(node.lamT)
+    #@handles(ir.ArrowT)
+    #def _(self, node: ir.ArrowT):
+    #    argT, resT = self.visit_children(node)
+    #    return node.replace(argT, resT)
+
+    #@handles(ir.FuncT)
+    #def _(self, node: ir.FuncT):
+    #    return self.visit(node.lamT)
 
     @handles(ir.RefT)
     def _(self, node: ir.RefT):
