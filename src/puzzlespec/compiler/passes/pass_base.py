@@ -317,8 +317,9 @@ class PassManager:
         if ctx is None:
             ctx = Context()
         if self.verbose > 1:
-            print("Running passes on:")
+            print("Running passes on: (")
             print(root)
+            print(")")
         if fixed_point:
             return self._run_fixed(root, self.passes, ctx)
         return self._run_passes(root, self.passes, ctx)
@@ -344,7 +345,9 @@ class PassManager:
             new_root, aobjs = p(root, ctx)
             if new_root != root:
                 if self.verbose > 1:
+                    print("modified: (")
                     print(new_root)
+                    print(")")
                 # Invalidate context
                 ctx.invalidate()
             for aobj in aobjs:

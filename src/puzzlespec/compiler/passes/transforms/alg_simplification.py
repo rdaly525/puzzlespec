@@ -1,8 +1,10 @@
 from __future__ import annotations
 import math
+from re import L
 
 from ..pass_base import Transform, Context, handles
 from ...dsl import ir, ast
+from ....libs import std
 import typing as tp
 
 
@@ -70,6 +72,7 @@ class AlgebraicSimplificationPass(Transform):
 
         if len(children) == 1:
             return children[0]
+        children.sort()
         return node.replace(T, *children)
 
     @handles(ir.Prod)
@@ -92,11 +95,87 @@ class AlgebraicSimplificationPass(Transform):
                 children = non_const_children
             case _:
                 children = non_const_children + [ir.Lit(T, const_val)]
-
-        # Div is integer division so we CANNOT simplify x, 1/x => 1
         if len(children) == 1:
             return children[0]
+        # TODO All this needs guards
+        div_children, non_div_children = _partition(children, lambda c: isinstance(c, ir.TrueDiv))
+        if len(div_children)>0:
+            tops = [c._children[1] for c in div_children] + non_div_children
+            bots = [c._children[2] for c in div_children]
+            return (std.prod(ast.wrap(t) for t in tops) / std.prod(ast.wrap(b) for b in bots)).node
+        
+        # TODO these needs guards
+        sqrt_children, non_sqrt_children = _partition(children, lambda c: isinstance(c, ir.Isqrt))
+        # If there are multiple sqrt children, we can simplify them to a single sqrt
+        if len(sqrt_children)>1:
+            sqrt = std.isqrt(std.prod(ast.wrap(c._children[1]) for c in sqrt_children)).node
+            children = non_sqrt_children + [sqrt]
+        children.sort()
         return node.replace(T, *children)
+
+    # All this needs guards
+    @handles(ir.Isqrt)
+    def _(self, node: ir.Isqrt):
+        T, a = self.visit_children(node)
+        if isinstance(a, ir.Prod):
+            T, *terms = a._children
+            outs = []
+            ins = []
+            i=0
+            while (i < len(terms)-1):
+                if terms[i]==terms[i+1]:
+                    outs.append(terms[i])
+                    i+=2
+                else:
+                    ins.append(terms[i])
+                    i += 1
+            if len(outs) > 0:
+                return std.prod([ast.wrap(v) for v in outs] + [std.isqrt(std.prod(ast.wrap(v) for v in ins))]).node
+        return node.replace(T, a)
+
+    @handles(ir.TrueDiv)
+    def _(self, node: ir.TrueDiv):
+        T, a, b = self.visit_children(node)
+        if a==b:
+            return ir.Lit(T, 1)
+        match (a, b):
+            case (_, ir.Lit(val=1)):
+                return a
+            case (ir.Lit(val=0), _):
+                return ir.Lit(T, 0)
+        if isinstance(a, ir.TrueDiv):
+            _, c, d = a._children
+            return ((ast.wrap(b)*ast.wrap(c))/ast.wrap(d)).node
+        if isinstance(b, ir.TrueDiv):
+            _, c, d = b._children
+            return ((ast.wrap(a)*ast.wrap(d))/ast.wrap(c)).node
+        if isinstance(b, ir.Isqrt):
+            return ((ast.wrap(a)*ast.wrap(b))/ast.wrap(b._children[1])).node
+
+        if isinstance(a, ir.Prod) or isinstance(b, ir.Prod):
+            if isinstance(a, ir.Prod):
+                tops = a._children[1:]
+            else:
+                tops = [a]
+            if isinstance(b, ir.Prod):
+                bots = b._children[1:]
+            else:
+                bots = [b]
+            new_tops = []
+            new_bots = list(bots)
+            for t in tops:
+                for i, b in enumerate(new_bots):
+                    if t==b:
+                        del new_bots[i]
+                        break
+                else:
+                    new_tops.append(t)
+            if len(new_tops)!=len(tops):
+                top = std.prod(ast.wrap(t) for t in new_tops)
+                bot = std.prod(ast.wrap(b) for b in new_bots)
+                return (top/bot).node
+
+        return node.replace(T, a, b)
 
     @handles(ir.Conj)
     def _(self, node: ir.Node) -> ir.Node:
@@ -137,8 +216,8 @@ class AlgebraicSimplificationPass(Transform):
             return children[0]
         return node.replace(T, *children)
 
-    @handles(ir.Div)
-    def _(self, node: ir.Div) -> ir.Node:
+    @handles(ir.FloorDiv)
+    def _(self, node: ir.Node) -> ir.Node:
         T, a, b = self.visit_children(node)
         if a==b:
             return ir.Lit(T, 1)
@@ -230,16 +309,6 @@ class AlgebraicSimplificationPass(Transform):
             # Apply the function to tag
             return ir.ApplyFunc(T, func_lit, tag)
         return node.replace(T, scrut, *cases)
-
-    #@handles(ir.ApplyFunc)
-    #def _(self, node: ir.ApplyFunc):
-    #    T, func, arg = self.visit_children(node)
-    #    if isinstance(func, ir.Map):
-    #        _, dom, lam = func._children
-    #        from ...dsl import ast
-    #        node = ir.Apply(T, lam, arg)
-    #        return ast.wrap(node).refine(lambda _: ast.wrap(dom).contains(ast.wrap(arg))).node
-    #    return node.replace(T, func, arg)
 
     @handles(ir.Proj)
     def _(self, node: ir.Proj):

@@ -47,6 +47,8 @@ class GuardLift(Transform):
         self.bnames = {}
         self.root_preds = []
         new_root = self.visit(root)
+        if new_root == root:
+            return new_root
         preds = self.root_preds
         if isinstance(new_root, ir.Spec):
             cons, obls = new_root._children

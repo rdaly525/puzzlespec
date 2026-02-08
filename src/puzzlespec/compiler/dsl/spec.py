@@ -112,9 +112,10 @@ class PuzzleSpec:
                 ConstFoldPass(),
                 DomainSimplificationPass(),
                 BetaReductionHOAS(),
-                GuardLift(),
+                #GuardLift(),
         ]
         opt_passes = [base_opt, OrdSimplificationPass(), base_opt]
+        #opt_passes = [GuardLift(), base_opt]
 
         #opt = self.transform(opt_passes, OrdSimplificationPass(), opt_passes, ctx=ctx, analysis_map=analysis_map, max_iter=5)
         opt = self.transform(*opt_passes, ctx=ctx, analysis_map=analysis_map, max_iter=8, verbose=2)

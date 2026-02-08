@@ -10,7 +10,8 @@ def fin(n: ast.IntOrExpr):
     n = ast.IntExpr.make(n)
     T = ir.DomT(carT=ir.IntT(), ord=True)
     node = ir.Fin(T, n.node)
-    return OrdDomainExpr(node).guard(n >=0)
+    #return OrdDomainExpr(node).guard(n >=0)
+    return OrdDomainExpr(node)
 
 # ND Types
 class OrdDomainType(ast.DomainType):
@@ -48,7 +49,8 @@ class OrdDomainExpr(ast.DomainExpr):
     def elemAt(self, idx: ast.IntOrExpr) -> ast.IntExpr:
         idx = ast.IntExpr.make(idx)
         node = ir.ElemAt(self.T.carT._node, self.node, idx.node)
-        return ast.wrap(node).guard(fin(self.size).contains(idx))
+        #return ast.wrap(node).guard(fin(self.size).contains(idx))
+        return ast.wrap(node)
 
     # Exact windows
     def windows(self, size: ast.IntOrExpr, stride: ast.IntOrExpr=1, _exact=True) -> OrdDomainExpr:

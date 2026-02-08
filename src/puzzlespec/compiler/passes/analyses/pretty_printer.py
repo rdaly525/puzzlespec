@@ -311,10 +311,20 @@ class PrettyPrinterPass(Analysis):
         _, child = self.visit_children(node)  # Skip type at index 0
         return f"(-{child})"
 
-    @handles(ir.Div)
-    def _(self, node: ir.Div) -> str:
+    @handles(ir.FloorDiv)
+    def _(self, node: ir.FloorDiv) -> str:
         _, left, right = self.visit_children(node)  # Skip type at index 0
         return f"({left} // {right})"
+
+    @handles(ir.TrueDiv)
+    def _(self, node: ir.TrueDiv) -> str:
+        _, left, right = self.visit_children(node)  # Skip type at index 0
+        return f"({left} / {right})"
+
+    @handles(ir.Isqrt)
+    def _(self, node: ir.Isqrt) -> str:
+        _, child = self.visit_children(node)  # Skip type at index 0
+        return f"√{child}"
 
     @handles(ir.Mod)
     def _(self, node: ir.Mod) -> str:

@@ -70,6 +70,7 @@ class RefineAdd(Transform):
     produces: tp.Tuple[type, ...] = ()
 
     def run(self, root: ir.Node, ctx: Context) -> ir.Node:
+        assert 0
         new_root = self.visit(root)
         return new_root
 
@@ -78,7 +79,7 @@ class RefineAdd(Transform):
         T, N = self.visit_children(node)
         return ast.wrap(node).refine(lambda _: ast.wrap(N) >=0).node
 
-    @handles(ir.Mod, ir.Div)
+    @handles(ir.Mod, ir.FloorDiv)
     def _(self, node: ir.Value):
         T, a, b = self.visit_children(node)
         return ast.wrap(node).refine(lambda _: ast.wrap(b)!=0).node

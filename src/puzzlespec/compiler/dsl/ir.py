@@ -65,6 +65,9 @@ class Node:
         #    if self != new_node:
         #        raise ValueError()
         #type_check(new_node)
+        #print("REPLACED")
+        #print("  OLD: ", self)
+        #print("  NEW: ", new_node)
         return new_node
 
     def __init_subclass__(cls, **kwargs):
@@ -417,7 +420,12 @@ class Neg(Value):
     def __init__(self, T: Type, a: Value):
         super().__init__(T, a)
 
-class Div(Value):
+class FloorDiv(Value):
+    _numc = 3
+    def __init__(self, T: Type, a: Value, b: Value):
+        super().__init__(T, a, b)
+
+class TrueDiv(Value):
     _numc = 3
     def __init__(self, T: Type, a: Value, b: Value):
         super().__init__(T, a, b)
@@ -426,6 +434,11 @@ class Mod(Value):
     _numc = 3
     def __init__(self, T: Type, a: Value, b: Value):
         super().__init__(T, a, b)
+
+class Isqrt(Value):
+    _numc = 2
+    def __init__(self, T: Type, a: Value):
+        super().__init__(T, a)
 
 class Conj(Value):
     _numc = -1
@@ -822,6 +835,17 @@ class VarHOAS(Value):
     def __repr__(self):
         return f"VarHOAS[{self.name}]"
 
+class ParamHOAS(Value):
+    _fields = ('name', 'metadata')
+    _numc = 1
+    def __init__(self, T: Type, name: str, metadata: tp.Dict[str, tp.Any]):
+        self.name = name
+        self.metadata = metadata
+        super().__init__(T)
+
+    def __repr__(self):
+        return f"ParamHOAS[{self.name}]"
+
 # Mapping from Nodes to a priority integer. Used for canonicalization among commutative operations
 # Commutative ops: Prod, Sum, Conj, Disj, Intersect, Union, DomLit, 
 NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
@@ -850,7 +874,8 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     # Any Type
     VarRef: 30,
     VarHOAS: 31,
-    Choose: 32,
+    ParamHOAS: 32,
+    Choose: 33,
     BoundVar: 40,
     BoundVarHOAS: 41,
     Guard: 42,
@@ -884,8 +909,10 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     Abs: 201,
     Sum: 210,
     Prod: 211,
-    Div: 220,
-    Mod: 221,
+    FloorDiv: 220,
+    TrueDiv: 221,
+    Mod: 222,
+    Isqrt: 223,
     Card: 230,
     SumReduce: 240,
     ProdReduce: 241,

@@ -6,7 +6,6 @@ from dataclasses import dataclass
 from .utils import _has_bv
 from ..passes.analyses.pretty_printer import pretty
 from ..passes.analyses.type_check import type_check
-from ..passes.transforms.beta_reduction import applyT
 import inspect
 
 @dataclass
@@ -193,6 +192,7 @@ class FuncType(TExpr):
         return wrapT(self._node.argT)
 
     def resT(self, arg: Expr):
+        from ..passes.transforms.beta_reduction import applyT
         return wrapT(applyT(self._node, arg.node))
 
     def _raw_resT(self):
@@ -456,19 +456,27 @@ class IntExpr(Expr):
 
     def __floordiv__(self, other: IntOrExpr) -> IntExpr:
         other = IntExpr.make(other)
-        node = ir.Div(ir.IntT(), self.node, other.node)
-        return IntExpr(node).guard(other!=0)
+        node = ir.FloorDiv(ir.IntT(), self.node, other.node)
+        #return IntExpr(node).guard(other!=0)
+        return IntExpr(node)
 
     def ceildiv(self, other: IntOrExpr):
         return -(-self//other)
 
+    #def __truediv__(self, other: IntOrExpr) -> IntExpr:
+    #    return Int.choose(lambda v: v*other==self)
+
     def __truediv__(self, other: IntOrExpr) -> IntExpr:
-        return Int.choose(lambda v: v*other==self)
+        other = IntExpr.make(other)
+        node = ir.TrueDiv(ir.IntT(), self.node, other.node)
+        #return IntExpr(node)
+        return IntExpr(node).guard(other!=0)
 
     def __mod__(self, other: IntOrExpr) -> IntExpr:
         other = IntExpr.make(other)
         node = ir.Mod(ir.IntT(), self.node, other.node)
-        return IntExpr(node).guard(other !=0)
+        #return IntExpr(node).guard(other !=0)
+        return IntExpr(node)
 
     def __gt__(self, other: IntOrExpr) -> BoolExpr:
         other = IntExpr.make(other)
@@ -758,15 +766,11 @@ class DomainExpr(Expr):
 
     def forall(self, pred_fun: tp.Callable) -> BoolExpr:
         func_expr = self.map(pred_fun)
-        #if not isinstance(func_expr.T.lamT.resT, BoolType):
-        #    raise ValueError(f"Forall predicate must return Bool, got {func_expr.T.lamT.resT}")
         node = ir.Forall(ir.BoolT(), func_expr.node)
         return BoolExpr(node)
 
     def exists(self, pred_fun: tp.Callable) -> BoolExpr:
         func_expr = self.map(pred_fun)
-        #if not isinstance(func_expr.T.lamT.resT, BoolType):
-        #    raise ValueError(f"Exists predicate must return Bool, got {func_expr.T.piT.resT}")
         node = ir.Exists(ir.BoolT(), func_expr.node)
         return BoolExpr(node)
 
@@ -842,7 +846,8 @@ class FuncExpr(Expr):
             func = self.node,
             arg = arg.node
         )
-        return wrap(node).guard(self.domain.contains(arg))
+        #return wrap(node).guard(self.domain.contains(arg))
+        return wrap(node)
 
     # Func[Dom(A) -> B] -> (B -> C) -> Func[Dom(A) -> C]
     def map(self, fn: tp.Callable) -> FuncExpr:

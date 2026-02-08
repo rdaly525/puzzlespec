@@ -327,8 +327,8 @@ class TypeCheckingPass(Analysis):
         self.Tmap[node] = T
         return T
 
-    @handles(ir.Div)
-    def _(self, node: ir.Div):
+    @handles(ir.FloorDiv)
+    def _(self, node: ir.FloorDiv):
         T, aT, bT = self.visit_children(node)
         # Verify type is IntT
         if not _is_kind(T, ir.IntT):
@@ -336,6 +336,30 @@ class TypeCheckingPass(Analysis):
         # Verify operands are Int
         if not (_is_kind(aT, ir.IntT) and _is_kind(bT, ir.IntT)):
             raise TypeError(f"Div expects Int operands, got {aT} and {bT}")
+        self.Tmap[node] = T
+        return T
+
+    @handles(ir.TrueDiv)
+    def _(self, node: ir.TrueDiv):
+        T, aT, bT = self.visit_children(node)
+        # Verify type is IntT
+        if not _is_kind(T, ir.IntT):
+            raise TypeError(f"Div must have IntT type, got {node.T}")
+        # Verify operands are Int
+        if not (_is_kind(aT, ir.IntT) and _is_kind(bT, ir.IntT)):
+            raise TypeError(f"Div expects Int operands, got {aT} and {bT}")
+        self.Tmap[node] = T
+        return T
+
+    @handles(ir.Isqrt)
+    def _(self, node: ir.Isqrt):
+        T, aT = self.visit_children(node)
+        # Verify type is IntT
+        if not _is_kind(T, ir.IntT):
+            raise TypeError(f"Isqrt must have IntT type, got {node.T}")
+        # Verify operands are Int
+        if not _is_kind(aT, ir.IntT):
+            raise TypeError(f"Isqrt expects Int operand, got {aT}")
         self.Tmap[node] = T
         return T
 

@@ -26,7 +26,7 @@ Digits = nd.range(1, N+1) # [1..N)
 # Alternate definition of box_size:  {i: Int | i >=0 & i*i==N}
 #refinement_dom = U(Int).restrict(lambda i: (i >= 0) & (i*i==N))
 #box_size = var(dom=refinement_dom, name='bs')
-box_size = std.isqrt(N, 'bs')
+box_size = std.isqrt(N)
 
 #########################
 # Functions are *total* #
@@ -52,10 +52,10 @@ p += nd.cols(cell_digits).forall(lambda col_vals: std.distinct(col_vals))
 ## Box constraint
 p += nd.tiles(
     cell_digits,
-    #size=(box_size, box_size),
-    #stride=(box_size, box_size)
-    size=(3, 3),
-    stride=(3, 3),
+    size=(box_size, box_size),
+    stride=(box_size, box_size)
+    #size=(3, 3)
+    #stride=(3, 3),
 ).forall(lambda box_vals: std.distinct(box_vals))
 
 #####################

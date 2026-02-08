@@ -6,8 +6,10 @@ import typing as tp
 Nat = ast.Int.refine(lambda i: i>0)
 Nat0 = ast.Int.refine(lambda i: i>=0)
 
-def isqrt(v: ast.IntExpr, _name=None) -> ast.IntExpr:
-    return Nat0.choose(lambda i: i*i==v)
+def isqrt(v: ast.IntExpr) -> ast.IntExpr:
+    #return ast.wrap(ir.Isqrt(ir.IntT(), v.node)).guard(v >=0)
+    return ast.wrap(ir.Isqrt(ir.IntT(), v.node))
+    #return Nat0.choose(lambda i: i*i==v)
 
 def U(carT: ast.TExpr):
     return carT.U
@@ -17,7 +19,7 @@ def sum(func: ast.FuncExpr | tp.Iterable) -> ast.IntExpr:
         if not isinstance(func.T._raw_resT(), ir.IntT):
             raise ValueError(f"Expected FuncExpr[IntExpr], got {func}")
         return ast.IntExpr(ir.SumReduce(ir.IntT(), func.node))
-    assert isinstance(tp.Iterable)
+    assert isinstance(func, tp.Iterable)
     vals = [ast.IntExpr.make(v).node for v in func]
     return ast.IntExpr(ir.Sum(ir.IntT(), *vals))
 
@@ -26,7 +28,7 @@ def prod(func: ast.FuncExpr | tp.Iterable) -> ast.IntExpr:
         if not isinstance(func.T._raw_resT(), ir.IntT):
             raise ValueError(f"Expected FuncExpr[IntExpr], got {func}")
         return ast.IntExpr(ir.ProdReduce(ir.IntT(), func.node))
-    assert isinstance(tp.Iterable)
+    assert isinstance(func, tp.Iterable)
     vals = [ast.IntExpr.make(v).node for v in func]
     return ast.IntExpr(ir.Prod(ir.IntT(), *vals))
 
