@@ -22,10 +22,6 @@ class PuzzleSpecBuilder:
         self._rules = []
         self.dom_cons = []
 
-    def _new_var_name(self):
-        self._var_name_cnt += 1
-        return f"_X{self._var_name_cnt}"
-
     def _add_rules(self, *new_rules: ast.Expr):
         self._rules += [r.node for r in new_rules]
 

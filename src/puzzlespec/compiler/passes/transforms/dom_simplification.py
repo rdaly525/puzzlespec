@@ -4,6 +4,7 @@ import math
 
 from ..pass_base import Transform, Context, handles
 from ...dsl import ir, ast
+from ....libs import std
 import typing as tp
 
 
@@ -185,7 +186,22 @@ class DomainSimplificationPass(Transform):
     @handles(ir.IsMember)
     def _(self, node: ir.IsMember):
         T, dom, val = self.visit_children(node)
-        if isinstance(val.T, ir.RefT):
-            _, refdom = val.T._children
-            return (ast.wrap(refdom) <= ast.wrap(dom)).node
+        if isinstance(dom, ir.Restrict):
+            T, func = dom._children
+            f = ast.wrap(func)
+            v = ast.wrap(val)
+            return (f.domain.contains(v) & f(v)).node
+        #if isinstance(dom, ir.CartProd):
+        #    d = ast.wrap(dom)
+        #    v = ast.wrap(val)
+        #    return std.all((d.dom_proj(i).contains(v[i]) for i, vi in enumerate(v))).node
         return node.replace(T, dom, val)
+
+    # NOT SOUND. Only shoud discharge if subset is proven
+    #@handles(ir.IsMember)
+    #def _(self, node: ir.IsMember):
+    #    T, dom, val = self.visit_children(node)
+    #    if isinstance(val.T, ir.RefT):
+    #        _, refdom = val.T._children
+    #        return (ast.wrap(refdom) <= ast.wrap(dom)).node
+    #    return node.replace(T, dom, val)

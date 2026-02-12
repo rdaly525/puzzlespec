@@ -47,6 +47,15 @@ class TExpr:
             return self.ref_dom
         return wrap(ir.Universe(ir.DomT(self.node, False)))
 
+    @property
+    def DomT(self) -> DomainType:
+        return wrapT(ir.DomT(self.T.node, ord=False))
+
+    # Create a PiType
+    def to(self, T: TExpr):
+        piT = ir.PiTHOAS(self.node, T.node, bv_name="_")
+        return wrapT(piT)
+
     def refine(self, dom: DomainExpr| tp.Callable) -> TExpr:
         if not isinstance(dom, DomainExpr):
             assert isinstance(dom, tp.Callable)
@@ -846,8 +855,8 @@ class FuncExpr(Expr):
             func = self.node,
             arg = arg.node
         )
-        #return wrap(node).guard(self.domain.contains(arg))
-        return wrap(node)
+        return wrap(node).guard(self.domain.contains(arg))
+        #return wrap(node)
 
     # Func[Dom(A) -> B] -> (B -> C) -> Func[Dom(A) -> C]
     def map(self, fn: tp.Callable) -> FuncExpr:

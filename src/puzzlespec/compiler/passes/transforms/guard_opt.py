@@ -205,7 +205,6 @@ class GuardOpt(Transform):
 
     @handles(ir.Guard)
     def _(self, node: ir.Guard):
-        print(node)
         node, ps = self._simp_child_guards(node)
         T, new_val, pre = node._children
         if len(ps) ==0:

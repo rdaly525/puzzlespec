@@ -1,5 +1,4 @@
 from .compiler.dsl import ir as _ir, ast as _ast
-
 # Base Types
 from .compiler.dsl.ast import UnitType, BoolType, IntType
 Unit = UnitType(_ir.UnitT())
@@ -20,8 +19,8 @@ from .libs.std import sum, distinct, all_same, count, U, make_enum, enumT
 _constructors = ['sum', 'distinct', 'all_same', 'count', 'U', 'make_enum', 'enumT']
 
 # vars
-from .libs.var_def import var, func_var
-_vars = ['var', 'func_var']
+from .libs.var_def import var, func_var, param, func_param
+_vars = ['var', 'func_var', 'param', 'func_param']
 
 # helper classes
 from .compiler.dsl.spec_builder import PuzzleSpecBuilder

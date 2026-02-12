@@ -116,10 +116,12 @@ class Node:
         return self._children < other._children
 
 
-# Background info: Containers are represented a 'Func[Dom(A) -> B]'
-# So a 'List[B]' would be Func(Fin(n) -> B).
-# And a Set[B] would be Func(Dom(B) -> Bool)
-# A Func[Dom(A) -> B] is typed as Arrow[carrier(A) -> B]
+class MetaVar(Node):
+    _params = ('id',)
+    _numc = 0
+    def __init__(self, id: int):
+        self.id = id
+        super().__init__()
 
 ##############################
 ## Core-level IR Type nodes 
@@ -824,27 +826,21 @@ class LambdaHOAS(_Lambda):
         self.bv_name = bv_name
         super().__init__(T, body)
 
+    @property
+    def body(self):
+        return self._children[1]
+
 class VarHOAS(Value):
-    _fields = ('name', 'metadata')
+    _fields = ('name', 'kind', 'metadata')
     _numc = 1
-    def __init__(self, T: Type, name: str, metadata: tp.Dict[str, tp.Any]):
+    def __init__(self, T: Type, name: str, kind: str, metadata: tp.Dict[str, tp.Any]):
         self.name = name
+        self.kind = kind
         self.metadata = metadata
         super().__init__(T)
 
     def __repr__(self):
         return f"VarHOAS[{self.name}]"
-
-class ParamHOAS(Value):
-    _fields = ('name', 'metadata')
-    _numc = 1
-    def __init__(self, T: Type, name: str, metadata: tp.Dict[str, tp.Any]):
-        self.name = name
-        self.metadata = metadata
-        super().__init__(T)
-
-    def __repr__(self):
-        return f"ParamHOAS[{self.name}]"
 
 # Mapping from Nodes to a priority integer. Used for canonicalization among commutative operations
 # Commutative ops: Prod, Sum, Conj, Disj, Intersect, Union, DomLit, 
@@ -874,7 +870,6 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     # Any Type
     VarRef: 30,
     VarHOAS: 31,
-    ParamHOAS: 32,
     Choose: 33,
     BoundVar: 40,
     BoundVarHOAS: 41,
