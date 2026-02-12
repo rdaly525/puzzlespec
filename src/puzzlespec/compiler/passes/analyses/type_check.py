@@ -773,34 +773,19 @@ class TypeCheckingPass(Analysis):
         self.Tmap[node] = T
         return T
 
-    @handles(ir.Forall)
-    def _(self, node: ir.Forall):
+    @handles(ir.Forall, ir.Exists)
+    def _(self, node: ir.Node):
         T, piT = self.visit_children(node)
         # Verify type is BoolT
         if not _is_kind(T, ir.BoolT):
             raise TypeError(f"Forall must have BoolT type, got {T}")
-        # Verify function argument is a ArrowT
+        # Verify function argument is a PiT 
         if not _is_kind(piT, ir._PiT):
             raise TypeError(f"Forall expects PiT argument, got {piT}")
         # Verify function returns Bool
         if not _is_kind(piT.resT, ir.BoolT):
             raise TypeError(f"Forall expects PiT with Bool result type, got {piT.resT}")
         # Verify function argument type matches domain carrier type
-        self.Tmap[node] = T
-        return T
-
-    @handles(ir.Exists)
-    def _(self, node: ir.Exists):
-        T, arrowT = self.visit_children(node)
-        # Verify type is BoolT
-        if not _is_kind(T, ir.BoolT):
-            raise TypeError(f"Exists must have BoolT type, got {T}")
-        # Verify function argument is a ArrowT
-        if not _is_kind(arrowT, ir.ArrowT):
-            raise TypeError(f"Exists expects ArrowT argument, got {arrowT}")
-        # Verify function returns Bool
-        if not _is_kind(arrowT.resT, ir.BoolT):
-            raise TypeError(f"Exists expects ArrowT with Bool result type, got {arrowT.resT}")
         self.Tmap[node] = T
         return T
 

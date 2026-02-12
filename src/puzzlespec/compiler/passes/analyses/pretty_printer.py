@@ -215,6 +215,10 @@ class PrettyPrinterPass(Analysis):
     ## Core-level IR Value nodes (Used throughout entire compiler flow)
     ##############################
 
+    @handles(ir.MetaVar)
+    def _(self, node: ir.MetaVar) -> str:
+        return f"M{node.id}"
+
     @handles(ir.VarRef)
     def _(self, node: ir.VarRef) -> str:
         if hasattr(self, 'sym'):
@@ -585,18 +589,9 @@ class PrettyPrinterPass(Analysis):
     def _(self, node: ir.Exists) -> str:
         T, func_node = node._children
         # Extract domain and lambda from func (typically a Map node)
-        if isinstance(func_node, ir.Map):
-            funcT, dom, lam = func_node._children
-            domain_expr = self.visit(dom)
-            (_, var_name, body_expr) = self._lambda(lam)
-            # Multi-line format: context on first line, body indented on next line
-            # If body_expr is multi-line (e.g., nested Forall/Exists), indent all lines
-            body_formatted = self._indent_expr(body_expr)
-            return f"∃ {var_name} ∈ {domain_expr}:\n{body_formatted}"
-        else:
-            # Fallback for other func types (FuncLit, VarRef, etc.)
-            func_expr = self.visit(func_node)
-            return f"∃ {func_expr}"
+        argT, var_name, body_expr = self._lambda(func_node)
+        body_expr = self._indent_expr(body_expr)
+        return f"∃ {var_name} ∈ {argT}:\n{body_expr}"
 
     ### Funcs (i.e., containers)
     #@handles(ir.Map)

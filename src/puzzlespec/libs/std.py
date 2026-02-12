@@ -94,3 +94,44 @@ def make_enum(*labels: str, name: str=None) -> tp.Tuple[ast.DomainExpr, _EnumAtt
     dom = ast.DomainExpr(dom_node)
     return dom, enum_attrs
 
+
+def _quantify(
+    kind: tp.Literal["e", "a"],
+    doms: tp.Iterable[ast.TExpr | ast.DomainExpr | tp.Callable],
+    body: tp.Callable
+):
+    assert kind in "ea"
+    if len(doms)==0:
+        raise ValueError("Must provide at least one domain for quantifiers")
+    
+    def _make(doms, bvs: tp.Tuple[ast.Expr, ...]=None):
+        if len(doms)==0:
+            return body(*bvs)
+        if bvs is None:
+            bvs = ()
+        if isinstance(doms[0], (ast.TExpr, ast.DomainExpr)):
+            dom = doms[0]
+        else:
+            assert isinstance(doms[0], tp.Callable)
+            if len(bvs)==1:
+                bv_tup = bvs[0]
+            else:
+                bv_tup = ast.TupleExpr.make(tuple(bvs))
+            dom = ast._call_fn(doms[0], bv_tup)
+        if isinstance(dom, ast.TExpr):
+            dom = dom.U
+        quantify = dom.forall if kind=='a' else dom.exists
+        return quantify(lambda b: _make(doms[1:], (*bvs, b)))
+    return _make(doms, ())
+
+def forall(
+    doms: tp.Iterable[ast.TExpr | ast.DomainExpr | tp.Callable],
+    body: tp.Callable
+):
+    return _quantify('a', doms, body)
+
+def exists(
+    doms: tp.Iterable[ast.TExpr | ast.DomainExpr | tp.Callable],
+    body: tp.Callable
+):
+    return _quantify('e', doms, body)

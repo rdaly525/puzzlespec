@@ -49,7 +49,8 @@ class TExpr:
 
     @property
     def DomT(self) -> DomainType:
-        return wrapT(ir.DomT(self.T.node, ord=False))
+        ord = isinstance(self, (BoolType, IntType))
+        return wrapT(ir.DomT(self.node, ord=ord))
 
     # Create a PiType
     def to(self, T: TExpr):
