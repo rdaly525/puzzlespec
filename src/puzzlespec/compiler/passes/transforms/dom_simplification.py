@@ -3,7 +3,7 @@ from hmac import new
 import math
 
 from ..pass_base import Transform, Context, handles
-from ...dsl import ir, ast
+from ...dsl import ir, ast, ast_nd
 from ....libs import std
 import typing as tp
 
@@ -29,9 +29,8 @@ class DomainSimplificationPass(Transform):
         if len(doms)==0:
             domT = ir.DomT(ir.TupleT())
             return ir.Singleton(domT, ir.TupleLit(ir.TupleT()))
-        if all(ast.wrap(dom).T.is_singleton for dom in doms):
-            assert T.is_singleton
-            elems = [ir.Unique(dom.T.carT, dom) for dom in doms]
+        if all(isinstance(dom, ir.Singleton) for dom in doms):
+            elems = [ir.Unique(ast.wrapT(dom.T).carT.node, dom) for dom in doms]
             return ir.Singleton(T, ir.TupleLit(T.carT, *elems))
         return node.replace(T, *doms)
 
@@ -52,6 +51,14 @@ class DomainSimplificationPass(Transform):
             new_dom = cart_doms[node.idx]
             assert ast.wrapT(T)==ast.wrapT(new_dom.T)
             return new_dom
+        #elif isinstance(dom, ir.Image):
+        #    T_img, lam = dom._children
+        #    T_img_ast = ast.wrapT(T_img)
+        #    if isinstance(T_img_ast, ast_nd.NDDomainExpr):
+        #        shape = T_img_ast.shape
+        #        
+        #        lam_ast = ast.wrap(lam)
+            
         return node.replace(T, dom)
 
     @handles(ir.Card)
@@ -85,7 +92,7 @@ class DomainSimplificationPass(Transform):
         if isinstance(dom, ir.Image):
             _, func = dom._children
             func_ast = ast.wrap(func)
-            if func_ast.T.inj_known:
+            if func_ast.known_inj:
                 return func_ast.domain.size.node
         return node.replace(T, dom)
 
@@ -191,6 +198,8 @@ class DomainSimplificationPass(Transform):
             f = ast.wrap(func)
             v = ast.wrap(val)
             return (f.domain.contains(v) & f(v)).node
+        if isinstance(dom, ir.Fin):
+            return (ast.wrap(val) < ast.wrap(dom).size).node
         #if isinstance(dom, ir.CartProd):
         #    d = ast.wrap(dom)
         #    v = ast.wrap(val)

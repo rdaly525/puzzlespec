@@ -148,14 +148,14 @@ class PrettyPrinterPass(Analysis):
         carT_str, = self.visit_children(node)
         return f"Dom[{carT_str}]"
     
-    @handles(ir.NDDomT)
-    def _(self, node: ir.NDDomT) -> str:
-        #factors = self.visit_children(node)
-        factors = node._children
-        shape_Ts = [factors[a].carT for a in node.axes]
-        shape_s = self.visit(ir.TupleT(*shape_Ts))
-        base_s = self.visit(ir.TupleT(*(f.carT for f in factors)))
-        return f"NDDom[{shape_s} -> {base_s}]"
+    #@handles(ir.NDDomT)
+    #def _(self, node: ir.NDDomT) -> str:
+    #    #factors = self.visit_children(node)
+    #    factors = node._children
+    #    shape_Ts = [factors[a].carT for a in node.axes]
+    #    shape_s = self.visit(ir.TupleT(*shape_Ts))
+    #    base_s = self.visit(ir.TupleT(*(f.carT for f in factors)))
+    #    return f"NDDom[{shape_s} -> {base_s}]"
         
     @handles(ir.GuardT)
     def _(self, node: ir.GuardT) -> str:
@@ -701,6 +701,21 @@ class PrettyPrinterPass(Analysis):
     def _(self, node: ir.Enumerate) -> str:
         _, dom_expr = self.visit_children(node)
         return f"enum({dom_expr})"
+
+    # Domain Capabilities
+    @handles(ir.EnumerableDomain)
+    def _(self, node: ir.EnumerableDomain) -> str:
+        return f"{{E}}"
+
+    @handles(ir.SqueezableDomain)
+    def _(self, node: ir.SqueezableDomain) -> str:
+        return f"{{S}}"
+
+    @handles(ir.NDDomain)
+    def _(self, node: ir.NDDomain) -> str:
+        carT = self.visit(node.T.carT)
+        return f"{carT}/ND"
+
 
     ##############################
     ## Constructor-level IR nodes (Used for construction but immediately gets transformed for spec)

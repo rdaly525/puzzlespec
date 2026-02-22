@@ -2,7 +2,7 @@ from __future__ import annotations
 import typing as tp
 range_ = range
 from ..compiler.dsl import ir, ast, ast_nd as nd
-from ..compiler.dsl.ast_nd import fin
+from .std import fin
 
 #def affine(dom: nd.OrdDomainExpr, a: ast.IntExpr, b: ast.IntExpr) -> nd.OrdDomainExpr:
 #    if not isinstance(dom, nd.OrdDomainExpr):
@@ -25,7 +25,9 @@ def range(*args: ast.IntOrExpr) -> nd.NDDomainExpr:
     if len(args) == 3:
         lo, hi, step = args
     lo, hi, step = tuple(ast.IntExpr.make(v) for v in (lo, hi, step))
-    node = ir.Range(ir.DomT(ir.IntT(), True), lo.node, hi.node, step.node)
+    T = ast.Int.DomT
+    cap = ast.wrap(ir.EnumerableDomain(T.DomT.node))
+    node = ir.Range(T.refine(cap).node, lo.node, hi.node, step.node)
     return ast.wrap(node)
 
 ArrOrDom = tp.Union[nd.NDDomainExpr, nd.NDArrayExpr]
@@ -52,12 +54,15 @@ def tiles(ndom: ArrOrDom, size: tp.Tuple[ast.IntOrExpr, ...], stride: tp.Tuple[a
     for size, stride, dom in zip(sizes, strides, ndom.shape_doms):
         odom = fin((dom.size-(size-stride))/stride)
         odoms.append(odom)
-    odom = nd.nd_cartprod(*odoms)
+    odom = ast.cartprod(*odoms)
+    odom.type_check()
     def lam(oidx: ast.TupleExpr, ndom=ndom):
         slices = []
         for oi, size, stride in zip(oidx, sizes, strides):
             slices.append(slice(oi*stride, oi*stride+size))
-        return ndom[*slices]
+        tile = ndom[*slices]
+        tile.type_check()
+        return tile
     return odom.map(lam, inj=True).image
 
 def slices(dom: ArrOrDom, i: int) -> nd.NDDomainExpr | nd.NDArrayExpr:

@@ -8,6 +8,7 @@ from .transforms import ConstFoldPass, AlgebraicSimplificationPass
 from .transforms.resolve_vars import ResolveBoundVars
 from .transforms.ord import OrdSimplificationPass
 from .transforms.guard_opt import GuardOpt
+import enum
 
 def simplify(node: ir.Node, hoas: bool=False, verbose: int = 0) -> ir.Node:
     opt_passes = [

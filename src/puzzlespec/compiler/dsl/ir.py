@@ -18,18 +18,13 @@ class Node:
             raise TypeError(f"Expected {self._numc} children, got {len(children)}")
         self._children: tp.Tuple[Node, ...] = children
         self._hash = calc_hash(self._opcode, tuple(self.field_dict.values()), tuple(c._hash for c in self._children))
+        
+        # True attributes about the particular node that may be calculated (or guarded)
+        self._attrs = {}
 
     @property
     def num_children(self):
         return len(self._children)
-
-    #def _gen_key(self):
-    #    child_keys = tuple(c._key for c in self._children)
-    #    assert None not in child_keys
-    #    fields = tuple(getattr(self, field, None) for field in self._fields)
-    #    priority = NODE_PRIORITY[(type(self))]
-    #    key = (priority, self.__class__.__name__, fields, child_keys)
-    #    return key
 
     def __iter__(self):
         return iter(self._children)
@@ -56,18 +51,9 @@ class Node:
         new_fields = {**self.field_dict, **kwargs}
         if (new_fields == self.field_dict) and (new_children == self._children):
             return self
-        #from ..passes.analyses.type_check import type_check, stripT
-        #if isinstance(self, Value):
-        #    if stripT(self.T) != stripT(new_children[0]):
-        #        raise ValueError()
         new_node = type(self)(*new_children, **new_fields)
-        #if isinstance(self, DomT):
-        #    if self != new_node:
-        #        raise ValueError()
-        #type_check(new_node)
-        #print("REPLACED")
-        #print("  OLD: ", self)
-        #print("  NEW: ", new_node)
+        for an, val in self._attrs.items():
+            new_node._attrs[an] = val
         return new_node
 
     def __init_subclass__(cls, **kwargs):
@@ -114,7 +100,6 @@ class Node:
         if self.field_vals != other.field_vals:
             return self.field_vals < other.field_vals
         return self._children < other._children
-
 
 class MetaVar(Node):
     _params = ('id',)
@@ -213,51 +198,14 @@ class SumT(Type):
     def __len__(self):
         return len(self._children)
 
-    #def __repr__(self):
-    #    return "⊎".join(str(child) for child in self._children)
-
-class _DomT(Type):
-    ord = False
-    is_singleton=False
-
-    @property
-    def carT(self) -> Type:
-        raise NotImplementedError()
-
-class DomT(_DomT):
-    _fields = ('ord', 'is_singleton')
+class DomT(Type):
     _numc = 1
-    def __init__(self, carT: Type, ord: bool, is_singleton: bool=False):
-        self.ord = ord
-        self.is_singleton = is_singleton
+    def __init__(self, carT: Type):
         super().__init__(carT)
 
     @property
     def carT(self) -> Type:
         return self._children[0]
-
-    #def __repr__(self):
-    #    return f"DomT[{self.carT}]"
-
-class NDDomT(_DomT):
-    _fields=('axes',)
-    _numc=-1
-    def __init__(self, *factors: Type, axes: tp.Tuple[int]):
-        assert all(isinstance(f, DomT) for f in factors)
-        self.axes = axes
-        super().__init__(*factors)
-    
-    @property
-    def carT(self) -> Type:
-        return TupleT(*(f.carT for f in self._children))
-    
-    @property
-    def factors(self) -> tp.Tuple[_DomT]:
-        return self._children
-
-    @property
-    def ord(self) -> bool:
-        return all(f.ord for f in self.factors)
 
 class _PiT(Type):
     @property
@@ -332,8 +280,6 @@ class Value(Node):
     def __init__(self, T: Type, *children: Node):
         if not isinstance(T, Type):
             raise ValueError(f"{T} must be a Type")
-        if any(isinstance(c, Type) for c in children):
-            raise ValueError(f"{children} must not have Type children, got {children}")
         super().__init__(T, *children)
     
     @property
@@ -580,7 +526,7 @@ class DisjUnion(Value):
         super().__init__(T, *doms)
 
 class DomInj(Value):
-    _fields = ('idx')
+    _fields = ('idx',)
     _numc = 2
     def __init__(self, T: Type, dom: Value, idx: int):
         assert isinstance(idx, int)
@@ -780,6 +726,32 @@ class Enumerate(Value):
     def __init__(self, T: Type, dom: Value):
         super().__init__(T, dom)
 
+##############################
+## Capability IR nodes (Used in RefT's)
+##############################
+
+# These are 'domains of domains'
+# Semantically interpreted as 'the set of domains that adhere to the capability'
+class DomainCapability(Value): pass
+class EnumerableDomain(DomainCapability):
+    _numc=1
+    def __init__(self, T: Type):
+        super().__init__(T)
+
+class SqueezableDomain(DomainCapability):
+    _numc=1
+    def __init__(self, T: Type):
+        super().__init__(T)
+
+class NDDomain(DomainCapability):
+    _numc = -1
+    def __init__(self, T: Type, *factors: Value):
+        super().__init__(T, *factors)
+
+    @property
+    def factors(self) -> tp.Tuple[Type]:
+        return tuple(self._children[1:])
+
 
 ##############################
 ## Constructor-level IR nodes (Used for construction but immediatley gets transformed for spec)
@@ -803,11 +775,10 @@ class BoundVarHOAS(Value):
         return self._children[0]
 
 class PiTHOAS(_PiT):
-    _fields = ('bv_name', 'inj',)
+    _fields = ('bv_name',)
     _numc = 2
-    def __init__(self, argT: Value, resT: Type, bv_name: str, inj=False):
+    def __init__(self, argT: Value, resT: Type, bv_name: str):
         self.bv_name = bv_name
-        self.inj = inj
         super().__init__(argT, resT)
 
     @property
@@ -819,7 +790,7 @@ class PiTHOAS(_PiT):
         return self._children[1]
 
 class LambdaHOAS(_Lambda):
-    _fields = ('bv_name',) #True -> Known to be injective
+    _fields = ('bv_name',)
     _numc = 2
     def __init__(self, T: Type, body: Value, bv_name: str):
         assert isinstance(T, PiTHOAS)
@@ -853,7 +824,6 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     TupleT: 0,
     SumT: 0,
     DomT: 0,
-    NDDomT: 0,
     PiTHOAS: 0,
     PiT: 0,
     ApplyT: 0,
@@ -916,6 +886,9 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     Empty: 300,
     Universe: 301,
     Singleton: 302,
+    EnumerableDomain: 303,
+    SqueezableDomain: 304,
+    NDDomain: 305,
     Fin: 310,
     Range: 311,
     DomLit: 320,

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from .utils import _has_bv
 from ..passes.analyses.pretty_printer import pretty
 from ..passes.analyses.type_check import type_check
+from ..utils import BoolLat
 import inspect
 
 @dataclass
@@ -45,12 +46,12 @@ class TExpr:
     def U(self) -> DomainExpr:
         if self.is_ref:
             return self.ref_dom
-        return wrap(ir.Universe(ir.DomT(self.node, False)))
+        return wrap(ir.Universe(ir.DomT(self.node)))
 
     @property
     def DomT(self) -> DomainType:
         ord = isinstance(self, (BoolType, IntType))
-        return wrapT(ir.DomT(self.node, ord=ord))
+        return wrapT(ir.DomT(self.node))
 
     # Create a PiType
     def to(self, T: TExpr):
@@ -167,25 +168,45 @@ class SumType(TExpr):
     def __getitem__(self, i: int):
         return self.elemT(i)
 
-
-
 class DomainType(TExpr):
     def __post_init__(self):
         super().__post_init__()
-        if not isinstance(self._node, ir._DomT):
+        if not isinstance(self._node, ir.DomT):
             raise ValueError(f"Expected DomainType, got {self.node}")
-
-    @property
-    def is_ord(self) -> bool:
-        return self._node.ord
-
-    @property
-    def is_singleton(self) -> bool:
-        return self._node.is_singleton
 
     @property
     def carT(self) -> TExpr:
         return wrapT(self._node.carT)
+
+    @property
+    def _caps(self) -> tp.Set[ir.DomainCapability]:
+        if self.ref_dom is None:
+            return set()
+        if isinstance(self.ref_dom.node, ir.DomainCapability):
+            return set((self.ref_dom.node,))
+        if isinstance(self.ref_dom.node, ir.Intersection):
+            caps = set()
+            for dom in self.ref_dom.node._children[1:]:
+                if isinstance(dom, ir.DomainCapability):
+                    caps.add(dom)
+            return caps
+        else:
+            raise set()
+
+    @property
+    def _is_squeezable(self):
+        caps = self._caps
+        return any(isinstance(dom, ir.SqueezableDomain) for dom in caps)
+
+    @property
+    def _is_enumerable(self):
+        caps = self._caps
+        return any(isinstance(dom, ir.EnumerableDomain) for dom in caps)
+
+    @property
+    def _is_nd(self):
+        caps = self._caps
+        return any(isinstance(dom, ir.NDDomain) for dom in caps)
 
 class FuncType(TExpr):
     def __post_init__(self):
@@ -194,10 +215,6 @@ class FuncType(TExpr):
             raise ValueError(f"Expected PiT, got {self.node}")
     
     @property
-    def inj_known(self):
-        return self._node.inj
-
-    @property
     def argT(self) -> TExpr:
         return wrapT(self._node.argT)
 
@@ -205,12 +222,13 @@ class FuncType(TExpr):
         from ..passes.transforms.beta_reduction import applyT
         return wrapT(applyT(self._node, arg.node))
 
+    @property
     def _raw_resT(self):
         return wrapT(self._rawT.resT)
 
-    @property
-    def inj_known(self):
-        return self.node.inj
+    #@property
+    #def inj_known(self):
+    #    return self.node.inj
 
     @property
     def domain(self) -> DomainExpr:
@@ -220,7 +238,6 @@ class FuncType(TExpr):
             return self.argT.U
 
 def wrapT(T: ir.Type):
-    from . import ast_nd as nd
     assert isinstance(T, ir.Type)
     def get(T: ir.Type):
         if isinstance(T, ir.RefT):
@@ -241,12 +258,11 @@ def wrapT(T: ir.Type):
         case ir.SumT:
             return SumType(T)
         case ir.DomT:
-            if _T.ord:
-                return nd.OrdDomainType(T)
-            else:
-                return DomainType(T)
-        case ir.NDDomT:
-            return nd.NDDomainType(T)
+            domT = DomainType(T)
+            if domT._is_nd:
+                from .ast_nd import NDDomainType
+                return NDDomainType(T)
+            return domT
         case ir.PiTHOAS:
             return FuncType(T)
         case _:
@@ -315,13 +331,15 @@ class Expr:
     def guard(self, p: BoolExpr):
         p = BoolExpr.make(p)
         node = ir.Guard(self.T.node, self.node, p.node)
-        return type(self)(node)
+        return wrap(node)
 
     @property
     def singleton(self):
-        domT = ir.DomT(self.T._node, ord=True, is_singleton=True)
-        node = ir.Singleton(domT, self.node)
-        return DomainExpr(node)
+        T = self.T.DomT
+        cap_s = wrap(ir.SqueezableDomain(T.DomT.node))
+        cap_e = wrap(ir.EnumerableDomain(T.DomT.node))
+        node = ir.Singleton(T.refine(cap_s & cap_e).node, self.node)
+        return wrap(node)
 
     def simplify(self, verbose=0) -> tp.Self:
         from ..passes.utils import simplify
@@ -435,7 +453,10 @@ class IntExpr(Expr):
         raise ValueError(f"Expected Int expression. Got {val}")
 
     def fin(self):
-        return DomainExpr(ir.Fin(ir.DomT(ir.IntT()), self.node))
+        T = Int.DomT
+        cap = wrap(ir.EnumerableDomain(T.DomT.node))
+        node = ir.Fin(T.refine(cap).node, self.node)
+        return wrap(node)
 
     def __add__(self, other: IntOrExpr) -> IntExpr:
         other = IntExpr.make(other)
@@ -622,14 +643,13 @@ class SumExpr(Expr):
 def cartprod(*doms: DomainExpr) -> DomainExpr:
     if not all(isinstance(dom, DomainExpr) for dom in doms):
         raise ValueError(f"Expected all DomainExpr, got {doms}")
-    is_singleton = all(dom.T.is_singleton for dom in doms)
-    if all(dom.T.is_ord for dom in doms) and not is_singleton:
+    squeezable = all(dom.T._is_squeezable for dom in doms)
+    if not squeezable and all(dom.T._is_enumerable for dom in doms):
         from . import ast_nd
         return ast_nd.nd_cartprod(*doms)
     carT = ir.TupleT(*[dom.T.carT._node for dom in doms])
     dom_nodes = tuple(dom.node for dom in doms)
-    ord = all(dom.T._node.ord for dom in doms)
-    T = ir.DomT(carT, ord, is_singleton)
+    T = ir.DomT(carT)
     cartprod_node = ir.CartProd(T, *dom_nodes)
     return wrap(cartprod_node)
 
@@ -637,8 +657,7 @@ def coproduct(*doms: DomainExpr) -> DomainExpr:
     if not all(isinstance(other, DomainExpr) for other in doms):
         raise ValueError(f"Expected list of DomainExpr, got {doms}")
     carT = ir.SumT(*[dom.T.carT._node for dom in doms])
-    ord = all(dom.T.is_ord for dom in doms)
-    T = ir.DomT(carT, ord)
+    T = ir.DomT(carT)
     coprod_node = ir.DisjUnion(T, *[dom.node for dom in doms])
     return wrap(coprod_node)
 
@@ -672,16 +691,13 @@ class DomainExpr(Expr):
 
     @property
     def unique_elem(self) -> bool:
-        if not self.T.is_singleton:
-            raise ValueError()
+        # TODO add Guard that size == 1
         return wrap(ir.Unique(self.T.carT._node, self.node))
 
     def restrict(self, pred_fun: tp.Callable) -> DomainExpr:
         func_expr = self.map(pred_fun)
-        if func_expr.T.argT != self.T.carT:
-            raise ValueError(f"Cannot restrict {self.T} with {func_expr.T.argT}")
-        if func_expr.T._raw_resT() != Bool:
-            raise ValueError(f"Cannot restrict {self.T} with {func_expr.T.resT}")
+        if func_expr.T.argT != self.T.carT or func_expr.T._raw_resT != Bool:
+            raise ValueError(f"Cannot restrict {self.T} with func typed: {func_expr.T}")
         node = ir.Restrict(self.T._node, func_expr.node)
         d = wrap(node)
         return d
@@ -750,6 +766,8 @@ class DomainExpr(Expr):
         #return dom.guard(dom <= self)
 
     def __getitem__(self, dom: DomainExpr) -> DomainExpr:
+        if not isinstance(dom, DomainExpr):
+            raise ValueError(f"Expected domain, got {dom}")
         if dom.T != self.T:
             raise ValueError()
         if not isinstance(dom, DomainExpr):
@@ -759,7 +777,7 @@ class DomainExpr(Expr):
     def _bound_var(self):
         bv = self.T.carT._bound_var()
         return bv.refine(self)
-        return bv
+        #return bv
 
     def __iter__(self):
         yield self._bound_var()
@@ -808,8 +826,10 @@ def _call_fn(fn: tp.Callable, expr: Expr) -> Expr:
 def _make_lambda(argT: TExpr, body: Expr, bv_name, inj=False) -> FuncExpr:
     assert isinstance(argT, TExpr)
     retT = body.T.node
-    lamT = ir.PiTHOAS(argT.node, retT, bv_name=bv_name, inj=inj)
-    lambda_node = ir.LambdaHOAS(lamT, body.node, bv_name=bv_name)    
+    lamT = ir.PiTHOAS(argT.node, retT, bv_name=bv_name)
+    lambda_node = ir.LambdaHOAS(lamT, body.node, bv_name=bv_name)
+    if inj:
+        lambda_node._attrs['inj'] = BoolLat.T
     return lambda_node
 
 class FuncExpr(Expr):
@@ -829,6 +849,7 @@ class FuncExpr(Expr):
         assert not bv.node.closed
         body_expr = _call_fn(fn, bv)
         bv.node.closed=True
+        #TODO if inj, add a guard with injective proof
         return wrap(_make_lambda(argT, body_expr, bv.node.name, inj))
 
     @property
@@ -840,11 +861,18 @@ class FuncExpr(Expr):
         return self.T.domain
 
     @property
+    def known_inj(self) -> Bool:
+        inj = self.node._attrs.get('inj', None)
+        if inj is not None:
+            return inj == BoolLat.T
+        # TODO maybe try to infer?
+        return False
+
+    @property
     def image(self) -> DomainExpr:
-        arrT = self.T._rawT
-        ord = self.domain.T.is_ord and self.T.inj_known
-        domT = ir.DomT(arrT.resT, ord)
-        node = ir.Image(domT, self.node)
+        resT = self.T._raw_resT
+        imgT = resT.DomT
+        node = ir.Image(imgT.node, self.node)
         return wrap(node)
 
     def apply(self, arg: Expr) -> Expr:
@@ -867,13 +895,13 @@ class FuncExpr(Expr):
     def compose(self, other: FuncExpr):
         if not isinstance(other, FuncExpr):
             raise ValueError(f"Expected LambdaExpr, got {other}")
-        if self.T.argT != other.T._raw_resT():
+        if self.T.argT != other.T._raw_resT:
             raise ValueError(f"Composition {self.T} @ {other.T} is not valid")
         def lam(a: Expr):
             b = other.apply(a)
             c = self.apply(b)
             return c
-        inj = self.T.inj_known and other.T.inj_known
+        inj = self.known_inj and other.known_inj
         return FuncExpr.make(other.T.argT, lam, inj)
 
     def __matmul__(self, other: FuncExpr):
@@ -913,8 +941,7 @@ class FuncExpr(Expr):
 
     # Basically a 'gather'
     def __getitem__(self, dom: DomainExpr) -> FuncExpr:
-        if dom.T.is_singleton:
-            return self(dom.unique_elem)
+
         if not isinstance(dom, DomainExpr):
             raise ValueError(f"Can only index into funcs with a domain (i.e., a gather).\nFunc: {self}\n Got: {dom}")
         return self.gather(dom)
@@ -1028,7 +1055,6 @@ class EmptyFuncExpr(FuncExpr):
         return super().__getitem__(dom)
 
 def wrap(node: ir.Node) -> Expr:
-    from . import ast_nd as nd
     T = wrapT(node.T)
     # Base theory types
     if isinstance(T, UnitType):
@@ -1043,11 +1069,12 @@ def wrap(node: ir.Node) -> Expr:
         return TupleExpr(node)
     if isinstance(T, SumType):
         return SumExpr(node)
+    from . import ast_nd as nd
+    if isinstance(T, nd.NDDomainType):
+        return nd.NDDomainExpr(node)
     if isinstance(T, DomainType):
-        if isinstance(T, nd.OrdDomainType):
+        if T._is_enumerable and not T._is_squeezable:
             return nd.OrdDomainExpr(node)
-        if isinstance(T, nd.NDDomainType):
-            return nd.NDDomainExpr(node)
         return DomainExpr(node)
     if isinstance(T, FuncType):
         if isinstance(T.domain, nd.NDDomainExpr):

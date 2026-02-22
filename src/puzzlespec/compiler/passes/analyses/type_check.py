@@ -102,16 +102,16 @@ class TypeCheckingPass(Analysis):
         self.Tmap[node] = T
         return T
 
-    @handles(ir.NDDomT)
-    def _(self, node: ir.NDDomT):
-        factors = self.visit_children(node)
-        for f in factors:
-            if not _is_kind(f, ir.DomT):
-                raise TypeError(f"NDDomT factors must be DomT, got {f}")
-            if not f.ord:
-                raise TypeError(f"NDDomT factors must be ordered, got {f}")
-        self.Tmap[node] = node
-        return node
+    #@handles(ir.NDDomT)
+    #def _(self, node: ir.NDDomT):
+    #    factors = self.visit_children(node)
+    #    for f in factors:
+    #        if not _is_kind(f, ir.DomT):
+    #            raise TypeError(f"NDDomT factors must be DomT, got {f}")
+    #        if not f.ord:
+    #            raise TypeError(f"NDDomT factors must be ordered, got {f}")
+    #    self.Tmap[node] = node
+    #    return node
 
     @handles(ir.PiT)
     def _(self, node: ir.PiT):
@@ -148,7 +148,7 @@ class TypeCheckingPass(Analysis):
         T, domT = self.visit_children(node)
         if not _is_kind(T, ir.Type):
             raise TypeError(f"RefT's underlying type must be a type, got {T}")
-        if not _is_kind(domT, ir._DomT):
+        if not _is_kind(domT, ir.DomT):
             raise TypeError(f"RefT's domain must be a domain, got {domT}")
         # dom.T.carT must be T
         if not _is_same_kind(domT.carT, T):
@@ -526,7 +526,7 @@ class TypeCheckingPass(Analysis):
         if not _is_kind(T, ir.IntT):
             raise TypeError(f"Card must have IntT type, got {T}")
         # Verify domain argument is a domain
-        if not _is_kind(domainT, ir._DomT):
+        if not _is_kind(domainT, ir.DomT):
             raise TypeError(f"Card expects domain argument, got {domainT}")
         self.Tmap[node] = T
         return T
@@ -538,7 +538,7 @@ class TypeCheckingPass(Analysis):
         if not _is_kind(T, ir.BoolT):
             raise TypeError(f"IsMember must have BoolT type, got {node.T}")
         # Verify domain argument is a domain
-        if not _is_kind(domainT, ir._DomT):
+        if not _is_kind(domainT, ir.DomT):
             raise TypeError(f"IsMember expects domain argument, got {domainT}")
         # Verify value argument type matches domain carrier type
         if not _is_same_kind(valT, domainT.carT):
@@ -553,9 +553,9 @@ class TypeCheckingPass(Analysis):
         if not _is_kind(T, ir.BoolT):
             raise TypeError(f"Subset must have BoolT type, got {node.T}")
         # Verify domain arguments are domains
-        if not _is_kind(domAT, ir._DomT):
+        if not _is_kind(domAT, ir.DomT):
             raise TypeError(f"Subset expects domain argument, got {domAT}")
-        if not _is_kind(domBT, ir._DomT):
+        if not _is_kind(domBT, ir.DomT):
             raise TypeError(f"Subset expects domain argument, got {domBT}")
         if not _is_same_kind(domAT.carT, domBT.carT):
             raise TypeError(f"Subset domain arguments must have the same carrier type, got {domAT.carT} and {domBT.carT}")
@@ -606,11 +606,11 @@ class TypeCheckingPass(Analysis):
             domT = self.visit(dom)
             domTs.append(domT)
         # Verify type is DomT
-        if not _is_kind(T, ir._DomT):
+        if not _is_kind(T, ir.DomT):
             raise TypeError(f"Intersection must have DomT type, got {node.T}")
         # Verify domain arguments are domains
         for domT in domTs:
-            if not _is_kind(domT, ir._DomT):
+            if not _is_kind(domT, ir.DomT):
                 raise TypeError(f"Intersection expects domain argument, got {domT}")
             if not _is_same_kind(T.carT, domTs[0].carT):
                 raise TypeError(f"Intersection result type {T.carT} does not match domain carrier type {domTs[0].carT}")
@@ -621,7 +621,7 @@ class TypeCheckingPass(Analysis):
     def _(self, node: ir.CartProd):
         T, *domTs = self.visit_children(node)
         # T should be DomT with TupleT carrier type
-        if not _is_kind(T, ir._DomT):
+        if not _is_kind(T, ir.DomT):
             raise TypeError(f"CartProd must have DomT type, got {node.T}")
         if not _is_kind(T.carT, ir.TupleT):
             raise TypeError(f"CartProd must have TupleT carrier type, got {T.carT}")
@@ -643,13 +643,13 @@ class TypeCheckingPass(Analysis):
         if not _is_kind(T, ir.DomT):
             raise TypeError(f"DomProj must have DomT type, got {T}")
         # Verify domain argument is a domain
-        if not _is_kind(domT, ir._DomT):
+        if not _is_kind(domT, ir.DomT):
             raise TypeError(f"DomProj expects domain argument, got {domT}")
         # domT.carT must be a TupleT
-        if not _is_kind(domT.carT, ir.TupleT):
-            raise TypeError(f"DomProj expects tuple carT, got {domT.carT}")
-        if node.idx >= len(domT.carT):
-            raise TypeError(f"DomProj index {node.idx} out of bounds for tuple {domT.carT}")
+        #if not _is_kind(domT.carT, ir.TupleT):
+        #    raise TypeError(f"DomProj expects tuple carT, got {domT.carT}")
+        #if node.idx >= len(domT.carT):
+        #    raise TypeError(f"DomProj index {node.idx} out of bounds for tuple {domT.carT}")
         self.Tmap[node] = T
         return T
     
@@ -759,7 +759,7 @@ class TypeCheckingPass(Analysis):
     def _(self, node: ir.Restrict):
         T, piT = self.visit_children(node)
         # Verify type is DomT
-        if not _is_kind(T, ir._DomT):
+        if not _is_kind(T, ir.DomT):
             raise TypeError(f"Restrict must have DomT type, got {T}")
         # Verify function argument is a PiT
         if not _is_kind(piT, ir._PiT):
@@ -788,20 +788,6 @@ class TypeCheckingPass(Analysis):
         # Verify function argument type matches domain carrier type
         self.Tmap[node] = T
         return T
-
-    #@handles(ir.Map)
-    #def _(self, node: ir.Map):
-    #    T, domT, funT = self.visit_children(node)
-    #    # Verify T is the same as funT
-    #    if not _is_same_kind(T, funT):
-    #        raise TypeError(f"Map must have FuncT type, got {T}")
-    #    # Verify domain argument is a domain
-    #    if not _is_kind(domT, ir._DomT):
-    #        raise TypeError(f"Map expects domain argument, got {domT}")
-    #    if not _is_same_kind(funT.argT, domT.carT):
-    #        raise TypeError(f"Map function argument type {funT.argT} does not match domain carrier type {domT.carT}")
-    #    self.Tmap[node] = T
-    #    return T
 
     @handles(ir.FuncLit)
     def _(self, node: ir.FuncLit):
@@ -836,21 +822,6 @@ class TypeCheckingPass(Analysis):
             raise TypeError(f"Image carrier type {T.carT} does not match function result type {piT.resT}")
         self.Tmap[node] = T
         return T
-
-    #@handles(ir.ApplyFunc)
-    #def _(self, node: ir.ApplyFunc):
-    #    T, arrowT, argT = self.visit_children(node)
-    #    # Verify function argument is a FuncT
-    #    if not _is_kind(arrowT, ir.ArrowT):
-    #        raise TypeError(f"ApplyFunc expects ArrowT function, got {arrowT}")
-    #    # Verify argument type matches function domain carrier type
-    #    if not _is_same_kind(argT, arrowT.argT):
-    #        raise TypeError(f"ApplyFunc argument type {argT} does not match function domain carrier type {arrowT.argT}")
-    #    # Verify result type matches function result type
-    #    if not _is_same_kind(T, arrowT.resT):
-    #        raise TypeError(f"ApplyFunc result type {T} does not match function result type {arrowT.resT}")
-    #    self.Tmap[node] = T
-    #    return T
 
     @handles(ir.Apply)
     def _(self, node: ir.Apply):
@@ -1038,8 +1009,6 @@ class TypeCheckingPass(Analysis):
             raise TypeError(f"Range must have IntT type, got {T}")
         if not _is_kind(T.carT, ir.IntT):
             raise TypeError(f"Range domain carrier type must be Int, got {T.carT}")
-        if T.ord is False:
-            raise TypeError(f"Range domain must be ordered, got {T}")
         # Verify lo, hi, and step are IntT
         if not _is_kind(loT, ir.IntT):
             raise TypeError(f"Range lo must be Int, got {loT}")
@@ -1076,6 +1045,35 @@ class TypeCheckingPass(Analysis):
         self.Tmap[node] = T
         return T
 
+
+    @handles(ir.EnumerableDomain)
+    def _(self, node: ir.EnumerableDomain):
+        T, = self.visit_children(node)
+        if not _is_kind(T, ir.DomT):
+            raise TypeError(f"EnumerableDomain must have DomT type, got {T}")
+        self.Tmap[node] = T
+        return T
+
+    @handles(ir.SqueezableDomain)
+    def _(self, node: ir.SqueezableDomain):
+        T, = self.visit_children(node)
+        if not _is_kind(T, ir.DomT):
+            raise TypeError(f"SqueezableDomain must have DomT type, got {T}")
+        self.Tmap[node] = T
+        return T
+
+    @handles(ir.NDDomain)
+    def _(self, node: ir.NDDomain):
+        T, *factors = self.visit_children(node)
+        if not _is_kind(T, ir.DomT):
+            raise TypeError(f"NDDomain must have DomT[DomT[T]] type, got {T}")
+        if not _is_kind(T.carT, ir.DomT):
+            raise TypeError(f"NDDomain must have DomT[DomT[T]] type, got {T}")
+        for i, factor in enumerate(factors):
+            if not _is_kind(factor, ir.DomT):
+                raise TypeError(f"NDDomain factor {i} must be a domain, got {factor}")
+        self.Tmap[node] = T
+        return T
 
 @dataclass
 class Stripped(AnalysisObject):
@@ -1132,10 +1130,10 @@ class StripType(Analysis):
         carT, = self.visit_children(node)
         return node.replace(carT)
 
-    @handles(ir.NDDomT)
-    def _(self, node: ir.NDDomT):
-        carT = self.visit(node.carT)
-        return ir.DomT(carT, ord=True)
+    #@handles(ir.NDDomT)
+    #def _(self, node: ir.NDDomT):
+    #    carT = self.visit(node.carT)
+    #    return ir.DomT(carT, ord=True)
 
     @handles(ir.PiT)
     def _(self, node: ir.PiT):

@@ -3,24 +3,14 @@ import typing as tp
 from functools import cached_property
 
 from . import ir, ast
-#from ..passes.analyses.type_check import get_rawT
-#from ..passes.analyses.nd_axis import get_info, DomInfo
-
-def fin(n: ast.IntOrExpr):
-    n = ast.IntExpr.make(n)
-    T = ir.DomT(carT=ir.IntT(), ord=True)
-    node = ir.Fin(T, n.node)
-    #return OrdDomainExpr(node).guard(n >=0)
-    return OrdDomainExpr(node)
 
 # ND Types
-class OrdDomainType(ast.DomainType):
-    def __post_init__(self):
-        super().__post_init__()
-        if not (isinstance(self._node, ir.DomT) and self._node.ord):
-            raise ValueError(f"Expected Ord, got {self.node}")
-
-   
+#class OrdDomainType(ast.DomainType):
+#    def __post_init__(self):
+#        super().__post_init__()
+#        ref_dom = self.ref_dom
+#        if not (ref_dom is not None and isinstance(ref_dom.node, ir.EnumerableDomain)):
+#            raise ValueError(f"Expected Enumerable Domain Type, got {self.node}")
 
 def _make_slice(N: ast.IntExpr, s: slice):
     lo, hi, step = s.start, s.stop, s.step
@@ -36,35 +26,36 @@ def _make_slice(N: ast.IntExpr, s: slice):
     return lo, hi, step
 
 class OrdDomainExpr(ast.DomainExpr):
-    def __init__(self, dom: ir.Node):
-        if not isinstance(ast.wrapT(dom.T), OrdDomainType):
-            raise NotImplementedError()
-        super().__init__(dom)
+    def __post_init__(self):
+        super().__post_init__()
+        if not (self.T._is_enumerable and not self.T._is_squeezable):
+            raise ValueError("Bad construciton")
     
     def slice(self, lo: ast.IntExpr, hi: ast.IntExpr, step: ast.IntExpr) -> OrdDomainExpr:
         lo, hi, step = ast.IntExpr.make(lo), ast.IntExpr.make(hi), ast.IntExpr.make(step)
-        node = ir.Slice(self.T._node, self.node, lo.node, hi.node, step.node)
+        node = ir.Slice(self.T.node, self.node, lo.node, hi.node, step.node)
         return OrdDomainExpr(node)
 
     def elemAt(self, idx: ast.IntOrExpr) -> ast.IntExpr:
         idx = ast.IntExpr.make(idx)
-        node = ir.ElemAt(self.T.carT._node, self.node, idx.node)
+        node = ir.ElemAt(self.T.carT.node, self.node, idx.node)
+        # TODO add guard
         #return ast.wrap(node).guard(fin(self.size).contains(idx))
         return ast.wrap(node)
 
     # Exact windows
-    def windows(self, size: ast.IntOrExpr, stride: ast.IntOrExpr=1, _exact=True) -> OrdDomainExpr:
-        if not _exact:
+    def windows(self, size: ast.IntOrExpr, stride: ast.IntOrExpr=1, exact=True) -> OrdDomainExpr:
+        if not exact:
             raise NotImplementedError()
         size = ast.IntExpr.make(size)
         stride = ast.IntExpr.make(stride)
         #[0,1,2,3,4]
         #5,2,2
         #[0,1], [2,3], [4]
-        if _exact:
-            dom = fin((self.size-(size-stride))/stride)
+        if exact:
+            dom = ((self.size-(size-stride))/stride).fin()
         else:
-            dom = fin((self.size+1-(size-stride))//stride)
+            dom = ((self.size+1-(size-stride))//stride).fin()
         wins = dom.map(
             lambda i: self.slice(lo=i*stride, hi=i*stride+size, step=1), inj=True
         ).image
@@ -90,12 +81,24 @@ class OrdDomainExpr(ast.DomainExpr):
 class ArrayExpr(ast.FuncExpr):
     def __post_init__(self):
         super().__post_init__()
-        if self.domain.T.is_ord is not True:
+        if not self.domain.T._is_enumerable:
             raise ValueError("Array's must have ord domains")
 
     @property
     def domain(self) -> OrdDomainExpr:
         return OrdDomainExpr(super().domain.node)
+
+    @property
+    def image(self) -> ast.DomainExpr:
+        if not self.known_inj:
+            raise NotImplementedError()
+        resT = self.T._raw_resT
+        imgT = resT.DomT
+        cap = ast.wrap(ir.EnumerableDomain(imgT.DomT.node))
+        node = ir.Image(imgT.refine(cap).node, self.node)
+        img = ast.wrap(node)
+        assert isinstance(img, OrdDomainExpr)
+        return img
 
     def windows(self, size: ast.IntOrExpr, stride: ast.IntOrExpr=1) -> ArrayExpr:
         wins = self.domain.windows(size, stride) # Array[Array]
@@ -113,24 +116,38 @@ class ArrayExpr(ast.FuncExpr):
 class NDDomainType(ast.DomainType):
     def __post_init__(self):
         super().__post_init__()
-        if not isinstance(self._node, ir.NDDomT):
-            raise ValueError(f"Expected NDDomT, got {self.node}")
+        if not self._is_nd:
+            raise ValueError(f"Expected ND, got {self.node}")
 
     @property
+    def _nddom(self) -> ir.NDDomain:
+        caps = self._caps
+        assert len(caps)==1
+        nddom, = caps
+        return nddom
+
+    @cached_property
     def axes(self):
-        return self._node.axes
+        nddom = self._nddom
+        axes = tuple(i for i, dom in enumerate(nddom.factors) if not ast.wrap(dom).T._is_squeezable)
+        return axes
 
-    @property
+    @cached_property
     def rank(self):
         return len(self.axes)
 
-    @property
-    def num_factors(self):
-        return len(self._node.factors)
+    @cached_property
+    def factors(self) -> tp.Tuple[ast.DomainExpr]:
+        nddom = self._nddom
+        return tuple(ast.wrap(dom) for dom in nddom.factors)
 
     @property
-    def is_ord(self) -> bool:
-        return True
+    def num_factors(self):
+        return len(self.factors)
+
+    def __getitem__(self, i: int):
+        assert isinstance(i, int) and i in range(self.num_factors)
+        return self.factors[i].T
 
 # Cart product of 3 kinds of domains
 # 1) 'ordered domain'
@@ -140,7 +157,7 @@ class NDDomainType(ast.DomainType):
 class NDDomainExpr(ast.DomainExpr):
     def __post_init__(self):
         super().__post_init__()
-        assert isinstance(self.T._node, ir.NDDomT)
+        assert isinstance(self.T, NDDomainType)
 
     @cached_property
     def T(self) -> NDDomainType:
@@ -168,7 +185,7 @@ class NDDomainExpr(ast.DomainExpr):
 
     def dom_proj(self, i: int):
         assert i in range(self.T.num_factors)
-        node = ir.DomProj(self.T._node.factors[i], self.node, i)
+        node = ir.DomProj(self.T[i].node, self.node, i)
         return ast.wrap(node)
 
     def _create_base(self, *sdoms) -> tp.Tuple[ast.DomainExpr]:
@@ -199,34 +216,28 @@ class NDDomainExpr(ast.DomainExpr):
         return self.tiles((size,), (stride,))
 
 def nd_cartprod(*doms: ast.DomainExpr) -> NDDomainExpr:
-    assert all(dom.T.is_ord for dom in doms)
-    if all(dom.T.is_singleton for dom in doms):
+    assert all(dom.T._is_enumerable for dom in doms)
+    if all(dom.T._is_squeezable for dom in doms):
         return ast.cartprod(*doms)
-    axes = []
     bdoms = []
-    bo = 0
     for dom in doms:
         if isinstance(dom, NDDomainExpr):
-            bdoms += dom.base_doms
-            axes += [bo + a for a in dom.axes]
-            bo += dom.T.num_factors
-        elif dom.T.is_singleton:
-            bdoms.append(dom)
-            bo +=1
+            bdoms.extend(dom.base_doms)
         else:
-            axes.append(len(bdoms))
             bdoms.append(dom)
-            bo +=1
-    T = ir.NDDomT(
-        *(dom.T._node for dom in bdoms),
-        axes=tuple(axes)
+    factorTs = [dom.T for dom in bdoms]
+    carT = ast.wrapT(ir.TupleT(*(T.carT.node for T in factorTs)))
+    capND = ir.NDDomain(
+        carT.DomT.DomT.node,
+        *(dom.node for dom in bdoms),
     )
+    T = carT.DomT.refine(ast.wrap(capND))
+    assert isinstance(T, NDDomainType)
     node = ir.CartProd(
-        T,
+        T.node,
         *(dom.node for dom in bdoms)
     )
     return NDDomainExpr(node)
-
 
 # Func[NDDom -> T]
 class NDArrayExpr(ast.FuncExpr):
@@ -242,9 +253,23 @@ class NDArrayExpr(ast.FuncExpr):
     def rank(self):
         return self.domain.rank
 
-    #@cached_property
-    #def domain(self) -> NDDomainExpr:
-    #    return NDDomainExpr(super().domain.node)
+    @property
+    def domain(self) -> NDDomainExpr:
+        return super().domain
+
+    @property
+    def image(self) -> ast.DomainExpr:
+        if not self.known_inj:
+            return super().image
+        carT = self.T._raw_resT
+        imgT = carT.DomT
+        # build NDDomain
+        nddom = self.domain.T._nddom
+        cap = ast.wrap(ir.NDDomain(imgT.DomT.node, *nddom.factors))
+        node = ir.Image(imgT.refine(cap).node, self.node)
+        img = ast.wrap(node)
+        assert isinstance(img, NDDomainExpr)
+        return img
 
     def __getitem__(self, val: tp.Any) -> NDArrayExpr:
         dom = self.domain[val]

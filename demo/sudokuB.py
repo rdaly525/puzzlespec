@@ -32,6 +32,7 @@ cell_digits = func_var(Cells, Digits, name="cell_digits") # Cells -> Digits
 ##############################
 
 # Alternate syntax
+Units = dom_lit
 p += nd.rows(cell_digits).forall(lambda row_vals: std.distinct(row_vals))
 p += nd.cols(cell_digits).forall(lambda col_vals: std.distinct(col_vals))
 

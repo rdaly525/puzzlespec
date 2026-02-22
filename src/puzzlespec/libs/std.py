@@ -6,12 +6,21 @@ import typing as tp
 Nat = ast.Int.refine(lambda i: i>0)
 Nat0 = ast.Int.refine(lambda i: i>=0)
 
+def lit(v: tp.Any) -> ast.Expr:
+    return ast.Expr.make(v)
+
+def fin(v: ast.IntOrExpr):
+    v = lit(v)
+    if not isinstance(v, ast.IntExpr):
+        raise ValueError(f"Expected IntExpr, got {v}")
+    return v.fin()
+
 def isqrt(v: ast.IntExpr) -> ast.IntExpr:
     #return ast.wrap(ir.Isqrt(ir.IntT(), v.node)).guard(v >=0)
     return ast.wrap(ir.Isqrt(ir.IntT(), v.node))
     #return Nat0.choose(lambda i: i*i==v)
 
-def U(carT: ast.TExpr):
+def U(carT: ast.TExpr) -> ast.DomainExpr:
     return carT.U
 
 def sum(func: ast.FuncExpr | tp.Iterable) -> ast.IntExpr:
