@@ -42,7 +42,7 @@ class TypeCheckingPass(Analysis):
     ##############################
 
     def visit(self, node: ir.Node):
-        raise NotImplementedError(node)
+        raise NotImplementedError(type(node))
 
     @handles(ir.UnitT)
     def _(self, node: ir.UnitT):
@@ -102,17 +102,6 @@ class TypeCheckingPass(Analysis):
         self.Tmap[node] = T
         return T
 
-    #@handles(ir.NDDomT)
-    #def _(self, node: ir.NDDomT):
-    #    factors = self.visit_children(node)
-    #    for f in factors:
-    #        if not _is_kind(f, ir.DomT):
-    #            raise TypeError(f"NDDomT factors must be DomT, got {f}")
-    #        if not f.ord:
-    #            raise TypeError(f"NDDomT factors must be ordered, got {f}")
-    #    self.Tmap[node] = node
-    #    return node
-
     @handles(ir.PiT)
     def _(self, node: ir.PiT):
         argT, resT = node._children
@@ -155,6 +144,29 @@ class TypeCheckingPass(Analysis):
             raise TypeError(f"Refinement Type's T, {T}, does not match domain carrier type {domT.carT}")
         self.Tmap[node] = T
         return T
+
+    @handles(ir.ViewWrapperT)
+    def _(self, node: ir.ViewWrapperT):
+        T = self.visit(node.T)
+        # TODO Finish type checking of views
+        #T, _ = self.visit_children(node)
+        self.Tmap[node] = T
+        return T
+
+    @handles(ir.ViewT)
+    def _(self, node: ir.ViewT):
+        self.Tmap[node] = node
+        return node
+    #@handles(ir.IsoT)
+    #def _(self, node: ir.IsoT):
+    #    A, B = self.visit_children(node)
+    #    if not _is_kind(A, ir.Type):
+    #        raise TypeError(f"IsoT must have Type type, got {A}")
+    #    if not _is_kind(B, ir.Type):
+    #        raise TypeError(f"IsoT must have Type type, got {B}")
+    #    T = ir.IsoT(A, B)
+    #    self.Tmap[node] = T
+    #    return T
     
     ##############################
     ## Core-level IR Value nodes (Used throughout entire compiler flow)
@@ -1045,35 +1057,44 @@ class TypeCheckingPass(Analysis):
         self.Tmap[node] = T
         return T
 
+    #@handles(ir.IndexView)
+    #def _(self, node: ir.IndexView):
+    #    T, idxT = self.visit_children(node)
+    #    if not _is_kind(T, ir.IsoT):
+    #        raise TypeError(f"IndexView must have IsoT type, got {T}")
+    #    if not _is_kind(idxT, ir._PiT):
+    #        raise TypeError(f"IndexView index must be PiT, got {idxT}")
+    #    self.Tmap[node] = T
+    #    return T
 
-    @handles(ir.EnumerableDomain)
-    def _(self, node: ir.EnumerableDomain):
-        T, = self.visit_children(node)
-        if not _is_kind(T, ir.DomT):
-            raise TypeError(f"EnumerableDomain must have DomT type, got {T}")
-        self.Tmap[node] = T
-        return T
+    #@handles(ir.EnumerableDomain)
+    #def _(self, node: ir.EnumerableDomain):
+    #    T, = self.visit_children(node)
+    #    if not _is_kind(T, ir.DomT):
+    #        raise TypeError(f"EnumerableDomain must have DomT type, got {T}")
+    #    self.Tmap[node] = T
+    #    return T
 
-    @handles(ir.SqueezableDomain)
-    def _(self, node: ir.SqueezableDomain):
-        T, = self.visit_children(node)
-        if not _is_kind(T, ir.DomT):
-            raise TypeError(f"SqueezableDomain must have DomT type, got {T}")
-        self.Tmap[node] = T
-        return T
+    #@handles(ir.SqueezableDomain)
+    #def _(self, node: ir.SqueezableDomain):
+    #    T, = self.visit_children(node)
+    #    if not _is_kind(T, ir.DomT):
+    #        raise TypeError(f"SqueezableDomain must have DomT type, got {T}")
+    #    self.Tmap[node] = T
+    #    return T
 
-    @handles(ir.NDDomain)
-    def _(self, node: ir.NDDomain):
-        T, *factors = self.visit_children(node)
-        if not _is_kind(T, ir.DomT):
-            raise TypeError(f"NDDomain must have DomT[DomT[T]] type, got {T}")
-        if not _is_kind(T.carT, ir.DomT):
-            raise TypeError(f"NDDomain must have DomT[DomT[T]] type, got {T}")
-        for i, factor in enumerate(factors):
-            if not _is_kind(factor, ir.DomT):
-                raise TypeError(f"NDDomain factor {i} must be a domain, got {factor}")
-        self.Tmap[node] = T
-        return T
+    #@handles(ir.NDDomain)
+    #def _(self, node: ir.NDDomain):
+    #    T, *factors = self.visit_children(node)
+    #    if not _is_kind(T, ir.DomT):
+    #        raise TypeError(f"NDDomain must have DomT[DomT[T]] type, got {T}")
+    #    if not _is_kind(T.carT, ir.DomT):
+    #        raise TypeError(f"NDDomain must have DomT[DomT[T]] type, got {T}")
+    #    for i, factor in enumerate(factors):
+    #        if not _is_kind(factor, ir.DomT):
+    #            raise TypeError(f"NDDomain factor {i} must be a domain, got {factor}")
+    #    self.Tmap[node] = T
+    #    return T
 
 @dataclass
 class Stripped(AnalysisObject):
@@ -1094,7 +1115,7 @@ class StripType(Analysis):
     ##############################
 
     def visit(self, node: ir.Node):
-        raise NotImplementedError(node)
+        raise NotImplementedError(type(node))
 
     @handles(ir.UnitT)
     def _(self, node: ir.UnitT):
@@ -1130,32 +1151,13 @@ class StripType(Analysis):
         carT, = self.visit_children(node)
         return node.replace(carT)
 
-    #@handles(ir.NDDomT)
-    #def _(self, node: ir.NDDomT):
-    #    carT = self.visit(node.carT)
-    #    return ir.DomT(carT, ord=True)
-
-    @handles(ir.PiT)
-    def _(self, node: ir.PiT):
+    @handles(ir.PiT, ir.PiTHOAS)
+    def _(self, node: ir._PiT):
         argT, resT = self.visit_children(node)
         return node.replace(argT, resT)
 
-    @handles(ir.PiTHOAS)
-    def _(self, node: ir.PiTHOAS):
-        argT, resT = self.visit_children(node)
-        return node.replace(argT, resT)
-
-    #@handles(ir.ArrowT)
-    #def _(self, node: ir.ArrowT):
-    #    argT, resT = self.visit_children(node)
-    #    return node.replace(argT, resT)
-
-    #@handles(ir.FuncT)
-    #def _(self, node: ir.FuncT):
-    #    return self.visit(node.lamT)
-
-    @handles(ir.RefT)
-    def _(self, node: ir.RefT):
+    @handles(ir.RefT, ir.GuardT, ir.ViewWrapperT)
+    def _(self, node: ir.Type):
         return self.visit(node.T)
  
 def stripT(node: ir.Type):

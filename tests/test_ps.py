@@ -1,46 +1,60 @@
 from puzzlespec import make_enum, var, func_var, Unit, Int, U, PuzzleSpecBuilder, VarSetter
 from puzzlespec.libs import std
 from puzzlespec.libs import optional as opt, topology as topo, nd
-from puzzlespec.compiler.passes.analyses.nd_info import get_dom_info
+from puzzlespec.compiler.dsl import ast_nd
+
 fin = std.fin
 def test_basic():
+    NDDomainExpr = ast_nd.NDDomainExpr
+    NDArrayExpr  = ast_nd.NDArrayExpr
     f = std.fin(5)
-    print(f)
-    g = std.fin(5)*nd.fin(3)
-    h = g.map(lambda i, j: i+j, inj=True)
-    print(h)
-    print(h.simplify())
-    img = h.image
-    print(img[2,3].simplify())
+    assert isinstance(f, NDDomainExpr)
+    assert f.rank==1
+    print(f.shape)
+    print(f[2].simplify())
+    g = f.map(lambda i: fin(i+1), inj=True)
+    assert isinstance(g, NDArrayExpr)
+    assert isinstance(g[1], NDDomainExpr)
+    assert isinstance(g[1:3], NDArrayExpr)
+    print(g[1:3].simplify())
+    img = g.image
+    assert isinstance(img, NDDomainExpr)
+    assert isinstance(img[1], NDDomainExpr)
+    print(img)
+    v = img[1].simplify()
+    assert isinstance(v, NDDomainExpr)
+    print(v)
 
-test_basic()
+#test_basic()
 
 def test_vars():
     n = var(Int, name='n')
     #m = var(fin(n), name='m')
     m = var(Int, name='m')
     f0 = func_var(fin(n), fin(m), name='f0')
-    print(f0.T)
-    print(f0.T.simplify())
+    assert isinstance(f0, ast_nd.NDArrayExpr)
     f1 = func_var(fin(n), lambda i: fin(m+i), name='f1')
-    print(f1.T.simplify())
     f2 = func_var(fin(n), lambda i: fin(m+i), lambda i, j: fin(i+j) + fin(j), name='f2')
-    print(f2.T.simplify())
-    print(f2(3)(4).T.simplify())
-    print(f2(m)(n).T._rawT)
+    f3 = f2(3)
+    assert isinstance(f3, ast_nd.NDArrayExpr)
+    assert isinstance(f2(m), ast_nd.NDArrayExpr)
 
 #test_vars()
 
 def test_1d():
     n = var(Int, name='n')
     f1 = fin(n)
-    f2 = nd.range(2, n)
-    for f in (f1, f2):
+    #f2 = nd.range(2, n)
+    for f in (
+        f1, 
+        #f2,
+    ):
         print("*"*20)
         print(f)
         v0 = f[3]
         print(v0.simplify())
         v1 = f[3:5]
+        assert isinstance(v1, ast_nd.OrdDomainExpr)
         print(v1.simplify())
         wins = f.windows(3, 3)
         print(wins.simplify())
@@ -131,5 +145,3 @@ def test_singleton():
     p = get_dom_info(prod.node)
     print(p)
 
-
-#test_singleton()

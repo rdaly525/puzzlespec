@@ -9,6 +9,9 @@ Nat0 = ast.Int.refine(lambda i: i>=0)
 def lit(v: tp.Any) -> ast.Expr:
     return ast.Expr.make(v)
 
+true = lit(True)
+false = lit(False)
+
 def fin(v: ast.IntOrExpr):
     v = lit(v)
     if not isinstance(v, ast.IntExpr):

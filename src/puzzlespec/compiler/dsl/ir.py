@@ -51,9 +51,12 @@ class Node:
         new_fields = {**self.field_dict, **kwargs}
         if (new_fields == self.field_dict) and (new_children == self._children):
             return self
+        #print("REPLACE", type(self))
+        #print("OLD:", self)
         new_node = type(self)(*new_children, **new_fields)
         for an, val in self._attrs.items():
             new_node._attrs[an] = val
+        #print("NEW:", new_node)
         return new_node
 
     def __init_subclass__(cls, **kwargs):
@@ -247,6 +250,22 @@ class RefT(Type):
     def cast_as(self, val: tp.Any):
         return self.T.cast_as(val)
 
+class ViewWrapperT(Type):
+    _numc = 2
+    def __init__(self, T: Type, view: Value):
+        super().__init__(T, view)
+
+    @property
+    def T(self):
+        return self._children[0]
+
+    @property
+    def view(self):
+        return self._children[1]
+
+class ViewT(Type): 
+    _numc=0
+
 class GuardT(Type):
     _numc = 2
     def __init__(self, T: Type, pre: Value):
@@ -309,7 +328,6 @@ class BoundVar(Value):
     def __init__(self, T: Type, idx: int):
         self.idx = idx
         super().__init__(T)
-
 
 class Unit(Value):
     _numc = 1
@@ -727,30 +745,38 @@ class Enumerate(Value):
         super().__init__(T, dom)
 
 ##############################
-## Capability IR nodes (Used in RefT's)
+## View IR nodes 
 ##############################
 
-# These are 'domains of domains'
-# Semantically interpreted as 'the set of domains that adhere to the capability'
-class DomainCapability(Value): pass
-class EnumerableDomain(DomainCapability):
-    _numc=1
-    def __init__(self, T: Type):
-        super().__init__(T)
+#class IdxViewT(_ViewT):
+#    _numc=2
+#    def __init__(self, A: Type, *bdoms: Value):
+#        super().__init__(A, *bdoms)
+#
+#    @property
+#    def A(self):
+#        return self._children[0]
+#
+#    @property
+#    def bdoms(self):
+#        return self._children[1:]
 
-class SqueezableDomain(DomainCapability):
-    _numc=1
-    def __init__(self, T: Type):
-        super().__init__(T)
+class View(Value): pass
 
-class NDDomain(DomainCapability):
-    _numc = -1
-    def __init__(self, T: Type, *factors: Value):
-        super().__init__(T, *factors)
 
-    @property
-    def factors(self) -> tp.Tuple[Type]:
-        return tuple(self._children[1:])
+#class SqueezableDomain(DomainCapability):
+#    _numc=1
+#    def __init__(self, T: Type):
+#        super().__init__(T)
+#
+#class NDDomain(DomainCapability):
+#    _numc = -1
+#    def __init__(self, T: Type, *factors: Value):
+#        super().__init__(T, *factors)
+#
+#    @property
+#    def factors(self) -> tp.Tuple[Type]:
+#        return tuple(self._children[1:])
 
 
 ##############################
@@ -828,6 +854,8 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     PiT: 0,
     ApplyT: 0,
     RefT: 0,
+    ViewT: 0,
+    ViewWrapperT: 0,
     
     # Spec
     Spec: 0,
@@ -886,9 +914,9 @@ NODE_PRIORITY: tp.Dict[tp.Type[Value], int] = {
     Empty: 300,
     Universe: 301,
     Singleton: 302,
-    EnumerableDomain: 303,
-    SqueezableDomain: 304,
-    NDDomain: 305,
+    #IndexView: 303,
+    #SqueezableDomain: 304,
+    #NDDomain: 305,
     Fin: 310,
     Range: 311,
     DomLit: 320,

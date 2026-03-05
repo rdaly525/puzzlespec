@@ -3,15 +3,13 @@ from __future__ import annotations
 import typing as tp
 
 from ..pass_base import Transform, Context, handles, AnalysisObject
-from ..transforms.substitution import SubMapping, SubstitutionPass
 from ...dsl import ir, ast
 from ....libs import var_def, std
-from ..envobj import EnvsObj, SymTable
 
-def guard_opt(node: ir.Node):
-    assert isinstance(node, ir.Node)
-    node = GuardOpt()(node, Context())[0]
-    return node
+#def guard_opt(node: ir.Node):
+#    assert isinstance(node, ir.Node)
+#    node = GuardOpt()(node, Context())[0]
+#    return node
 
 def _has_bv(node: ir.Node, name: str):
     if isinstance(node, ir.BoundVarHOAS) and node.name==name:
@@ -43,70 +41,101 @@ class GuardLift(Transform):
 
     def run(self, root: ir.Node, ctx: Context) -> ir.Node:
         self.bstack = []
-        self.preds = {} # oldest name -> list of preds
-        self.bnames = {}
-        self.root_preds = []
+        self.preds = set()
         new_root = self.visit(root)
-        if new_root == root:
-            return new_root
-        preds = self.root_preds
-        if isinstance(new_root, ir.Spec):
-            cons, obls = new_root._children
-            if len(obls)>0:
-                preds += obls._children[1:]
-            obls = ast.TupleExpr.make((std.all(ast.wrap(p) for p in preds),)).node
-            return ir.Spec(cons, obls)
-        return ast.wrap(new_root).guard(std.all(ast.wrap(p) for p in preds)).node
-
-    def _handle_pre(self, pre):
-        bvs = _get_bvs(pre)
-        for name in self.bstack[::-1]:
-            if name in bvs:
-                assert name in self.preds
-                self.preds[name].append(pre)
-                return
-        self.root_preds.append(pre)
+        if len(self.preds) > 0:
+            new_root = ast.wrap(new_root).guard(std.all(ast.wrap(p) for p in self.preds)).node
+        return new_root
 
     @handles(ir.Guard)
     def _(self, node: ir.Guard):
         T, new_val, pre = self.visit_children(node)
-        self._handle_pre(pre)
+        self.preds.add(pre)
         return new_val
 
     @handles(ir.GuardT)
     def _(self, node: ir.GuardT):
         T, pre = self.visit_children(node)
-        self._handle_pre(pre)
+        self.preds.add(pre)
         return T
+
+    def filter_preds(self, bv_name: str):
+        dep_preds = set()
+        ndep_preds = set()
+        for p in self.preds:
+            if _has_bv(p, bv_name):
+                dep_preds.add(p)
+            else:
+                ndep_preds.add(p)
+        return dep_preds, ndep_preds
 
     @handles(ir.LambdaHOAS)
     def _(self, node: ir.LambdaHOAS):
         T, body = node._children
-        new_T = self.visit(T)
-        self.bstack.append(node.bv_name)
-        self.preds[node.bv_name] = []
+        newT = self.visit(T)
+        cur_preds = self.preds
+        self.preds = set()
         new_body = self.visit(body)
-        preds = self.preds.pop(node.bv_name)
-        self.bstack.pop()
-        if len(preds)>0:
-            new_body = ast.wrap(new_body).guard(std.all(ast.wrap(p) for p in preds)).node
-        return node.replace(new_T, new_body)
+        dep_preds, ndep_preds = self.filter_preds(node.bv_name)
+        self.preds = cur_preds | ndep_preds
+        if len(dep_preds)>0:
+            new_body = ast.wrap(new_body).guard(std.all(ast.wrap(p) for p in dep_preds)).node
+        return node.replace(newT, new_body)
 
     @handles(ir.PiTHOAS)
     def _(self, node: ir.PiTHOAS):
         argT, resT = node._children
         new_argT = self.visit(argT)
-        self.bstack.append(node.bv_name)
-        self.preds[node.bv_name] = []
+        cur_preds = self.preds
+        self.preds = set()
         new_resT = self.visit(resT)
-        preds = self.preds.pop(node.bv_name)
-        self.bstack.pop()
-        if len(preds)>0:
-            new_resT = ast.wrapT(new_resT).guard(std.all(ast.wrap(p) for p in preds)).node
+        dep_preds, ndep_preds = self.filter_preds(node.bv_name)
+        self.preds = cur_preds | ndep_preds
+        if len(dep_preds)>0:
+            new_resT = ast.wrapT(new_resT).guard(std.all(ast.wrap(p) for p in dep_preds)).node
         return node.replace(new_argT, new_resT)
 
-# The goal is to lift up guards from child nodes to parent nodes
+    @handles(ir.Spec)
+    def _(self, node: ir.Spec):
+        cons, obs = self.visit_children(node)
+        assert not isinstance(obs, ir.Guard)
+        if isinstance(cons, ir.Guard):
+            T, cons, p = cons._children
+            obs = ast.TupleExpr.make((ast.wrap(p),)).node
+            return ir.Spec(
+                cons,
+                obs
+            )
+        return node.replace(cons, obs)
+
 class GuardOpt(Transform):
+    """ guard opt
+    """
+    name = "guard_opt"
+
+    requires: tp.Tuple[type, ...] = ()
+    produces: tp.Tuple[type, ...] = ()
+
+    def run(self, root: ir.Node, ctx: Context) -> ir.Node:
+        return self.visit(root)
+
+    @handles(ir.GuardT)
+    def _(self, node: ir.GuardT):
+        T, pred = self.visit_children(node)
+        if pred == std.true.node:
+            return T
+        return node.replace(T, pred)
+
+    @handles(ir.Guard)
+    def _(self, node: ir.Guard):
+        T, v, pred = self.visit_children(node)
+        if pred == std.true.node:
+            return v
+        return node.replace(T, v, pred)
+
+
+# The goal is to lift up guards from child nodes to parent nodes
+class _GuardOpt(Transform):
     """ guard opt
     """
     name = "guard_opt"

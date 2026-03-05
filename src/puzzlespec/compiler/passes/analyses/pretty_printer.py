@@ -97,6 +97,8 @@ class PrettyPrinterPass(Analysis):
     #_debug=True
 
     def visit(self, node: ir.Node) -> str:
+        if hasattr(node, 'pretty'):
+            return node.pretty(self)
         raise NotImplementedError(f"{node.__class__.__name__} not implemented in PrettyPrinterPass")
         # All node kinds have a custom visit
 
@@ -190,26 +192,21 @@ class PrettyPrinterPass(Analysis):
         argT, resT = self.visit_children(node)
         return f"({node.bv_name} : {argT}) -> {resT}"
 
-    #@handles(ir.ArrowT)
-    #def _(self, node: ir.ArrowT) -> str:
-    #    argT, resT = self.visit_children(node)
-    #    return f"{argT} -> {resT}"
-
-    #@handles(ir.FuncT)
-    #def _(self, node: ir.FuncT):
-    #    dom, lamT = node._children
-    #    dom_str, (bv_name, argT_str, resT_str) = self.visit(dom), self._lambdaT(lamT)
-    #    if bv_name is None:
-    #        return f"{dom_str} -> {resT_str}"
-    #    else:
-    #        return f"(({bv_name} : {argT_str}) ∈ {dom_str}) -> {resT_str}"
-    
     @handles(ir.RefT)
     def _(self, node: ir.RefT):
         T_str, dom_str = self.visit_children(node)
         #return f"{{{T_str} | {dom_str}}}"
         #return f"{{{dom_str} : {T_str}}}"
         return f"{dom_str}" 
+
+    @handles(ir.ViewWrapperT)
+    def _(self, node: ir.ViewWrapperT):
+        T_str, view_str = self.visit_children(node)
+        return f"VT({T_str})"
+
+    @handles(ir.ViewT)
+    def _(self, node: ir.ViewT):
+        return f"ViewT"
 
     ##############################
     ## Core-level IR Value nodes (Used throughout entire compiler flow)
@@ -702,19 +699,30 @@ class PrettyPrinterPass(Analysis):
         _, dom_expr = self.visit_children(node)
         return f"enum({dom_expr})"
 
+    @handles(ir.ViewT)
+    def _(self, node: ir.IsoT):
+        #A, B = self.visit_children(node)
+        #return f"{A} ≅ {B}"
+        return "VT"
+
+    #@handles(ir.IndexView)
+    #def _(self, node: ir.IndexView):
+    #    _, ridx = self.visit_children(node)
+    #    return ridx
+
     # Domain Capabilities
-    @handles(ir.EnumerableDomain)
-    def _(self, node: ir.EnumerableDomain) -> str:
-        return f"{{E}}"
+    #@handles(ir.EnumerableDomain)
+    #def _(self, node: ir.EnumerableDomain) -> str:
+    #    return f"{{E}}"
 
-    @handles(ir.SqueezableDomain)
-    def _(self, node: ir.SqueezableDomain) -> str:
-        return f"{{S}}"
+    #@handles(ir.SqueezableDomain)
+    #def _(self, node: ir.SqueezableDomain) -> str:
+    #    return f"{{S}}"
 
-    @handles(ir.NDDomain)
-    def _(self, node: ir.NDDomain) -> str:
-        carT = self.visit(node.T.carT)
-        return f"{carT}/ND"
+    #@handles(ir.NDDomain)
+    #def _(self, node: ir.NDDomain) -> str:
+    #    carT = self.visit(node.T.carT)
+    #    return f"{carT}/ND"
 
 
     ##############################

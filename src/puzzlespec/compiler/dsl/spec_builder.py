@@ -6,7 +6,6 @@ from puzzlespec.compiler.passes.analyses.pretty_printer import PrettyPrinterPass
 from puzzlespec.compiler.passes.analyses.bound_var_check import CheckBoundVars
 from puzzlespec.compiler.passes.transforms.resolve_vars import ResolveBoundVars, ResolveFreeVars, VarMap
 from puzzlespec.compiler.passes.transforms.add_refinements import free_var_refine, add_refinements
-from puzzlespec.compiler.passes.transforms.guard_opt import guard_opt
 from . import ast, ir
 from .envs import SymTable, TypeEnv
 from ..passes.pass_base import Context, PassManager

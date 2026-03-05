@@ -26,7 +26,6 @@ def range(*args: ast.IntOrExpr) -> nd.NDDomainExpr:
         lo, hi, step = args
     lo, hi, step = tuple(ast.IntExpr.make(v) for v in (lo, hi, step))
     T = ast.Int.DomT
-    cap = ast.wrap(ir.EnumerableDomain(T.DomT.node))
     node = ir.Range(T.refine(cap).node, lo.node, hi.node, step.node)
     return ast.wrap(node)
 

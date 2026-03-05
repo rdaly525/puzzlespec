@@ -1,9 +1,10 @@
 from __future__ import annotations
+from re import A
 import typing as tp
 
 from . import ir
 from dataclasses import dataclass
-from .utils import _has_bv
+from .utils import _has_bv, _is_value
 from ..passes.analyses.pretty_printer import pretty
 from ..passes.analyses.type_check import type_check
 from ..utils import BoolLat
@@ -12,6 +13,7 @@ import inspect
 @dataclass
 class TExpr:
     node: ir.Type
+
     def __post_init__(self):
         assert isinstance(self.node, ir.Type)
         if self.is_ref:
@@ -25,9 +27,7 @@ class TExpr:
     @property
     def _node(self):
         def get(node: ir.Type):
-            if isinstance(node, ir.RefT):
-                return get(node.T)
-            if isinstance(node, ir.GuardT):
+            if isinstance(node, (ir.RefT, ir.GuardT, ir.ViewWrapperT)):
                 return get(node.T)
             return node
         return get(self.node)
@@ -43,6 +43,26 @@ class TExpr:
         return None
 
     @property
+    def has_view(self):
+        return isinstance(self.node, ir.ViewWrapperT)
+
+    def forget_view(self):
+        if self.has_view:
+            return wrapT(self.node._children[0])
+        return self
+    
+    @property
+    def view(self) -> tp.Optional[ViewExpr]:
+        if self.has_view:
+            return wrap(self.node._children[1])
+        return None
+
+    def with_view(self, view: ViewExpr):
+        assert not self.has_view
+        node = ir.ViewWrapperT(self.node, view.node)
+        return wrapT(node)
+
+    @property
     def U(self) -> DomainExpr:
         if self.is_ref:
             return self.ref_dom
@@ -50,7 +70,6 @@ class TExpr:
 
     @property
     def DomT(self) -> DomainType:
-        ord = isinstance(self, (BoolType, IntType))
         return wrapT(ir.DomT(self.node))
 
     # Create a PiType
@@ -70,8 +89,12 @@ class TExpr:
 
     def guard(self, p: BoolExpr):
         p = BoolExpr.make(p)
-        node = ir.GuardT(self.node, p.node)
-        return type(self)(node)
+        raw = self.forget_view().node
+        node = ir.GuardT(raw, p.node)
+        T = wrapT(node)
+        if self.has_view:
+            return T.with_view(self.view)
+        return T
 
     def choose(self, plam: tp.Callable) -> Expr:
         lam = FuncExpr.make(self, plam)
@@ -172,7 +195,7 @@ class DomainType(TExpr):
     def __post_init__(self):
         super().__post_init__()
         if not isinstance(self._node, ir.DomT):
-            raise ValueError(f"Expected DomainType, got {self.node}")
+            raise ValueError(f"Expected DomainType, got {type(self.node)}")
 
     @property
     def carT(self) -> TExpr:
@@ -237,13 +260,27 @@ class FuncType(TExpr):
         else:
             return self.argT.U
 
+class ViewType(TExpr):
+    def __post_init__(self):
+        super().__post_init__()
+        if not isinstance(self.node, ir.ViewT):
+            raise ValueError(f"Expected ViewT, got {self.node}")
+
+    def make_expr(self, node: ir.Node) -> ViewExpr:
+        return self.node.make_ast(node)
+    
 def wrapT(T: ir.Type):
     assert isinstance(T, ir.Type)
+    #if isinstance(T, ir.ViewWrapperT):
+    #    # TODO how do I get the defined wrapper class
+    #    return ViewType(T)
     def get(T: ir.Type):
-        if isinstance(T, ir.RefT):
+        if isinstance(T, (ir.RefT, ir.GuardT, ir.ViewWrapperT)):
             return get(T.T)
         return T
     _T = get(T)
+    if isinstance(_T, ir.ViewT):
+        return ViewType(T)
     match type(_T):
         case ir.UnitT:
             return UnitType(T)
@@ -259,12 +296,11 @@ def wrapT(T: ir.Type):
             return SumType(T)
         case ir.DomT:
             domT = DomainType(T)
-            if domT._is_nd:
-                from .ast_nd import NDDomainType
-                return NDDomainType(T)
             return domT
         case ir.PiTHOAS:
             return FuncType(T)
+        case ir.ViewT:
+            return ViewType(T)
         case _:
             raise ValueError(f"Expected Type, got {T}")
 
@@ -291,6 +327,15 @@ class Expr:
     def _T(self) -> TExpr:
         return wrapT(self.T._node)
     
+    # raw node, no guards
+    @property
+    def _node(self) -> ir.Node:
+        def strip(node):
+            if isinstance(node, ir.Guard):
+                return strip(node._children[1])
+            return node
+        return strip(self.node)
+
     @classmethod
     def make(cls, val: tp.Any) -> Expr:
         if isinstance(val, Expr):
@@ -334,6 +379,16 @@ class Expr:
         return wrap(node)
 
     @property
+    def view(self):
+        return self.T.view
+
+    def with_view(self, view: ViewExpr):
+        assert isinstance(view, ViewExpr)
+        T = self.T.with_view(view)
+        node = self.node.replace(T.node, *self.node._children[1:])
+        return wrap(node)
+
+    @property
     def singleton(self):
         T = self.T.DomT
         cap_s = wrap(ir.SqueezableDomain(T.DomT.node))
@@ -341,9 +396,9 @@ class Expr:
         node = ir.Singleton(T.refine(cap_s & cap_e).node, self.node)
         return wrap(node)
 
-    def simplify(self, verbose=0) -> tp.Self:
+    def simplify(self, verbose=0, max_iter=5) -> tp.Self:
         from ..passes.utils import simplify
-        simp = simplify(self.node, hoas=True, verbose=verbose)
+        simp = simplify(self.node, hoas=True, verbose=verbose, max_iter=max_iter)
         return wrap(simp)
 
     def type_check(self) -> ir.Type:
@@ -453,10 +508,11 @@ class IntExpr(Expr):
         raise ValueError(f"Expected Int expression. Got {val}")
 
     def fin(self):
+        from . import ast_nd
         T = Int.DomT
-        cap = wrap(ir.EnumerableDomain(T.DomT.node))
-        node = ir.Fin(T.refine(cap).node, self.node)
-        return wrap(node)
+        dom: DomainExpr = wrap(ir.Fin(T.node, self.node))
+        view = ast_nd.IdxView.make(dom.identity)
+        return dom.with_view(view)
 
     def __add__(self, other: IntOrExpr) -> IntExpr:
         other = IntExpr.make(other)
@@ -757,22 +813,22 @@ class DomainExpr(Expr):
     def __contains__(self, elem: Expr) -> BoolExpr:
         raise ValueError("Cannot use 'in'. Use dom.contains(val). Blame python for not being able to do this")
     
-    def gather(self, dom: DomainExpr) -> DomainExpr:
-        if dom.T != self.T:
-            raise ValueError()
-        assert isinstance(dom, DomainExpr)
-        return dom
-        #return dom & self
-        #return dom.guard(dom <= self)
+    #def gather(self, dom: DomainExpr) -> DomainExpr:
+    #    if dom.T != self.T:
+    #        raise ValueError()
+    #    assert isinstance(dom, DomainExpr)
+    #    return dom
+    #    #return dom & self
+    #    #return dom.guard(dom <= self)
 
-    def __getitem__(self, dom: DomainExpr) -> DomainExpr:
-        if not isinstance(dom, DomainExpr):
-            raise ValueError(f"Expected domain, got {dom}")
-        if dom.T != self.T:
-            raise ValueError()
-        if not isinstance(dom, DomainExpr):
-            raise ValueError()
-        return self.gather(dom)
+    #def __getitem__(self, dom: DomainExpr) -> DomainExpr:
+    #    if not isinstance(dom, DomainExpr):
+    #        raise ValueError(f"Expected domain, got {dom}")
+    #    if dom.T != self.T:
+    #        raise ValueError()
+    #    if not isinstance(dom, DomainExpr):
+    #        raise ValueError()
+    #    return self.gather(dom)
 
     def _bound_var(self):
         bv = self.T.carT._bound_var()
@@ -861,7 +917,7 @@ class FuncExpr(Expr):
         return self.T.domain
 
     @property
-    def known_inj(self) -> Bool:
+    def known_inj(self) -> bool:
         inj = self.node._attrs.get('inj', None)
         if inj is not None:
             return inj == BoolLat.T
@@ -1054,8 +1110,19 @@ class EmptyFuncExpr(FuncExpr):
             raise ValueError("Must set EmptyFunc before using")
         return super().__getitem__(dom)
 
+class ViewExpr(Expr):
+    def __post_init__(self):
+        super().__post_init__()
+        if not isinstance(self.T, ViewType):
+            raise ValueError(f"Expected ViewType, got {self.T}")
+ 
+    def promote(self, node: ir.Node):
+        raise NotImplementedError()
+
 def wrap(node: ir.Node) -> Expr:
     T = wrapT(node.T)
+    if T.has_view:
+        return T.view.promote(node)
     # Base theory types
     if isinstance(T, UnitType):
         return UnitExpr(node)
@@ -1069,17 +1136,14 @@ def wrap(node: ir.Node) -> Expr:
         return TupleExpr(node)
     if isinstance(T, SumType):
         return SumExpr(node)
-    from . import ast_nd as nd
-    if isinstance(T, nd.NDDomainType):
-        return nd.NDDomainExpr(node)
+    if isinstance(T, ViewType):
+        return T.make_expr(node)
     if isinstance(T, DomainType):
-        if T._is_enumerable and not T._is_squeezable:
-            return nd.OrdDomainExpr(node)
         return DomainExpr(node)
     if isinstance(T, FuncType):
-        if isinstance(T.domain, nd.NDDomainExpr):
-            return nd.NDArrayExpr(node)
-        if isinstance(T.domain, nd.OrdDomainExpr):
-            return nd.ArrayExpr(node)
-        return FuncExpr(node)
+        f = FuncExpr(node)
+        if f.domain.T.has_view:
+            return f.domain.T.view.promote_func(node)
+        return f
+
     raise NotImplementedError(f"Cannot cast node {node} with T={T} to Expr")
