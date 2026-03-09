@@ -14,6 +14,7 @@ class CheckBoundVars(Analysis):
     name = "check_bound_vars"
 
     def run(self, root, ctx):
+        print(root)
         self.bv_stack = set()
         self.visit(root)
         return BVCheck()

@@ -202,6 +202,14 @@ class TypeCheckingPass(Analysis):
         self.Tmap[node] = T
         return T
 
+    @handles(ir.GuardT)
+    def _(self, node: ir.GuardT):
+        T, pT = self.visit_children(node)
+        if not _is_kind(pT, ir.BoolT):
+            raise TypeError(f"GuardT predicate type {pT} is not a BoolT")
+        self.Tmap[node] = T
+        return T
+
     @handles(ir.Choose)
     def _(self, node: ir.Choose):
         T, piT = self.visit_children(node)

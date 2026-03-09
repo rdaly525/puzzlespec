@@ -7,10 +7,11 @@ from .transforms.beta_reduction import BetaReductionHOAS, BetaReductionPass
 from .transforms import ConstFoldPass, AlgebraicSimplificationPass
 from .transforms.resolve_vars import ResolveBoundVars
 from .transforms.ord import OrdSimplificationPass
-from .transforms.guard_opt import GuardLift, GuardOpt
+from .transforms.guard_opt import GuardLift, GuardOpt, GuardStrip
+from .transforms.curry import CurryPass
 import enum
 
-def simplify(node: ir.Node, hoas: bool=False, verbose: int = 0, max_iter: int=5) -> ir.Node:
+def simplify(node: ir.Node, hoas: bool=False, strip_guards=False, verbose: int = 0, max_iter: int=5) -> ir.Node:
     opt_passes = [
         TypeCheckingPass(),
         GuardLift(),
@@ -20,11 +21,14 @@ def simplify(node: ir.Node, hoas: bool=False, verbose: int = 0, max_iter: int=5)
             AlgebraicSimplificationPass(),
             DomainSimplificationPass(),
             GuardOpt(),
-            #RefineSimplify(),
             BetaReductionHOAS() if hoas else BetaReductionPass()
         ],
+        #CurryPass(),
     ]
     ctx = Context()
     #pm = PassManager(*opt_passes, OrdSimplificationPass(), *opt_passes, verbose=verbose, max_iter=max_iter)
-    pm = PassManager(*opt_passes, verbose=verbose)
+    if strip_guards:
+        pm = PassManager(opt_passes, GuardStrip(), verbose=verbose)
+    else:
+        pm = PassManager(opt_passes, verbose=verbose)
     return pm.run(node, ctx)

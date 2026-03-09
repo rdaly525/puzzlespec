@@ -32,9 +32,8 @@ cell_digits = func_var(Cells, Digits, name="cell_digits") # Cells -> Digits
 ##############################
 
 # Alternate syntax
-Units = dom_lit
-p += nd.rows(cell_digits).forall(lambda row_vals: std.distinct(row_vals))
-p += nd.cols(cell_digits).forall(lambda col_vals: std.distinct(col_vals))
+#p += nd.rows(cell_digits).forall(lambda row_vals: std.distinct(row_vals))
+#p += nd.cols(cell_digits).forall(lambda col_vals: std.distinct(col_vals))
 
 # Box constraint
 p += nd.tiles(
@@ -50,12 +49,12 @@ OptionalDigits = U(Unit) + Digits # Dom[𝟙] ⊎ Digits
 givens = func_param(Cells, OptionalDigits, name="givens")
 
 # Given vals must be consistent with cell_digits
-p += Cells.forall(
-    lambda c: givens(c).match(      # pattern match for clue
-        lambda _: True,             # True if Unit
-        lambda d: cell_digits(c)==d # Same as cell_digit if given
-    )
-)
+#p += Cells.forall(
+#    lambda c: givens(c).match(      # pattern match for clue
+#        lambda _: True,             # True if Unit
+#        lambda d: cell_digits(c)==d # Same as cell_digit if given
+#    )
+#)
 
 spec = p.build("Sudoku")
 print(spec.optimize())

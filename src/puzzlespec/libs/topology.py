@@ -1,10 +1,9 @@
 from ..compiler.dsl import ast, ast_nd, ir
-from . import nd as nd_lib
+from . import nd
 import typing as tp
 from abc import abstractmethod
 
-fin = nd_lib.fin
-
+fin = nd.fin
 class Topology:
     pass
 

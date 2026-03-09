@@ -522,7 +522,7 @@ class PrettyPrinterPass(Analysis):
     @handles(ir.TupleLit)
     def _(self, node: ir.TupleLit) -> str:
         elements = self.visit_children(node)[1:]  # Skip type at index 0
-        if utils._is_concrete(node) or len(elements)<3:
+        if utils._is_concrete(node) or len(elements)<4:
             return "(" + ", ".join(es for es in elements) + ",)"
         return self._format_variadic_multiline(
             elements, 

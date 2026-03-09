@@ -216,21 +216,6 @@ class DomainType(TExpr):
         else:
             raise set()
 
-    @property
-    def _is_squeezable(self):
-        caps = self._caps
-        return any(isinstance(dom, ir.SqueezableDomain) for dom in caps)
-
-    @property
-    def _is_enumerable(self):
-        caps = self._caps
-        return any(isinstance(dom, ir.EnumerableDomain) for dom in caps)
-
-    @property
-    def _is_nd(self):
-        caps = self._caps
-        return any(isinstance(dom, ir.NDDomain) for dom in caps)
-
 class FuncType(TExpr):
     def __post_init__(self):
         super().__post_init__()
@@ -271,9 +256,6 @@ class ViewType(TExpr):
     
 def wrapT(T: ir.Type):
     assert isinstance(T, ir.Type)
-    #if isinstance(T, ir.ViewWrapperT):
-    #    # TODO how do I get the defined wrapper class
-    #    return ViewType(T)
     def get(T: ir.Type):
         if isinstance(T, (ir.RefT, ir.GuardT, ir.ViewWrapperT)):
             return get(T.T)
@@ -388,6 +370,13 @@ class Expr:
         node = self.node.replace(T.node, *self.node._children[1:])
         return wrap(node)
 
+    def forget_view(self):
+        if self.T.has_view:
+            newT = self.T.forget_view().node
+            node = self.node.replace(newT, *self.node._children[1:])
+            return wrap(node)
+        return self
+
     @property
     def singleton(self):
         T = self.T.DomT
@@ -396,9 +385,9 @@ class Expr:
         node = ir.Singleton(T.refine(cap_s & cap_e).node, self.node)
         return wrap(node)
 
-    def simplify(self, verbose=0, max_iter=5) -> tp.Self:
+    def simplify(self, verbose=0, strip_guards=False, max_iter=5) -> tp.Self:
         from ..passes.utils import simplify
-        simp = simplify(self.node, hoas=True, verbose=verbose, max_iter=max_iter)
+        simp = simplify(self.node, hoas=True, strip_guards=strip_guards, verbose=verbose, max_iter=max_iter)
         return wrap(simp)
 
     def type_check(self) -> ir.Type:
@@ -508,11 +497,9 @@ class IntExpr(Expr):
         raise ValueError(f"Expected Int expression. Got {val}")
 
     def fin(self):
-        from . import ast_nd
         T = Int.DomT
         dom: DomainExpr = wrap(ir.Fin(T.node, self.node))
-        view = ast_nd.IdxView.make(dom.identity)
-        return dom.with_view(view)
+        return dom
 
     def __add__(self, other: IntOrExpr) -> IntExpr:
         other = IntExpr.make(other)
@@ -699,8 +686,7 @@ class SumExpr(Expr):
 def cartprod(*doms: DomainExpr) -> DomainExpr:
     if not all(isinstance(dom, DomainExpr) for dom in doms):
         raise ValueError(f"Expected all DomainExpr, got {doms}")
-    squeezable = all(dom.T._is_squeezable for dom in doms)
-    if not squeezable and all(dom.T._is_enumerable for dom in doms):
+    if all(dom.T.has_view for dom in doms):
         from . import ast_nd
         return ast_nd.nd_cartprod(*doms)
     carT = ir.TupleT(*[dom.T.carT._node for dom in doms])
@@ -740,6 +726,15 @@ class DomainExpr(Expr):
     def as_refT(self) -> TExpr:
         return wrapT(ir.RefT(self.T.carT.node, self.node))
 
+    def as_nd(self) -> DomainExpr:
+        if self.T.has_view:
+            return self
+        from .ast_nd import fin
+        if isinstance(self.node, ir.Fin):
+            return fin(self.size)
+        else:
+            raise NotImplementedError()
+
     @property
     def size(self) -> IntExpr:
         node = ir.Card(ir.IntT(), self.node)
@@ -757,6 +752,12 @@ class DomainExpr(Expr):
         node = ir.Restrict(self.T._node, func_expr.node)
         d = wrap(node)
         return d
+
+    def dom_proj(self, i: int) -> DomainExpr:
+        if not (isinstance(self.T.carT, TupleType) and i in range(len(self.T.carT))):
+            raise ValueError(f"Cannot project {i} into value with type {self.T}")
+        node = ir.DomProj(self.T.carT[i].DomT.node, self.node, i)
+        return wrap(node)
 
     def contains(self, elem: Expr):
         elem = Expr.make(elem)
@@ -828,7 +829,7 @@ class DomainExpr(Expr):
     #        raise ValueError()
     #    if not isinstance(dom, DomainExpr):
     #        raise ValueError()
-    #    return self.gather(dom)
+    #    return dom
 
     def _bound_var(self):
         bv = self.T.carT._bound_var()
@@ -962,6 +963,9 @@ class FuncExpr(Expr):
 
     def __matmul__(self, other: FuncExpr):
         return self.compose(other)
+
+    def __mul__(self, other: FuncExpr):
+        return funcprod(self, other)
     
     # Func[Dom(A) -> B] -> Func[Dom(A) -> (A, B)]
     def enumerate(self) -> FuncExpr:
@@ -989,7 +993,13 @@ class FuncExpr(Expr):
     def sum(self) -> IntExpr:
         return IntExpr(ir.SumReduce(ir.IntT(), self.node))
     
-    def __call__(self, val: Expr) -> Expr:
+    def __call__(self, *vals: tp.Any) -> Expr:
+        if len(vals) ==1:
+            val = vals[0]
+        elif len(vals) > 1:
+            val = Expr.make(tuple(vals))
+        else:
+            raise ValueError()
         return self.apply(val)
     
     def gather(self, dom: DomainExpr):
@@ -997,7 +1007,6 @@ class FuncExpr(Expr):
 
     # Basically a 'gather'
     def __getitem__(self, dom: DomainExpr) -> FuncExpr:
-
         if not isinstance(dom, DomainExpr):
             raise ValueError(f"Can only index into funcs with a domain (i.e., a gather).\nFunc: {self}\n Got: {dom}")
         return self.gather(dom)
@@ -1109,6 +1118,20 @@ class EmptyFuncExpr(FuncExpr):
         if self.empty:
             raise ValueError("Must set EmptyFunc before using")
         return super().__getitem__(dom)
+
+# product of functions
+# (A -> B) -> (C -> D) -> AxC -> BxD
+def funcprod(*funcs: FuncExpr) -> FuncExpr:
+    if not all(isinstance(f, FuncExpr) for f in funcs):
+        raise ValueError(f"Expected FuncExpr, got {funcs}")
+    if len(funcs) == 1:
+        return funcs[0]
+    new_dom = cartprod(*[f.domain for f in funcs])
+    def prod(nidx: TupleExpr):
+        results = [func[nidx[i]] for i, func in enumerate(funcs)]
+        return TupleExpr.make(results)
+    inj = all(f.known_inj for f in funcs)
+    return FuncExpr.make(new_dom, prod, inj)
 
 class ViewExpr(Expr):
     def __post_init__(self):

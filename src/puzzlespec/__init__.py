@@ -7,12 +7,8 @@ Int = IntType(_ir.IntT())
 _base_types = ['Unit', 'Bool', 'Int']
 
 # ast constructors
-from .compiler.dsl.ast import cartprod, coproduct
+from .compiler.dsl.ast import cartprod, funcprod, coproduct
 _ast = ['cartprod', 'coproduct']
-
-# ND constructors
-#from .compiler.dsl.nd_lib import fin, range_ as range
-#_nd = ['fin', 'range']
 
 # constructors
 from .libs.std import sum, distinct, all_same, count, U, make_enum, enumT

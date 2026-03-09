@@ -192,11 +192,7 @@ class AlgebraicSimplificationPass(Transform):
                 return ir.Lit(T, False)
         if len(children) == 1:
             return children[0]
-        new_children = []
-        for i, c in enumerate(children):
-            if c in children[i+1:]:
-                continue
-            new_children.append(c)
+        new_children = set(children)
         return node.replace(T, *new_children)
 
     @handles(ir.Disj)

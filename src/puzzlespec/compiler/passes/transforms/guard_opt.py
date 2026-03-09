@@ -31,6 +31,29 @@ def _get_bvs(node: ir.Node):
     return ret
 
 # The goal is to lift up guards from child nodes to parent nodes
+class GuardStrip(Transform):
+    """ Removes all guards. Useful for printing
+    """
+    name = "guard_strip"
+
+    requires: tp.Tuple[type, ...] = ()
+    produces: tp.Tuple[type, ...] = ()
+
+    def run(self, root: ir.Node, ctx: Context) -> ir.Node:
+        new_root = self.visit(root)
+        return new_root
+
+    @handles(ir.Guard)
+    def _(self, node: ir.Node):
+        T, val, pre = self.visit_children(node)
+        return val
+
+    @handles(ir.GuardT)
+    def _(self, node: ir.Node):
+        T, pre = self.visit_children(node)
+        return T
+
+# The goal is to lift up guards from child nodes to parent nodes
 class GuardLift(Transform):
     """ Lifts top level guards
     """
@@ -47,16 +70,23 @@ class GuardLift(Transform):
             new_root = ast.wrap(new_root).guard(std.all(ast.wrap(p) for p in self.preds)).node
         return new_root
 
+    def handle_pre(self, pre: ir.Node):
+        if isinstance(pre, ir.Conj):
+            for c in pre._children[1:]:
+                self.preds.add(c)
+        else:
+            self.preds.add(pre)
+    
     @handles(ir.Guard)
     def _(self, node: ir.Guard):
         T, new_val, pre = self.visit_children(node)
-        self.preds.add(pre)
+        self.handle_pre(pre)
         return new_val
 
     @handles(ir.GuardT)
     def _(self, node: ir.GuardT):
         T, pre = self.visit_children(node)
-        self.preds.add(pre)
+        self.handle_pre(pre)
         return T
 
     def filter_preds(self, bv_name: str):

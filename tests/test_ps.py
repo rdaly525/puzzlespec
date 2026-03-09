@@ -1,33 +1,33 @@
 from puzzlespec import make_enum, var, func_var, Unit, Int, U, PuzzleSpecBuilder, VarSetter
+from puzzlespec.compiler.dsl.ast import cartprod
 from puzzlespec.libs import std
 from puzzlespec.libs import optional as opt, topology as topo, nd
 from puzzlespec.compiler.dsl import ast_nd
 
-fin = std.fin
 def test_basic():
     NDDomainExpr = ast_nd.NDDomainExpr
     NDArrayExpr  = ast_nd.NDArrayExpr
-    f = std.fin(5)
+    f = nd.fin(5)
     assert isinstance(f, NDDomainExpr)
     assert f.rank==1
-    print(f.shape)
-    print(f[2].simplify())
-    g = f.map(lambda i: fin(i+1), inj=True)
+    #print(f.shape)
+    #print(f[2].simplify())
+    g = f.map(lambda i: nd.fin(i+1), inj=True)
     assert isinstance(g, NDArrayExpr)
     assert isinstance(g[1], NDDomainExpr)
     assert isinstance(g[1:3], NDArrayExpr)
-    print(g[1:3].simplify())
+    #print(g[1:3].simplify())
     img = g.image
     assert isinstance(img, NDDomainExpr)
     assert isinstance(img[1], NDDomainExpr)
-    print(img)
+    #print(img)
     v = img[1].simplify()
-    assert isinstance(v, NDDomainExpr)
     print(v)
 
 #test_basic()
-
+#assert 0
 def test_vars():
+    fin = nd.fin
     n = var(Int, name='n')
     #m = var(fin(n), name='m')
     m = var(Int, name='m')
@@ -41,107 +41,70 @@ def test_vars():
 
 #test_vars()
 
-def test_1d():
+def test_nd():
+    fin = nd.fin
+    f = cartprod(fin(2), fin(4), fin(3))
+    print(f.map(lambda i,j,k: i+j+k)(0,1,2).simplify())
+    assert isinstance(f, ast_nd.NDDomainExpr)
+    assert f.rank==3
+    s = f[:,1,:]
+    assert isinstance(s, ast_nd.NDDomainExpr) and s.rank==2
+    #print(s.simplify())
+    g = s.map(lambda i,j, k: fin(i+j+k))
+    assert isinstance(g, ast_nd.NDArrayExpr) and g.rank==2
+    g.simplify()
+    img = g.image
+    assert isinstance(img, ast_nd.NDDomainExpr) and img.rank==2
+
+#test_nd()
+
+def test_windows():
     n = var(Int, name='n')
-    f1 = fin(n)
-    #f2 = nd.range(2, n)
+    f1 = nd.fin(9)
+    f2 = nd.range(2, n)
     for f in (
         f1, 
-        #f2,
+        f2,
     ):
-        print("*"*20)
-        print(f)
-        v0 = f[3]
-        print(v0.simplify())
-        v1 = f[3:5]
-        assert isinstance(v1, ast_nd.OrdDomainExpr)
-        print(v1.simplify())
-        wins = f.windows(3, 3)
-        print(wins.simplify())
-        win1 = wins[n]
+        wins = nd.windows(f, 3, 3)
+        assert isinstance(wins, ast_nd.NDDomainExpr)
+        win1 = wins[1]
+        assert isinstance(win1, ast_nd.NDDomainExpr)
         print(win1.simplify())
-        g = f.map(lambda i: i*i)
-        print(g.simplify())
-        g0 = g[n:n+3][2]
-        print(g0.simplify())
 
-#test_1d()
+#test_windows()
 
 def test_nd():
     n = var(Int, name='n')
     m = var(Int, name='m')
-    d = std.fin(n) * nd.fin(m)
+    d = nd.fin(n) * nd.fin(m)
     g = d[2:5, 3]
-    print(g)
+    assert isinstance(g, ast_nd.NDDomainExpr) and g.rank==1
     print(g.simplify())
     rows = nd.rows(d)
-    print(rows.simplify())
+    assert isinstance(rows, ast_nd.NDDomainExpr) and rows.rank==1
+    print(rows.simplify(strip_guards=True))
     row5 = rows[5]
+    assert isinstance(row5, ast_nd.NDDomainExpr) and row5.rank==1
     print(row5)
     print(row5.simplify())
-    f = d.map(lambda i,j: i+j)
+
     tiles = nd.tiles(d, (2,2), (2,2))
-    print("Tiles")
-    print(tiles)
-    tiles.type_check()
-    print(tiles.simplify())
+    assert isinstance(tiles, ast_nd.NDDomainExpr) and tiles.rank==2
+    tiles11 = tiles[1,1]
+    assert isinstance(tiles11, ast_nd.NDDomainExpr) and tiles11.rank==2
     f = d.map(lambda i, j: i*2+j, inj=True)
-    print(f)
-    print(f.simplify())
-    print(f[1,2].simplify())
+    assert isinstance(f, ast_nd.NDArrayExpr) and f.rank==2
     rows = nd.rows(f)
-    print(rows)
-    print("*"*30)
-    print(rows.simplify())
+    assert isinstance(rows, ast_nd.NDDomainExpr) and rows.rank==1
+    row1 = rows[1]
+    assert isinstance(row1, ast_nd.NDArrayExpr) and row1.rank==1
     tiles = nd.tiles(f, (2,2), (2,2))
-    print(tiles)
+    assert isinstance(tiles, ast_nd.NDDomainExpr) and tiles.rank==2
+    tiles11 = tiles[1,1]
+    assert isinstance(tiles11, ast_nd.NDArrayExpr) and tiles11.rank==2
     a = tiles.forall(lambda vals: std.distinct(vals))
+    print(a.simplify(strip_guards=True))
     print(a.simplify())
 
-#test_nd()
-
-def test_nd_vars():
-    n = var(Int, name='n')
-    #m = var(std.fin(n).unwrap(), name='m')
-    #print(m.simplify())
-    #f0 = func_var(std.fin(n), lambda i: nd.fin(m)[i[0]:3], name='f0')
-    #f0 = func_var(std.fin(n).unwrap(), nd.fin(m).unwrap(), name='f0')
-    #f0 = func_var(std.fin(n)*nd.fin(n), nd.fin(m), Int, name='f0')
-    f0 = func_var(std.fin(n)*nd.fin(8), Int, name='f0')
-    #print(f0[2,3].simplify())
-    rows = nd.rows(f0)
-    print(rows.type_check())
-    print("*"*30)
-    print(rows)
-    print("*"*30)
-    rs = rows.simplify()
-    print(rs)
-    print(rs.type_check())
-    assert 0
-    #print(rows.T)
-    b = rows.forall(lambda v: std.distinct(v))
-    print("*"*30)
-    print(b)
-    print("*"*30)
-    print(b.simplify())
-
-#test_nd_vars()
-
-
-def test_empty_func():
-    func = fin(5).empty_func()
-    for i in fin(5):
-        func[i] = i+1
-    print(func)
-    print(type(func))
-    print(func[3:7])
-
-def test_singleton():
-    print(get_dom_info(std.fin(4).node))
-    F = std.fin(5).map(lambda v: v.singleton)
-    p = get_dom_info(F(3).node)
-    print(p)
-    prod = std.fin(5)*nd.fin(2).singleton
-    p = get_dom_info(prod.node)
-    print(p)
-
+test_nd()

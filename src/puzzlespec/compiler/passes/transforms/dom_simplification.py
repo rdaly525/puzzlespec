@@ -198,12 +198,12 @@ class DomainSimplificationPass(Transform):
             f = ast.wrap(func)
             v = ast.wrap(val)
             return (f.domain.contains(v) & f(v)).node
-        if isinstance(dom, ir.Fin):
-            return (ast.wrap(val) < ast.wrap(dom).size).node
-        #if isinstance(dom, ir.CartProd):
-        #    d = ast.wrap(dom)
-        #    v = ast.wrap(val)
-        #    return std.all((d.dom_proj(i).contains(v[i]) for i, vi in enumerate(v))).node
+        #if isinstance(dom, ir.Fin):
+        #    return (ast.wrap(val) < ast.wrap(dom).size).node
+        if isinstance(dom, ir.CartProd) and isinstance(val, ir.TupleLit):
+            d = ast.wrap(dom)
+            v = ast.wrap(val)
+            return std.all((d.dom_proj(i).contains(v[i]) for i, vi in enumerate(v))).node
         return node.replace(T, dom, val)
 
     # NOT SOUND. Only shoud discharge if subset is proven

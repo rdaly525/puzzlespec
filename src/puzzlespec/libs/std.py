@@ -13,10 +13,7 @@ true = lit(True)
 false = lit(False)
 
 def fin(v: ast.IntOrExpr):
-    v = lit(v)
-    if not isinstance(v, ast.IntExpr):
-        raise ValueError(f"Expected IntExpr, got {v}")
-    return v.fin()
+    return ast.IntExpr.make(v).fin()
 
 def isqrt(v: ast.IntExpr) -> ast.IntExpr:
     #return ast.wrap(ir.Isqrt(ir.IntT(), v.node)).guard(v >=0)

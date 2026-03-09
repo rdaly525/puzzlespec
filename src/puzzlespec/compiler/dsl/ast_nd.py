@@ -41,6 +41,10 @@ class IdxView(ast.ViewExpr):
     def promote_func(self, node: ir.Node):
         return NDArrayExpr(node)
 
+    def as_dom(self):
+        img = self.idx_lam.image
+        return img.with_view(self)
+
     @classmethod
     def make(cls, lam: ast.FuncExpr):
         T = IRIdxViewT()
@@ -54,15 +58,13 @@ class IdxView(ast.ViewExpr):
     @property
     def shape_doms(self) -> tp.Tuple[ast.DomainExpr]:
         dom = self.idx_lam.domain
-        if isinstance(dom.node, ir.Fin):
-            doms = [dom]
-        elif isinstance(dom.node, ir.CartProd):
+        if isinstance(dom.node, ir.CartProd):
             doms = []
             for d in dom.node._children[1:]:
                 assert isinstance(d, ir.Fin)
                 doms.append(ast.wrap(d))
         else:
-            raise ValueError("Bad construction")
+            raise ValueError("Bad construction", type(dom.node))
         return tuple(doms)
  
     @property
@@ -72,15 +74,15 @@ class IdxView(ast.ViewExpr):
     @property
     def rank(self):
         return len(self.shape_doms)
-
-    #@property
-    #def A(self) -> ast.TExpr:
-    #    return ast.wrapT(self.node.A)
     
-    #@property
-    #def bdoms(self) -> tp.Tuple[ast.DomainExpr, ...]:
-    #    return tuple(ast.wrapT(d) for d in self.node.bdoms)
+def fin(n: ast.IntOrExpr) -> NDDomainExpr:
+    n = ast.IntExpr.make(n)
+    dom = n.fin()
+    idx = ast.cartprod(dom).map(lambda i: i[0])
+    view = IdxView.make(idx)
+    return dom.with_view(view)
 
+# None means [:]
 def _make_slice(N: ast.IntExpr, s: slice):
     lo, hi, step = s.start, s.stop, s.step
     if lo is None and hi is None and step is None:
@@ -98,6 +100,10 @@ class NDDomainExpr(ast.DomainExpr):
     def __post_init__(self):
         super().__post_init__()
         assert self.view is not None and isinstance(self.view, IdxView)
+
+    @property
+    def view(self) -> IdxView:
+        return self.T.view
 
     @property
     def idx_lam(self) -> ast.FuncExpr:
@@ -120,8 +126,8 @@ class NDDomainExpr(ast.DomainExpr):
         return NDArrayExpr(func.node)
 
     def __getitem__(self, vals: tp.Any) -> ast.Expr:
-        if isinstance(vals, ast.DomainExpr):
-            return super().__getitem__(vals)
+        #if isinstance(vals, ast.DomainExpr):
+        #    return super().__getitem__(vals)
         if not isinstance(vals, tuple):
             vals = (vals,)
         if len(vals) != self.rank:
@@ -132,74 +138,58 @@ class NDDomainExpr(ast.DomainExpr):
             if isinstance(v, (int, ast.IntExpr)):
                 cvals.append(ast.IntExpr.make(v))
             elif isinstance(v, slice):
-                lo, hi, step = _make_slice(sdom.size, v)
-                new_dom = (hi-lo).ceildiv(step).fin()
-                new_doms.append(new_dom)
-                cvals.append(lambda i: lo + i*step)
+                lhs = _make_slice(sdom.size, v)
+                if lhs is None:
+                    new_doms.append(sdom)
+                    cvals.append(lambda i: i)
+                else:
+                    lo, hi, step = lhs
+                    new_dom = (hi-lo).ceildiv(step).fin().forget_view()
+                    new_doms.append(new_dom)
+                    cvals.append(lambda i: lo + i*step)
             else:
                 raise NotImplementedError(f"Cannot handle {v} in indexing")
         # If no slices, return the element
         if len(new_doms)==0:
-            elem = self.idx_lam(*cvals)
-            # Hack to tell if returned a single element
+            elem = self.idx_lam(tuple(cvals))
             elem._raw_elem = True
             return elem
         # Else return a new ND domain
         # N -> T = (O -> T) @ (N -> O)
         def new_to_old(nidx):
-            if len(new_doms)==1:
-                nidx = ast.TupleExpr.make((nidx,))
             oidx = []
             ni = 0
-            for oi, v in enumerate(cvals):
+            for v in cvals:
                 if isinstance(v, ast.IntExpr):
                     oidx.append(v)
                 else:
                     oidx.append(v(nidx[ni]))
                     ni +=1
             oidx = tuple(oidx)
-            if len(oidx)==1:
-                return oidx[0]
             return oidx
-        if len(new_doms)==1:
-            new_dom = new_doms[0]
-        else:
-            new_dom = ast.cartprod(*new_doms)
+        new_dom = ast.cartprod(*new_doms)
         nto = new_dom.map(new_to_old)
         new_idx = self.idx_lam @ nto
-        
-        #view = IdxView.make(new_idx)
-        #view_s = view.simplify()
-        img = new_idx.image
-        #new_dom = img.with_view(view)
-        #new_dom._raw_elem = False
+        img = IdxView.make(new_idx).as_dom()
         img._raw_elem = False
         return img 
-        #return new_dom
 
-def nd_cartprod(*doms: ast.DomainExpr) -> NDDomainExpr:
-    assert all(dom.T._is_enumerable for dom in doms)
-    if all(dom.T._is_squeezable for dom in doms):
-        return ast.cartprod(*doms)
-    bdoms = []
+def nd_cartprod(*doms: NDDomainExpr) -> NDDomainExpr:
+    sdoms = []
     for dom in doms:
-        if isinstance(dom, NDDomainExpr):
-            bdoms.extend(dom.base_doms)
-        else:
-            bdoms.append(dom)
-    factorTs = [dom.T for dom in bdoms]
-    carT = ast.wrapT(ir.TupleT(*(T.carT.node for T in factorTs)))
-    capND = ir.NDDomain(
-        carT.DomT.DomT.node,
-        *(dom.node for dom in bdoms),
-    )
-    T = carT.DomT.refine(ast.wrap(capND))
-    assert isinstance(T, NDDomainType)
-    node = ir.CartProd(
-        T.node,
-        *(dom.node for dom in bdoms)
-    )
-    return NDDomainExpr(node)
+        sdoms.extend(dom.shape_doms)
+    def prod(nidx: ast.TupleExpr):
+        res = []
+        i = 0
+        for oi, dom in enumerate(doms):
+            idx_lam = dom.view.idx_lam
+            res.append(idx_lam(nidx[i:i+dom.rank]))
+            i += dom.rank
+        return ast.TupleExpr.make(tuple(res))
+    inj = all(dom.view.idx_lam.known_inj for dom in doms)
+    new_idx = ast.cartprod(*sdoms).map(prod, inj)
+    view = IdxView.make(new_idx)
+    return view.as_dom()
 
 # Func[NDDom -> T]
 class NDArrayExpr(ast.FuncExpr):
@@ -226,9 +216,10 @@ class NDArrayExpr(ast.FuncExpr):
         return img.with_view(view)
 
     def __getitem__(self, val: tp.Any) -> ast.Expr | NDArrayExpr:
+        if isinstance(val, ast.DomainExpr):
+            return super().__getitem__(val)
         dom = self.domain[val]
-        assert hasattr(dom, '_raw_elem')
-        if dom._raw_elem:
+        if hasattr(dom, '_raw_elem') and dom._raw_elem:
             return self(dom)
         else:
             return super().__getitem__(dom)
