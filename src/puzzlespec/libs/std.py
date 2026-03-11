@@ -6,8 +6,8 @@ import typing as tp
 Nat = ast.Int.refine(lambda i: i>0)
 Nat0 = ast.Int.refine(lambda i: i>=0)
 
-def lit(v: tp.Any) -> ast.Expr:
-    return ast.Expr.make(v)
+def lit(v: tp.Any) -> ast.VExpr:
+    return ast.VExpr.make(v)
 
 true = lit(True)
 false = lit(False)
@@ -113,7 +113,7 @@ def _quantify(
     if len(doms)==0:
         raise ValueError("Must provide at least one domain for quantifiers")
     
-    def _make(doms, bvs: tp.Tuple[ast.Expr, ...]=None):
+    def _make(doms, bvs: tp.Tuple[ast.VExpr, ...]=None):
         if len(doms)==0:
             return body(*bvs)
         if bvs is None:

@@ -809,6 +809,28 @@ class TypeCheckingPass(Analysis):
         self.Tmap[node] = T
         return T
 
+    # f: B -> C
+    # g: A -> B
+    # fog: A -> C
+    # (B -> C) -> (A -> B) -> (A -> C)
+    @handles(ir.Compose)
+    def _(self, node: ir.Compose):
+        fogT, fT, gT = self.visit_children(node)
+        if not isinstance(fogT, ir._PiT):
+            raise TypeError(f"Compose must have PiT type, got {fogT}")
+        if not isinstance(fT, ir._PiT):
+            raise TypeError(f"Compose must have PiT type, got {fT}")
+        if not isinstance(gT, ir._PiT):
+            raise TypeError(f"Compose must have PiT type, got {gT}")
+        if not _is_same_kind(fogT.resT, fT.resT):
+            raise TypeError(f"Compose result type {fogT.resT} does not match function result type {fT.resT}")
+        if not _is_same_kind(fT.argT, gT.resT):
+            raise TypeError(f"Compose function argument type {fT.argT} does not match function result type {gT.resT}")
+        if not _is_same_kind(gT.argT, fogT.argT):
+            raise TypeError(f"Compose function result type {gT.resT} does not match function result type {fogT.resT}")
+        self.Tmap[node] = fogT
+        return fogT
+
     @handles(ir.FuncLit)
     def _(self, node: ir.FuncLit):
         T, domT, *elemsT = self.visit_children(node)

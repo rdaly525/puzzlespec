@@ -9,6 +9,8 @@ from .transforms.resolve_vars import ResolveBoundVars
 from .transforms.ord import OrdSimplificationPass
 from .transforms.guard_opt import GuardLift, GuardOpt, GuardStrip
 from .transforms.curry import CurryPass
+from .transforms.nd_simplification import NDSimplificationPass
+from .analyses.verifydag import VerifyDag
 import enum
 
 def simplify(node: ir.Node, hoas: bool=False, strip_guards=False, verbose: int = 0, max_iter: int=5) -> ir.Node:
@@ -21,8 +23,10 @@ def simplify(node: ir.Node, hoas: bool=False, strip_guards=False, verbose: int =
             AlgebraicSimplificationPass(),
             DomainSimplificationPass(),
             GuardOpt(),
-            BetaReductionHOAS() if hoas else BetaReductionPass()
+            BetaReductionHOAS() if hoas else BetaReductionPass(),
+            VerifyDag()
         ],
+        NDSimplificationPass(),
         #CurryPass(),
     ]
     ctx = Context()

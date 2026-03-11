@@ -4,7 +4,7 @@ import typing as tp
 
 from ..pass_base import Analysis, AnalysisObject, Context, handles
 from ..envobj import EnvsObj, SymTable
-from ...dsl import ir
+from ...dsl import ir, ast
 
 class UsesResult(AnalysisObject):
     def __init__(self, use_cnt):
@@ -27,11 +27,13 @@ class Uses(Analysis):
             else:
                 self.use_cnt[c] = 1
 
+def print_ssa(node: ir.Node):
+    text = SSAPrinter()(node, Context()).text
+    print(text)
 
 class SSAResult(AnalysisObject):
     def __init__(self, text):
         self.text = text
-
 
 class SSAPrinter(Analysis):
     """
@@ -40,14 +42,58 @@ class SSAPrinter(Analysis):
 
     """
 
-    requires = (EnvsObj,)  
+    requires = ()  
+    produces = (SSAResult,)  
+    name = "ssa_printer"
+    enable_memoization=False
+
+    def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
+        self.tcnt = 0
+        self.vcnt = 0
+        self.vmap = {}
+        self.decls = []
+        res = self.visit(root)
+        text = "\n" + "\n".join(self.decls) + "\n"
+        return SSAResult(text)
+
+    def new_var(self, node: ir.Node):
+        if isinstance(node, ir.Type):
+            v = f"t{self.tcnt}"
+            self.tcnt += 1
+        else:
+            v = f"x{self.vcnt}"
+            self.vcnt += 1
+        return v
+
+    def visit(self, node: ir.Node):
+        if node not in self.vmap:
+            cvals= self.visit_children(node)
+            vname = self.new_var(node)
+            fstr = ""
+            if len(node.field_dict) > 0:
+                fstr = "[" + ", ".join(f"{k}={v}" for k,v in node.field_dict.items()) + "]"
+            cs = ", ".join(cvals)
+            decl = f"{vname} = {node.__class__.__name__}{fstr}({cs})"
+            decl += f" {ast.wrap(node)._freevars}"
+            #decl += f" {ast.wrap(node)}"
+            self.decls.append(decl)
+            self.vmap[node] = vname
+        return self.vmap[node]
+
+
+ 
+class _SSAPrinter(Analysis):
+    """
+    Creates a python AST object that is a 'serialization' of a SpecObject
+    This will be in SSA form and will look something like:
+
+    """
+
+    requires = ()  
     produces = (SSAResult,)  
     name = "ssa_printer"
 
     def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
-        """Main entry point for the analysis pass."""
-        self.tenv: TypeEnv = ctx.get(EnvsObj).tenv
-        self.sym: SymTable = ctx.get(EnvsObj).sym
         self.decls = {}
         self.var_names = set()
         self.use_cnt = Uses()(root, ctx).use_cnt

@@ -51,12 +51,9 @@ class Node:
         new_fields = {**self.field_dict, **kwargs}
         if (new_fields == self.field_dict) and (new_children == self._children):
             return self
-        #print("REPLACE", type(self))
-        #print("OLD:", self)
         new_node = type(self)(*new_children, **new_fields)
         for an, val in self._attrs.items():
             new_node._attrs[an] = val
-        #print("NEW:", new_node)
         return new_node
 
     def __init_subclass__(cls, **kwargs):
@@ -183,7 +180,6 @@ class TupleT(Type):
     def __len__(self):
         return len(self._children)
 
-
 class SumT(Type):
     _numc = -1
     def __init__(self, *ts: Type):
@@ -201,6 +197,7 @@ class SumT(Type):
     def __len__(self):
         return len(self._children)
 
+
 class DomT(Type):
     _numc = 1
     def __init__(self, carT: Type):
@@ -209,6 +206,7 @@ class DomT(Type):
     @property
     def carT(self) -> Type:
         return self._children[0]
+
 
 class _PiT(Type):
     @property
@@ -351,8 +349,6 @@ class Lit(Value):
     _fields = ("val",)
     _numc = 1
     def __init__(self, T: Type, val: tp.Any):
-        if val == -9:
-            raise ValueError()
         self.val = val
         super().__init__(T)
 
@@ -594,17 +590,19 @@ class Exists(Value):
     def __init__(self, T: Type, func: Value):
         super().__init__(T, func)
 
-## Dom(A) -> (A->B) -> Func(Dom(A)->B)
-#class Map(Value):
-#    _numc=3
-#    def __init__(self, T: Type, dom: Value, lam: Value):
-#        super().__init__(T, dom, lam)
+#Compose
+# (B -> C) -> (A -> B) -> (A -> C)
+class Compose(Value):
+    _numc=-1
+    def __init__(self, T: Type, *lams: Value):
+        super().__init__(T, *lams)
 
 @dataclass(eq=True, frozen=True)
 class _FuncLitLayout:
     def index(self, val) -> tp.Optional[bool]:
         raise NotImplementedError()
     ...
+
 class _SparseLayout(_FuncLitLayout):
     ...
 
@@ -655,15 +653,6 @@ class Apply(Value):
     _numc = 3
     def __init__(self, T: Type, func: Value, arg: Value):
         super().__init__(T, func, arg)
-
-# F: B -> C
-# G: A -> B
-# Compose == F o G
-class Compose(Value):
-    _numc = 3
-    def __init__(self, T: Type, f: Value, g: Value):
-        super().__init__(T, f, g)
-
 
 # only used on Seq Funcs TODO maybe should have scan as the fundimental IR node
 # OrdDom[A] -> ((A,B) -> B) -> B -> B

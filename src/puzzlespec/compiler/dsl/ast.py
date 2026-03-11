@@ -1,17 +1,39 @@
 from __future__ import annotations
-from re import A
 import typing as tp
 
 from . import ir
 from dataclasses import dataclass
 from .utils import _has_bv, _is_value
 from ..passes.analyses.pretty_printer import pretty
+from ..passes.analyses.free_vars import get_free_vars
 from ..passes.analyses.type_check import type_check
+from ..passes.analyses.ast_printer import print_ast
+from ..passes.analyses.ssa_printer import print_ssa
+from ..passes.analyses.info import count
 from ..utils import BoolLat
 import inspect
 
 @dataclass
-class TExpr:
+class Expr:
+    node: ir.Node
+
+    def __repr__(self):
+        return pretty(self.node)
+
+    @property
+    def _freevars(self):
+        return get_free_vars(self.node)
+
+    def _print_ast(self):
+        print(print_ast(self.node))
+
+    def _print_ssa(self):
+        print_ssa(self.node)
+
+    def _size(self, unique=True):
+        return count(self.node, unique)
+
+class TExpr(Expr):
     node: ir.Type
 
     def __post_init__(self):
@@ -96,7 +118,7 @@ class TExpr:
             return T.with_view(self.view)
         return T
 
-    def choose(self, plam: tp.Callable) -> Expr:
+    def choose(self, plam: tp.Callable) -> VExpr:
         lam = FuncExpr.make(self, plam)
         node = ir.Choose(self.node, lam.node)
         return wrap(node)
@@ -226,9 +248,11 @@ class FuncType(TExpr):
     def argT(self) -> TExpr:
         return wrapT(self._node.argT)
 
-    def resT(self, arg: Expr):
+    def resT(self, arg: VExpr):
         from ..passes.transforms.beta_reduction import applyT
-        return wrapT(applyT(self._node, arg.node))
+        rT_node = applyT(self._node, arg.node)
+        rT = wrapT(rT_node)
+        return rT
 
     @property
     def _raw_resT(self):
@@ -286,15 +310,12 @@ def wrapT(T: ir.Type):
         case _:
             raise ValueError(f"Expected Type, got {T}")
 
-class ExprMakeError(Exception):
+class VExprMakeError(Exception):
     def __init__(self, message: str):
         self.message = message
         super().__init__(self.message)
 
-@dataclass
-class Expr:
-    node: ir.Value
-
+class VExpr(Expr):
     def __post_init__(self):
         if not isinstance(self.node, ir.Value):
             raise ValueError(f"Expr must be an ir.Value, got {self.node}")
@@ -319,10 +340,10 @@ class Expr:
         return strip(self.node)
 
     @classmethod
-    def make(cls, val: tp.Any) -> Expr:
-        if isinstance(val, Expr):
-            if type(val)==Expr:
-                raise ValueError("Raw Expr found!!", val)
+    def make(cls, val: tp.Any) -> VExpr:
+        if isinstance(val, VExpr):
+            if type(val)==VExpr:
+                raise ValueError("Raw VExpr found!!", val)
             return val
         if isinstance(val, bool):
             return BoolExpr.make(val)
@@ -332,10 +353,10 @@ class Expr:
             return TupleExpr.make(val)
         if isinstance(val, set):
             return DomainExpr.make(val)
-        raise ExprMakeError(f"Cannot make Expr from {val}")
+        raise VExprMakeError(f"Cannot make VExpr from {val}")
 
     def __eq__(self, other):
-        other = Expr.make(other)
+        other = VExpr.make(other)
         if self.T != other.T:
             raise ValueError(f"Cannot compare {self.T} and {other.T}")
         return BoolExpr(ir.Eq(ir.BoolT(), self.node, other.node))
@@ -343,8 +364,7 @@ class Expr:
     def __ne__(self, other):
         return ~(self == other)
 
-    def __repr__(self):
-        return pretty(self.node)
+
 
     def refine(self, v: DomainExpr | tp.Callable):
         if isinstance(v, DomainExpr):
@@ -356,6 +376,7 @@ class Expr:
         return type(self)(new_node)
 
     def guard(self, p: BoolExpr):
+        return self
         p = BoolExpr.make(p)
         node = ir.Guard(self.T.node, self.node, p.node)
         return wrap(node)
@@ -394,7 +415,7 @@ class Expr:
         return type_check(self.node)
 
 
-class UnitExpr(Expr):
+class UnitExpr(VExpr):
     def __post_init__(self):
         super().__post_init__()
         if not isinstance(self._T, UnitType):
@@ -409,7 +430,7 @@ class UnitExpr(Expr):
         node = ir.Unit(ir.UnitT())
         return UnitExpr(node)
 
-class BoolExpr(Expr):
+class BoolExpr(VExpr):
     def __post_init__(self):
         super().__post_init__()
         if not isinstance(self._T, BoolType):
@@ -452,8 +473,8 @@ class BoolExpr(Expr):
 
     __ror__ = __or__
 
-    def ite(self, t: Expr, f: Expr) -> Expr:
-        t, f = Expr.make(t), Expr.make(f)
+    def ite(self, t: VExpr, f: VExpr) -> VExpr:
+        t, f = VExpr.make(t), VExpr.make(f)
         node = ir.Ite(t.T._node, self.node, t.node, f.node)
         return type(t)(node)
 
@@ -477,7 +498,7 @@ class BoolExpr(Expr):
         node = ir.Disj(ir.BoolT(), *[BoolExpr.make(a).node for a in args])
         return BoolExpr(node)
 
-class IntExpr(Expr):
+class IntExpr(VExpr):
     def __post_init__(self):
         super().__post_init__()
         if not isinstance(self._T, IntType):
@@ -573,7 +594,7 @@ class IntExpr(Expr):
     def __bool__(self) -> bool:
         raise TypeError("IntExpr cannot be used as a python boolean")
 
-class EnumExpr(Expr):
+class EnumExpr(VExpr):
     def __post_init__(self):
         super().__post_init__()
         if not isinstance(self._T, EnumType):
@@ -590,11 +611,11 @@ class EnumExpr(Expr):
         raise NotImplementedError(f"cannot cast {val} to EnumExpr")
 
 IntOrExpr = tp.Union[int, IntExpr]
-BoolOrExpr = tp.Union[bool, BoolExpr, Expr]
-EnumOrExpr = tp.Union[str, EnumExpr, Expr]
+BoolOrExpr = tp.Union[bool, BoolExpr, VExpr]
+EnumOrExpr = tp.Union[str, EnumExpr, VExpr]
 
 
-class TupleExpr(Expr):
+class TupleExpr(VExpr):
     def __post_init__(self):
         super().__post_init__()
         if not isinstance(self._T, TupleType):
@@ -611,16 +632,16 @@ class TupleExpr(Expr):
         if isinstance(vals, TupleExpr):
             return vals
         if isinstance(vals, tp.Tuple):
-            vals = tuple(Expr.make(v) for v in vals)
+            vals = tuple(VExpr.make(v) for v in vals)
             node = ir.TupleLit(ir.TupleT(*[e.T._node for e in vals]), *[e.node for e in vals])
             return TupleExpr(node)
-        raise ExprMakeError(f"Cannot make TupleExpr from {vals}")
+        raise VExprMakeError(f"Cannot make TupleExpr from {vals}")
 
     @classmethod
     def empty(cls):
         return cls.make()
 
-    def __getitem__(self, idx: int|slice) -> Expr:
+    def __getitem__(self, idx: int|slice) -> VExpr:
         if isinstance(idx, int):
             if idx < 0 or idx >= len(self):
                 raise IndexError(f"Tuple index out of range: {idx}")
@@ -646,7 +667,7 @@ class TupleExpr(Expr):
         for i in range(len(self)):
             yield self[i]
 
-class SumExpr(Expr):
+class SumExpr(VExpr):
     def __post_init__(self):
         super().__post_init__()
         if not isinstance(self._T, SumType):
@@ -654,7 +675,7 @@ class SumExpr(Expr):
 
     @classmethod
     def make(cls, T: SumType, val: tp.Any):
-        val = Expr.make(val)
+        val = VExpr.make(val)
         idx = None
         for i, eT in enumerate(T.elemTs):
             if type(val.T)==type(eT):
@@ -668,7 +689,7 @@ class SumExpr(Expr):
     def T(self) -> SumType:
         return tp.cast(SumType, super().T)
  
-    def match(self, *branches: tp.Callable) -> Expr:
+    def match(self, *branches: tp.Callable) -> VExpr:
         if len(branches) != len(self.T):
             raise ValueError(f"Need a branch for each element of the sum type, got {len(branches)} branches for {len(self.T)} elements")
         branch_exprs = []
@@ -704,7 +725,7 @@ def coproduct(*doms: DomainExpr) -> DomainExpr:
     return wrap(coprod_node)
 
 
-class DomainExpr(Expr):
+class DomainExpr(VExpr):
     def __init__(self, node: ir.Value):
         super().__init__(node)
 
@@ -759,8 +780,8 @@ class DomainExpr(Expr):
         node = ir.DomProj(self.T.carT[i].DomT.node, self.node, i)
         return wrap(node)
 
-    def contains(self, elem: Expr):
-        elem = Expr.make(elem)
+    def contains(self, elem: VExpr):
+        elem = VExpr.make(elem)
         node = ir.IsMember(ir.BoolT(), self.node, elem.node)
         return BoolExpr(node)
 
@@ -811,7 +832,7 @@ class DomainExpr(Expr):
     def __or__(self, other: DomainExpr) -> DomainExpr:
         return self.union(other)
 
-    def __contains__(self, elem: Expr) -> BoolExpr:
+    def __contains__(self, elem: VExpr) -> BoolExpr:
         raise ValueError("Cannot use 'in'. Use dom.contains(val). Blame python for not being able to do this")
     
     #def gather(self, dom: DomainExpr) -> DomainExpr:
@@ -834,7 +855,6 @@ class DomainExpr(Expr):
     def _bound_var(self):
         bv = self.T.carT._bound_var()
         return bv.refine(self)
-        #return bv
 
     def __iter__(self):
         yield self._bound_var()
@@ -869,7 +889,7 @@ def _num_fn_args(fn: tp.Callable):
     fn_args = sum(v.default is inspect.Parameter.empty for v in sig.parameters.values())
     return fn_args
 
-def _call_fn(fn: tp.Callable, expr: Expr) -> Expr:
+def _call_fn(fn: tp.Callable, expr: VExpr) -> VExpr:
     fn_args = _num_fn_args(fn)
     if fn_args==1:
         ret = fn(expr)
@@ -878,9 +898,9 @@ def _call_fn(fn: tp.Callable, expr: Expr) -> Expr:
         ret = fn(*args)
     else:
         raise ValueError(f"Function has wrong number of arguments for sort. Expected {fn_args}, got {len(expr.T)}")
-    return Expr.make(ret)
+    return VExpr.make(ret)
 
-def _make_lambda(argT: TExpr, body: Expr, bv_name, inj=False) -> FuncExpr:
+def _make_lambda(argT: TExpr, body: VExpr, bv_name, inj=False) -> FuncExpr:
     assert isinstance(argT, TExpr)
     retT = body.T.node
     lamT = ir.PiTHOAS(argT.node, retT, bv_name=bv_name)
@@ -889,7 +909,7 @@ def _make_lambda(argT: TExpr, body: Expr, bv_name, inj=False) -> FuncExpr:
         lambda_node._attrs['inj'] = BoolLat.T
     return lambda_node
 
-class FuncExpr(Expr):
+class FuncExpr(VExpr):
     def __post_init__(self):
         super().__post_init__()
         if not isinstance(self._T, FuncType):
@@ -932,8 +952,8 @@ class FuncExpr(Expr):
         node = ir.Image(imgT.node, self.node)
         return wrap(node)
 
-    def apply(self, arg: Expr) -> Expr:
-        arg = Expr.make(arg)
+    def apply(self, arg: VExpr) -> VExpr:
+        arg = VExpr.make(arg)
         if self.T.argT != arg.T:
             raise ValueError(f"Cannot apply a {arg.T} to {self._T.argT}")
         node = ir.Apply(
@@ -941,6 +961,8 @@ class FuncExpr(Expr):
             func = self.node,
             arg = arg.node
         )
+        if arg.T.ref_dom is not None and arg.T.ref_dom.node==self.domain.node:
+            return wrap(node)
         return wrap(node).guard(self.domain.contains(arg))
         #return wrap(node)
 
@@ -948,21 +970,21 @@ class FuncExpr(Expr):
     def map(self, fn: tp.Callable) -> FuncExpr:
         return self.domain.map(lambda a: _call_fn(fn, self.apply(a)))
 
-    # From lam
-    def compose(self, other: FuncExpr):
-        if not isinstance(other, FuncExpr):
-            raise ValueError(f"Expected LambdaExpr, got {other}")
-        if self.T.argT != other.T._raw_resT:
-            raise ValueError(f"Composition {self.T} @ {other.T} is not valid")
-        def lam(a: Expr):
-            b = other.apply(a)
-            c = self.apply(b)
-            return c
-        inj = self.known_inj and other.known_inj
-        return FuncExpr.make(other.T.argT, lam, inj)
+
+    #def compose(self, other: FuncExpr):
+    #    if not isinstance(other, FuncExpr):
+    #        raise ValueError(f"Expected LambdaExpr, got {other}")
+    #    if self.T.argT != other.T._raw_resT:
+    #        raise ValueError(f"Composition {self.T} @ {other.T} is not valid")
+    #    def lam(a: VExpr):
+    #        b = other.apply(a)
+    #        c = self.apply(b)
+    #        return c
+    #    inj = self.known_inj and other.known_inj
+    #    return FuncExpr.make(other.T.argT, lam, inj)
 
     def __matmul__(self, other: FuncExpr):
-        return self.compose(other)
+        return compose(self, other)
 
     def __mul__(self, other: FuncExpr):
         return funcprod(self, other)
@@ -993,11 +1015,11 @@ class FuncExpr(Expr):
     def sum(self) -> IntExpr:
         return IntExpr(ir.SumReduce(ir.IntT(), self.node))
     
-    def __call__(self, *vals: tp.Any) -> Expr:
+    def __call__(self, *vals: tp.Any) -> VExpr:
         if len(vals) ==1:
             val = vals[0]
         elif len(vals) > 1:
-            val = Expr.make(tuple(vals))
+            val = VExpr.make(tuple(vals))
         else:
             raise ValueError()
         return self.apply(val)
@@ -1011,6 +1033,41 @@ class FuncExpr(Expr):
             raise ValueError(f"Can only index into funcs with a domain (i.e., a gather).\nFunc: {self}\n Got: {dom}")
         return self.gather(dom)
 
+# TN-1 -> TN, ..., T1 -> T2, T0 -> T1
+def compose(*lams: FuncExpr, guard=False):
+    if not all(isinstance(lam, FuncExpr) for lam in lams):
+        raise ValueError(f"Expected FuncExpr, got {lams}")
+    if len(lams) == 1:
+        return lams[0]
+    if len(lams)==0:
+        raise ValueError("Must provide at least one function")
+
+    # Check compatibility of all underlying types
+    for f, g in zip(lams[:-1], lams[1:]):
+        if f.T.argT != g.T._raw_resT:
+            raise ValueError(f"Composition {f.T} @ {g.T} is not valid")
+    inj = all(lam.known_inj for lam in lams)
+
+    # Construct obligation guard (B -> C) -> (A -> B') => (B' ⊆ B)
+    guards = []
+    for f, g in zip(lams[:-1], lams[1:]):
+        guards.append(g.image <= f.domain)
+
+    # Construct new Pi type for composition
+    def compose_lam(arg):
+        for lam in reversed(lams):
+            arg = lam(arg)
+        return arg
+    _lam = FuncExpr.make(lams[-1].domain, compose_lam, inj=inj)
+    node = ir.Compose(
+        _lam.T.node,
+        *(lam.node for lam in lams)
+    )
+    lam = wrap(node)
+    if guard:
+        from ...libs import std
+        return lam.guard(std.all(guards))
+    return lam
 
 class EmptyFuncExpr(FuncExpr):
     def __init__(self, dom: DomainExpr):
@@ -1029,8 +1086,8 @@ class EmptyFuncExpr(FuncExpr):
         return super().T
 
     def __setitem__(self, k, val):
-        val = Expr.make(val)
-        if (isinstance(k, Expr) and isinstance(k.node, ir.BoundVarHOAS)):
+        val = VExpr.make(val)
+        if (isinstance(k, VExpr) and isinstance(k.node, ir.BoundVarHOAS)):
             # verify it came from correct dom
             T = k.node.T
             if isinstance(T, ir.RefT) and T.dom._key == self.dom.node._key:
@@ -1055,7 +1112,7 @@ class EmptyFuncExpr(FuncExpr):
             raise ValueError("Must set EmptyFunc before using")
         return super().image
 
-    def apply(self, arg: Expr) -> Expr:
+    def apply(self, arg: VExpr) -> VExpr:
         if self.empty:
             raise ValueError("Must set EmptyFunc before using")
         return super().apply(arg)
@@ -1098,12 +1155,12 @@ class EmptyFuncExpr(FuncExpr):
             raise ValueError("Must set EmptyFunc before using")
         return super().sum()
     
-    def __contains__(self, elem: Expr) -> BoolExpr:
+    def __contains__(self, elem: VExpr) -> BoolExpr:
         if self.empty:
             raise ValueError("Must set EmptyFunc before using")
         return super().__contains__(elem)
 
-    def __call__(self, val: Expr) -> Expr:
+    def __call__(self, val: VExpr) -> VExpr:
         if self.empty:
             raise ValueError("Must set EmptyFunc before using")
         return super().__call__(val)
@@ -1133,7 +1190,7 @@ def funcprod(*funcs: FuncExpr) -> FuncExpr:
     inj = all(f.known_inj for f in funcs)
     return FuncExpr.make(new_dom, prod, inj)
 
-class ViewExpr(Expr):
+class ViewExpr(VExpr):
     def __post_init__(self):
         super().__post_init__()
         if not isinstance(self.T, ViewType):
@@ -1142,7 +1199,7 @@ class ViewExpr(Expr):
     def promote(self, node: ir.Node):
         raise NotImplementedError()
 
-def wrap(node: ir.Node) -> Expr:
+def wrap(node: ir.Node) -> VExpr:
     T = wrapT(node.T)
     if T.has_view:
         return T.view.promote(node)
@@ -1169,4 +1226,4 @@ def wrap(node: ir.Node) -> Expr:
             return f.domain.T.view.promote_func(node)
         return f
 
-    raise NotImplementedError(f"Cannot cast node {node} with T={T} to Expr")
+    raise NotImplementedError(f"Cannot cast node {node} with T={T} to VExpr")

@@ -182,7 +182,7 @@ class Analysis(Pass):
         # Define custom visit function to do caching
         def visit(self, node: ir.Node):
             if self._debug:
-                print("|  "*self._dindent + f"{node.__class__.__name__}: {str(node._hash)[-5:]} (", end="")
+                print("|  "*self._dindent + f"{node.__class__.__name__}({node.field_dict}): {str(node._hash)[-5:]} (", end="")
             if self.enable_memoization:
                 if node in self._cache:
                     if self._debug:
@@ -272,7 +272,7 @@ class Transform(Pass):
         # Define custom visit function that creates new keys
         def visit(self, node: ir.Node):
             if self._debug:
-                print("|  "*self._dindent + f"{node.__class__.__name__}: {str(node._hash)[-5:]}", end="(")
+                print("|  "*self._dindent + f"{node.__class__.__name__}({node.field_dict}): {str(node._hash)[-5:]}", end="(")
             if self.enable_memoization:
                 if isinstance(node, ir.BoundVar):
                     cache_key = (self._bframes[-(node.idx+1)], node)

@@ -197,12 +197,13 @@ class PrettyPrinterPass(Analysis):
         T_str, dom_str = self.visit_children(node)
         #return f"{{{T_str} | {dom_str}}}"
         #return f"{{{dom_str} : {T_str}}}"
-        return f"{dom_str}" 
+        #return f"Ref[{T_str}, {dom_str}]" 
+        return dom_str
 
     @handles(ir.ViewWrapperT)
     def _(self, node: ir.ViewWrapperT):
         T_str, view_str = self.visit_children(node)
-        return f"VT({T_str})"
+        return f"VT[{T_str}]"
 
     @handles(ir.ViewT)
     def _(self, node: ir.ViewT):
@@ -591,15 +592,10 @@ class PrettyPrinterPass(Analysis):
         return f"∃ {var_name} ∈ {argT}:\n{body_expr}"
 
     ### Funcs (i.e., containers)
-    #@handles(ir.Map)
-    #def _(self, node: ir.Map) -> str:
-    #    funcT, dom, lam = node._children
-    #    dom_expr = self.visit(dom)
-    #    (_, var_name, body_str) = self._lambda(lam)
-
-    #    body_formatted = self._indent_expr(body_str)
-    #    #return f"({var_name} ∈ {dom_expr}) -> [\n{body_formatted}\n]"
-    #    return f"Map({var_name} ∈ {dom_expr} -> [\n{body_formatted}\n])"
+    @handles(ir.Compose)
+    def _(self, node: ir.Compose) -> str:
+        _, fs, gs = self.visit_children(node)
+        return f"({fs} ∘ {gs})"
 
     @handles(ir.FuncLit)
     def _(self, node: ir.FuncLit) -> str:
