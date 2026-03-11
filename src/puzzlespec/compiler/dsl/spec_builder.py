@@ -3,10 +3,9 @@ import typing as tp
 from puzzlespec.compiler.passes.analyses.ast_printer import AstPrinterPass, PrintedAST
 from puzzlespec.compiler.passes.analyses.type_check import TypeCheckingPass
 from puzzlespec.compiler.passes.analyses.pretty_printer import PrettyPrinterPass, pretty
-from puzzlespec.compiler.passes.analyses.bound_var_check import CheckBoundVars
+from puzzlespec.compiler.passes.analyses.free_vars import FreeVarsPass
 from puzzlespec.compiler.passes.transforms.resolve_vars import ResolveBoundVars, ResolveFreeVars, VarMap
 from puzzlespec.compiler.passes.transforms.add_refinements import free_var_refine, add_refinements
-from puzzlespec.compiler.passes.transforms.guard_opt import guard_opt
 from . import ast, ir
 from .envs import SymTable, TypeEnv
 from ..passes.pass_base import Context, PassManager
@@ -22,7 +21,7 @@ class PuzzleSpecBuilder:
         self._rules = []
         self.dom_cons = []
 
-    def _add_rules(self, *new_rules: ast.Expr):
+    def _add_rules(self, *new_rules: ast.VExpr):
         self._rules += [r.node for r in new_rules]
 
     def __iadd__(self, other: tp.Union[ast.BoolExpr, tp.Iterable[ast.BoolExpr]]) -> tp.Self:
@@ -46,10 +45,10 @@ class PuzzleSpecBuilder:
     def build(self, name: str, opt=True) -> PuzzleSpec:
         # 1: Resolve Placeholders (for bound bars/lambdas)
         ctx = Context()
-        #pm = PassManager(TypeCheckingPass(), ResolveBoundVars(), verbose=True)
-        pm = PassManager(TypeCheckingPass(), CheckBoundVars(), verbose=True)
+        pm = PassManager(TypeCheckingPass(), verbose=True)
         rules_node = ir.TupleLit(ir.TupleT(*(ir.BoolT() for _ in self._rules)), *self._rules)
         new_rules_node = pm.run(rules_node, ctx=ctx)
+
 
         # Refine free vars
         # Populate sym table and type environment

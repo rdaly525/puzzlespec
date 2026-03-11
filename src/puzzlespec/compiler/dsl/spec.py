@@ -107,16 +107,16 @@ class PuzzleSpec:
         }
 
         base_opt = [
+            GuardLift(),
+            [
                 CanonicalizePass(),
                 AlgebraicSimplificationPass(),
                 ConstFoldPass(),
                 DomainSimplificationPass(),
                 BetaReductionHOAS(),
+            ]
         ]
-        opt_passes = [[base_opt, GuardLift()], OrdSimplificationPass(), [base_opt, GuardLift()]]
-        #opt_passes = [GuardLift(), base_opt]
-
-        #opt = self.transform(opt_passes, OrdSimplificationPass(), opt_passes, ctx=ctx, analysis_map=analysis_map, max_iter=5)
+        opt_passes = base_opt
         opt = self.transform(*opt_passes, ctx=ctx, analysis_map=analysis_map, max_iter=8, verbose=2)
         return opt
     

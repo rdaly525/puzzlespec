@@ -18,7 +18,6 @@ def _func_var(
         _name_cnt +=1
     metadata = frozenset(kwargs.items())
 
-    N = len(doms)
     def make_sort(doms, bvs: tp.Tuple[ast.Expr, ...]=None):
         if len(doms)==0:
             return None

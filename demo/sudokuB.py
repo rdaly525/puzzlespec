@@ -36,12 +36,12 @@ p += nd.rows(cell_digits).forall(lambda row_vals: std.distinct(row_vals))
 p += nd.cols(cell_digits).forall(lambda col_vals: std.distinct(col_vals))
 
 # Box constraint
-p += nd.tiles(
+tc = nd.tiles(
     cell_digits,
     size=(B, B),
     stride=(B, B)
 ).forall(lambda box_vals: std.distinct(box_vals))
-
+p += tc
 #####################
 # Clues as Sum Type #
 #####################

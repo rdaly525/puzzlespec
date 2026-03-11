@@ -65,19 +65,33 @@ class Tactic:
         self.bv_doms = doms
         self.p = premises
         self.q = conclusions
+
+    def __repr__(self):
+        s = ",\n".join(f"{i}: {d}" for i, d in enumerate(self.bv_doms))
+        s = s+f"\nP: {self.p}"
+        s = s+f"\nQ: {self.q}"
+        return s
     
     @classmethod
     def make(cls, fall: ir.Node | ast.Expr):
         if isinstance(fall, ast.Expr):
             fall = fall.node
-        assert isinstance(fall, ir.Forall)
-        _, lam = fall._children
-        bv_dom = ast.wrap(lam).domain.node
-        mvar = ir.MetaVar(0)
-        body = open_lambda(lam, mvar)
-        assert isinstance(body, ir.Implies)
-        _, p, q = body._children
-        return cls([bv_dom], p, q)
+        fall = ast.wrap(fall).simplify().node
+        def _unwrap(_fall: ir.Node, id: int):
+            if isinstance(_fall, ir.Implies):
+                _, p, q = _fall._children
+                return (), (p, q)
+            elif isinstance(_fall, ir.Forall):
+                _, lam = _fall._children
+                dom = ast.wrap(lam).domain.node
+                mvar = ir.MetaVar(id)
+                body = open_lambda(lam, mvar)
+                doms, pq = _unwrap(body, id+1)
+                return (dom, *doms), pq
+            else:
+                raise ValueError(f"Cannot make tactic out of:\n{fall}")
+        doms, (p, q) = _unwrap(fall, 0)
+        return cls(doms, p, q)
 
     def apply_backward(self, goal: ir.Node):
         # Pattern match the conclusion
@@ -85,7 +99,8 @@ class Tactic:
         if env is None:
             return None
         assert len(env)==len(self.bv_doms)
-        guard = std.all([ast.wrap(dom).contains(ast.wrap(env[i])) for i, dom in enumerate(self.bv_doms)]).node
+        doms = [substitute(dom, env) for dom in self.bv_doms]
+        guard = std.all([ast.wrap(dom).contains(ast.wrap(env[i])) for i, dom in enumerate(doms)]).node
         p = substitute(self.p, env)
         return [p, guard]
         
@@ -98,6 +113,7 @@ def match_template(val: ir.Node, template: ir.Node, env):
             env = {**env, template.id: val}
         return env
     if type(val) == type(template) and val.field_dict == template.field_dict:
+    #if type(val) == type(template):
         envs = [match_template(vc, tc, env) for vc, tc in zip(val._children, template._children)]
         env = {}
         for e in envs:

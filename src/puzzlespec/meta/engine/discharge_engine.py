@@ -127,7 +127,6 @@ class DischargeEngine(Engine):
                     self.propogate_justifications(pgoal)
             else:
                 raise NotImplementedError()
-            
 
     def prove_backwards_tactics(self, goalN: GoalNode):
         assert goalN.kind=='base'
