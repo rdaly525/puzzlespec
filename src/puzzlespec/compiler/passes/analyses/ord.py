@@ -2,14 +2,16 @@ from __future__ import annotations
 
 import typing as tp
 
+from puzzlespec.compiler.passes.analyses.type_check import stripT
+
 from ..pass_base import Analysis, AnalysisObject, Context, handles
 from ...dsl import ir, ast, ast_nd
 from ....libs import std
 from ..envobj import EnvsObj
 
-def gen_enumerate(node: ir._DomT) -> ast.FuncExpr:
+def gen_enumerate(node: ir.DomT) -> ast.FuncExpr:
     dom = ast.wrap(node)
-    dom_fin = ast_nd.fin(dom.size)
+    dom_fin = dom.size.fin()
     lam = get_elem_lam(node)
     return dom_fin.map(lam, inj=True)
     #fin_dom = ir.Fin(ir.DomT(ir.IntT(), True, False), ir.Card(ir.IntT(), node))
@@ -20,8 +22,8 @@ def gen_enumerate(node: ir._DomT) -> ast.FuncExpr:
     #node = ir.Enumerate(T, node)
     #return fin_dom, node
 
-def get_elem_lam(node: ir._DomT) -> ast.LambdaExpr:
-    if not node.T.ord:
+def get_elem_lam(node: ir.DomT) -> ast.LambdaExpr:
+    if not ast.wrap(node).T._is_enumerable:
         raise ValueError()
     np = OrdAnalysis()(node, Context()).node_map
     if node not in np:
@@ -42,10 +44,14 @@ class OrdAnalysis(Analysis):
         self.visit(root)
         return OrdMap(self.node_map)
 
+    def visit(self, node: ir.Node):
+        if isinstance(node, ir.Value):
+            if isinstance(stripT(node.T), ir.DomT):
+                raise ValueError()
+
     @handles(ir.Fin)
     def _(self, node: ir.Fin):
         self.visit_children(node)
-        assert node.T.ord
         fin = ast.wrap(node)
         lam = ast.FuncExpr.make(fin, lambda i: i)
         self.node_map[node] = lam
@@ -53,10 +59,9 @@ class OrdAnalysis(Analysis):
     @handles(ir.Range)
     def _(self, node: ir.Range):
         self.visit_children(node)
-        assert node.T.ord
         T, lo, hi, step = node._children
         lo, hi, step = ast.IntExpr(lo), ast.IntExpr(hi), ast.IntExpr(step)
-        fin = ast_nd.fin(ast.wrap(node).size)
+        fin = ast.wrap(node).size.fin()
         lam = ast.FuncExpr.make(fin, lambda i: (lo+i*step), inj=True)
         self.node_map[node] = lam
 
@@ -66,7 +71,7 @@ class OrdAnalysis(Analysis):
         T, dom, lo, hi, step = node._children
         assert dom in self.node_map
         lo, hi, step = ast.IntExpr(lo), ast.IntExpr(hi), ast.IntExpr(step)
-        fin = ast_nd.fin(ast.wrap(node).size)
+        fin = ast.wrap(node).size.fin()
         lam_s = ast.FuncExpr.make(fin, lambda i: (lo+i*step), inj=True)
         lam = lam_s @ self.node_map[dom]
         self.node_map[node] = lam
@@ -75,7 +80,7 @@ class OrdAnalysis(Analysis):
     def _(self, node: ir.Singleton):
         self.visit_children(node)
         T, val = node._children
-        self.node_map[node] = ast.FuncExpr.make(ast_nd.fin(1), lambda i: ast.wrap(node).unique_elem, inj=True)
+        self.node_map[node] = ast.FuncExpr.make(std.fin(1), lambda i: ast.wrap(node).unique_elem, inj=True)
 
     @handles(ir.CartProd)
     def _(self, node: ir.CartProd):
@@ -94,18 +99,18 @@ class OrdAnalysis(Analysis):
                 i = i // N
             idxs = [base_lams[i](idx) for i, idx in enumerate(reversed(idxs))]
             return ast.TupleExpr.make(tuple(idxs))
-        fin = ast_nd.fin(ast.wrap(node).size)
+        fin = std.fin(ast.wrap(node).size)
         self.node_map[node] = ast.FuncExpr.make(fin, lam, inj=True)
 
     @handles(ir.Image)
     def _(self, node: ir.Image):
         self.visit_children(node)
         T, func = node._children
-        if T.ord:
+        if ast.wrap(node).T._is_enumerable:
             if isinstance(func, ir._Lambda):
                 piT, body = func._children
                 func_ast = ast.wrap(func)
-                assert func_ast.T.inj_known
+                assert func_ast.known_inj
                 dom = func_ast.domain.node
                 if dom not in self.node_map:
                     raise ValueError()

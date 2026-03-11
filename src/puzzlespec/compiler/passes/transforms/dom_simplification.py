@@ -3,7 +3,8 @@ from hmac import new
 import math
 
 from ..pass_base import Transform, Context, handles
-from ...dsl import ir, ast
+from ...dsl import ir, ast, ast_nd
+from ....libs import std
 import typing as tp
 
 
@@ -28,9 +29,8 @@ class DomainSimplificationPass(Transform):
         if len(doms)==0:
             domT = ir.DomT(ir.TupleT())
             return ir.Singleton(domT, ir.TupleLit(ir.TupleT()))
-        if all(ast.wrap(dom).T.is_singleton for dom in doms):
-            assert T.is_singleton
-            elems = [ir.Unique(dom.T.carT, dom) for dom in doms]
+        if all(isinstance(dom, ir.Singleton) for dom in doms):
+            elems = [ir.Unique(ast.wrapT(dom.T).carT.node, dom) for dom in doms]
             return ir.Singleton(T, ir.TupleLit(T.carT, *elems))
         return node.replace(T, *doms)
 
@@ -51,6 +51,14 @@ class DomainSimplificationPass(Transform):
             new_dom = cart_doms[node.idx]
             assert ast.wrapT(T)==ast.wrapT(new_dom.T)
             return new_dom
+        #elif isinstance(dom, ir.Image):
+        #    T_img, lam = dom._children
+        #    T_img_ast = ast.wrapT(T_img)
+        #    if isinstance(T_img_ast, ast_nd.NDDomainExpr):
+        #        shape = T_img_ast.shape
+        #        
+        #        lam_ast = ast.wrap(lam)
+            
         return node.replace(T, dom)
 
     @handles(ir.Card)
@@ -84,7 +92,7 @@ class DomainSimplificationPass(Transform):
         if isinstance(dom, ir.Image):
             _, func = dom._children
             func_ast = ast.wrap(func)
-            if func_ast.T.inj_known:
+            if func_ast.known_inj:
                 return func_ast.domain.size.node
         return node.replace(T, dom)
 
@@ -185,7 +193,36 @@ class DomainSimplificationPass(Transform):
     @handles(ir.IsMember)
     def _(self, node: ir.IsMember):
         T, dom, val = self.visit_children(node)
-        if isinstance(val.T, ir.RefT):
-            _, refdom = val.T._children
-            return (ast.wrap(refdom) <= ast.wrap(dom)).node
+        if isinstance(dom, ir.Restrict):
+            T, func = dom._children
+            f = ast.wrap(func)
+            v = ast.wrap(val)
+            return (f.domain.contains(v) & f(v)).node
+        if isinstance(dom, ir.CartProd):
+            d = ast.wrap(dom)
+            v = ast.wrap(val)
+            return std.all((d.dom_proj(i).contains(vi) for i, vi in enumerate(v))).node
+        #if isinstance(dom, ir.CartProd) and isinstance(val, ir.TupleLit):
+        #    d = ast.wrap(dom)
+        #    v = ast.wrap(val)
+        #    return std.all((d.dom_proj(i).contains(v[i]) for i, vi in enumerate(v))).node
         return node.replace(T, dom, val)
+
+    @handles(ir.Apply)
+    def _(self, node: ir.Apply):
+        T, lam, arg = self.visit_children(node)
+        if isinstance(lam, ir.Compose):
+            ret = ast.wrap(arg)
+            for clam in reversed(lam._children[1:]):
+                ret = ast.wrap(clam)(ret)
+            return ret.node
+        return node.replace(T, lam, arg)
+
+    # NOT SOUND. Only shoud discharge if subset is proven
+    #@handles(ir.IsMember)
+    #def _(self, node: ir.IsMember):
+    #    T, dom, val = self.visit_children(node)
+    #    if isinstance(val.T, ir.RefT):
+    #        _, refdom = val.T._children
+    #        return (ast.wrap(refdom) <= ast.wrap(dom)).node
+    #    return node.replace(T, dom, val)

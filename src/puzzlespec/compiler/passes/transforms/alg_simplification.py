@@ -192,11 +192,7 @@ class AlgebraicSimplificationPass(Transform):
                 return ir.Lit(T, False)
         if len(children) == 1:
             return children[0]
-        new_children = []
-        for i, c in enumerate(children):
-            if c in children[i+1:]:
-                continue
-            new_children.append(c)
+        new_children = set(children)
         return node.replace(T, *new_children)
 
     @handles(ir.Disj)
@@ -331,9 +327,34 @@ class AlgebraicSimplificationPass(Transform):
                     return v0
         return node.replace(T, *elems)
 
-    @handles(ir.Subset, ir.LtEq)
+    @handles(ir.LtEq)
     def _(self, node: ir.Node):
         T, a, b = self.visit_children(node)
         if a == b:
             return ast.BoolExpr.make(True).node
+        return node.replace(T, a, b)
+
+    @handles(ir.Lt)
+    def _(self, node: ir.Node):
+        T, a, b = self.visit_children(node)
+        if a == b:
+            return ast.BoolExpr.make(False).node
+        return node.replace(T, a, b)
+
+    @handles(ir.Subset)
+    def _(self, node: ir.Node):
+        T, a, b = self.visit_children(node)
+        if a == b:
+            return ast.BoolExpr.make(True).node
+        if isinstance(a, ir.CartProd) and isinstance(b, ir.CartProd):
+            assert len(a._children) == len(b._children)
+            ps = []
+            for ca, cb in zip(a._children[1:], b._children[1:]):
+                ps.append(ast.wrap(ca)<= ast.wrap(cb))
+            return std.all(ps).node
+        if isinstance(a, ir.Singleton):
+            a = ast.wrap(a)
+            b = ast.wrap(b)
+            return b.contains(a.unique_elem).node
+
         return node.replace(T, a, b)

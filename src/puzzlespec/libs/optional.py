@@ -17,7 +17,7 @@ def _check_optT(T: ir.Type):
         raise ValueError(f"Expected SumT of Unit and T, got {T}")
     return T[1]
 
-def fold(val: ast.SumExpr, on_none: ast.Expr, on_some: tp.Callable[[ast.Expr], ast.Expr]) -> ast.Expr:
+def fold(val: ast.SumExpr, on_none: ast.VExpr, on_some: tp.Callable[[ast.VExpr], ast.VExpr]) -> ast.VExpr:
     return val.match(lambda _: on_none, on_some)
 
 def count_some(func: ast.FuncExpr) -> ast.IntExpr:

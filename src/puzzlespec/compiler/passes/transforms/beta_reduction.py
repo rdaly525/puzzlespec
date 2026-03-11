@@ -133,7 +133,7 @@ class BetaReductionHOAS(Transform):
         if node.name in self.bv_map:
             #print(f"  BV: {node.name} -> {self.bv_map[node.name]}")
             return self.bv_map[node.name]
-        return node
+        return super().visit(node)
 
     @handles(ir.ApplyT)
     def _(self, node: ir.ApplyT):

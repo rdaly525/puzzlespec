@@ -103,7 +103,7 @@ class ResolveFreeVars(Transform):
     @handles(ir.VarHOAS)
     def _(self, v: ir.VarHOAS):
         new_T, = self.visit_children(v)
-        sid = self.sym.new_or_get(v.name, v.metadata)
+        sid = self.sym.new_or_get(v.name, v.kind, v.metadata)
         return ir.VarRef(new_T, sid)
 
 def close_bound_vars(root: ir.Node, bv: ir.BoundVarHOAS) -> ir.Node:

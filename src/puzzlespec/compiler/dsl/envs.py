@@ -29,8 +29,9 @@ class TypeEnv:
 # Symbol table that stores params/vars and their role. 
 # There is an annoying circular dependency with params, so these have sid as their name
 class SymEntry:
-    def __init__(self, name: str, invalid: bool = False, **kwargs):
+    def __init__(self, name: str, kind: str, invalid: bool = False, **kwargs):
         self.name = name
+        self.kind = kind
         self.invalid = invalid
         self._metadata = kwargs
     
@@ -63,25 +64,27 @@ class SymTable:
             sid=self._sid
         )
 
-    def new_var(self, name: str, metadata: tp.FrozenSet[tp.Tuple[str, tp.Any]]) -> int:
+    def new_var(self, name: str, kind: str, metadata: tp.FrozenSet[tp.Tuple[str, tp.Any]]) -> int:
         sid = self._sid
         self._sid += 1
-        self.add_var(sid, name, metadata)
+        self.add_var(sid, name, kind, metadata)
         return sid
     
-    def new_or_get(self, name: str, metadata: tp.FrozenSet[tp.Tuple[str, tp.Any]]) -> int:
+    def new_or_get(self, name: str, kind: str, metadata: tp.FrozenSet[tp.Tuple[str, tp.Any]]) -> int:
         if (sid := self.get_sid(name)) is not None:
             assert all(self.entries[sid].get(k)==v for k,v in metadata)
+            assert kind == self.entries[sid].kind
             return sid
-        return self.new_var(name, metadata)
+        return self.new_var(name, kind, metadata)
 
-    def add_var(self, sid: int, name: str, metadata: tp.FrozenSet[tp.Tuple[str, tp.Any]]):
+    def add_var(self, sid: int, name: str, kind: str, metadata: tp.FrozenSet[tp.Tuple[str, tp.Any]]):
         if name in self._name_to_sid:
             raise ValueError(f"Var, {name}, already exists")
         if sid in self.entries:
             raise ValueError(f"Cannot add var {name} to sid {sid} because it already exists")
         mdict = dict(metadata)
         mdict['name'] = name
+        mdict['kind'] = kind
         entry = SymEntry(**mdict)
         self.entries[sid] = entry
         self._name_to_sid[name] = sid
