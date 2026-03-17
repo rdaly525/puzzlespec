@@ -24,8 +24,10 @@ class CounterAll(Analysis):
         return CountObj(cnt)
 
     def visit(self, node: ir.Node):
-        cnts = self.visit_children(node)
-        return sum(cnts) + 1
+        cnt = 1
+        for c in node.all_nodes:
+            cnt += self.visit(c)
+        return cnt
 
 class CounterUnique(Analysis):
     requires = ()
@@ -39,6 +41,7 @@ class CounterUnique(Analysis):
         return CountObj(self.cnt)
 
     def visit(self, node: ir.Node):
-        self.visit_children(node)
-        self.cnt +=1
+        for c in node.all_nodes:
+            self.visit(c)
+        self.cnt += 1
 

@@ -70,10 +70,11 @@ class Scalarize(Transform):
                 terms.append(new_var)
             return ir.FuncLit(T, dom, *terms, layout=ir._DenseLayout(val_map=val_map))
         raise ValueError(f"Expected scalar type, got {T}")
-    
+
     @handles(ir.VarRef)
     def _(self, node: ir.VarRef) -> ir.Node:
-        T, = self.visit_children(node)
+        vc = self.visit_children(node)
+        T = vc.T
         e = self.sym[node.sid]
         # Base case (enum, bool, int)
         if isinstance(T, (ir.EnumT, ir.IntT, ir.BoolT)):
@@ -82,7 +83,9 @@ class Scalarize(Transform):
 
     @handles(ir.Map)
     def _(self, node: ir.Map):
-        T, dom, lam = self.visit_children(node)
+        vc = self.visit_children(node)
+        T = vc.T
+        dom, lam = vc.children
         dom_size = utils._dom_size(dom)
         doit = self.aggressive or not utils._has_freevar(lam)
         if dom_size is not None and dom_size <= self.max_dom_size and doit:
@@ -98,15 +101,17 @@ class Scalarize(Transform):
                 val_map[v._key] = i
             layout = ir._DenseLayout(val_map=val_map)
             return ir.FuncLit(T, dom, *elems, layout=layout)
-        return node.replace(T, dom, lam)
+        return node.replace(dom, lam, T=T, obl=vc.obl)
 
 
     @handles(ir.Forall)
     def _(self, node: ir.Forall):
-        T, func = self.visit_children(node)
+        vc = self.visit_children(node)
+        T = vc.T
+        func, = vc.children
         # Extract domain and lambda from func if it's a Map
         if isinstance(func, ir.FuncLit):
-            _, dom, *vals = func._children
+            dom, *vals = func._children
             dom_size = utils._dom_size(dom)
             if dom_size is not None and dom_size <= self.max_dom_size:
                 conj_vals = []
@@ -117,14 +122,16 @@ class Scalarize(Transform):
                     conj_vals.append(vals[i])
                 return ir.Conj(T, *conj_vals)
 
-        return node.replace(T, func)
+        return node.replace(func, T=T, obl=vc.obl)
 
     @handles(ir.Exists)
     def _(self, node: ir.Exists):
-        T, func = self.visit_children(node)
+        vc = self.visit_children(node)
+        T = vc.T
+        func, = vc.children
         # Extract domain and lambda from func if it's a Map
         if isinstance(func, ir.FuncLit):
-            _, dom, *vals = func._children
+            dom, *vals = func._children
             disj_vals = []
             for v in utils._iterate(dom):
                 assert v is not None
@@ -132,19 +139,21 @@ class Scalarize(Transform):
                 assert i is not None and 0 <= i < len(vals)
                 disj_vals.append(vals[i])
             return ir.Disj(T, *disj_vals)
-        return node.replace(T, func)
+        return node.replace(func, T=T, obl=vc.obl)
 
     @handles(ir.Restrict)
     def _(self, node: ir.Restrict):
-        T, func = self.visit_children(node)
+        vc = self.visit_children(node)
+        T = vc.T
+        func, = vc.children
         # Extract domain and predicate values from func if it's a FuncLit
         if isinstance(func, ir.FuncLit):
-            _, dom, *vals = func._children
+            dom, *vals = func._children
             dom_size = utils._dom_size(dom)
             if dom_size is not None and dom_size <= self.max_dom_size:
                 # Early out: check that all predicate values are literals
                 if not all(isinstance(v, ir.Lit) for v in vals):
-                    return node.replace(T, func)
+                    return node.replace(func, T=T, obl=vc.obl)
                 restricted_elems = []
                 for v in utils._iterate(dom):
                     assert v is not None
@@ -156,15 +165,16 @@ class Scalarize(Transform):
                         restricted_elems.append(v)
                 # Create DomLit with the restricted elements
                 return ir.DomLit(T, *restricted_elems)
-        return node.replace(T, func)
+        return node.replace(func, T=T, obl=vc.obl)
 
     @handles(ir.SumLit)
     def _(self, node: ir.SumLit):
-        T, tag, *elems = self.visit_children(node)
+        vc = self.visit_children(node)
+        T = vc.T
+        tag, *elems = vc.children
         # If tag is a literal IntT, convert to Inj
         if isinstance(tag, ir.Lit) and isinstance(tag.T, ir.IntT):
             tag_val = tag.val
             assert isinstance(tag_val, int) and 0 <= tag_val < len(elems)
             return ir.Inj(T, elems[tag_val], idx=tag_val)
-        return node.replace(T, tag, *elems)
-
+        return node.replace(tag, *elems, T=T, obl=vc.obl)

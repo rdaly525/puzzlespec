@@ -16,8 +16,6 @@ class _Map:
     def __getitem__(self, key: ir.Node) -> ir.Type:
         return self.Tmap[key]
     def __setitem__(self, key: ir.Node, value: ir.Type):
-        if isinstance(value, ir.RefT):
-            raise ValueError(f"RefT cannot be set in TypeMap, got {value}")
         self.Tmap[key] = value
 
 class TypeMap(AnalysisObject):
@@ -37,8 +35,35 @@ class TypeCheckingPass(Analysis):
         self.visit(root)
         return TypeMap(self.Tmap)
 
+    def check_node_attrs(self, node: ir.Node):
+        """Type-check the named children (obl, ref, view) on any node."""
+        if isinstance(node, ir.Value):
+            if node.obl is not None:
+                oblT = self.visit(node.obl)
+                if not _is_kind(oblT, ir.BoolT):
+                    raise TypeError(f"obligation on {type(node).__name__} must be BoolT, got {oblT}")
+        elif isinstance(node, ir.Type):
+            if node.ref is not None:
+                refT = self.visit(node.ref)
+                if not _is_kind(refT, ir.DomT):
+                    raise TypeError(f"refinement on {type(node).__name__} must be DomT, got {refT}")
+            if node.view is not None:
+                self.visit(node.view)
+            if node.obl is not None:
+                oblT = self.visit(node.obl)
+                if not _is_kind(oblT, ir.BoolT):
+                    raise TypeError(f"obligation on {type(node).__name__} must be BoolT, got {oblT}")
+
+    def visit_children(self, node: ir.Node):
+        self.check_node_attrs(node)
+        children = tuple(self.visit(c) for c in node._children)
+        if isinstance(node, ir.Value):
+            T_result = self.visit(node.T)
+            return (T_result, *children)
+        return children
+
     ##############################
-    ## Core-level IR Type nodes 
+    ## Core-level IR Type nodes
     ##############################
 
     def visit(self, node: ir.Node):
@@ -75,35 +100,37 @@ class TypeCheckingPass(Analysis):
     @handles(ir.TupleT)
     def _(self, node: ir.TupleT):
         # Visit children to verify they are Types
-        childTs = self.visit_children(node)
-        if not all(_is_type(childT) for childT in childTs):
-            raise TypeError(f"TupleT children must be Types, got {childTs}")
-        T = node.replace(*childTs)
+        vc = self.visit_children(node)
+        if not all(_is_type(childT) for childT in vc):
+            raise TypeError(f"TupleT children must be Types, got {vc}")
+        T = node.replace(*vc, ref=node.ref, view=node.view, obl=node.obl)
         self.Tmap[node] = T
         return T
 
     @handles(ir.SumT)
     def _(self, node: ir.SumT):
         # Visit children to verify they are Types
-        childTs = self.visit_children(node)
-        if not all(_is_type(childT) for childT in childTs):
-            raise TypeError(f"SumT children must be Types, got {childTs}")
-        T = node.replace(*childTs)
+        vc = self.visit_children(node)
+        if not all(_is_type(childT) for childT in vc):
+            raise TypeError(f"SumT children must be Types, got {vc}")
+        T = node.replace(*vc, ref=node.ref, view=node.view, obl=node.obl)
         self.Tmap[node] = T
         return T
 
     @handles(ir.DomT)
     def _(self, node: ir.DomT):
         # Visit children to verify they are Types
-        carT, = self.visit_children(node)
+        vc = self.visit_children(node)
+        carT, = vc
         if not _is_type(carT):
             raise TypeError(f"DomT's carT must be a type, got {carT}")
-        T = node.replace(carT)
+        T = node.replace(carT, ref=node.ref, view=node.view, obl=node.obl)
         self.Tmap[node] = T
         return T
 
     @handles(ir.PiT)
     def _(self, node: ir.PiT):
+        self.check_node_attrs(node)
         argT, resT = node._children
         # Verify T is a type
         if not _is_type(argT):
@@ -122,34 +149,14 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.PiTHOAS)
     def _(self, node: ir.PiTHOAS):
-        argT, resT = self.visit_children(node)
+        vc = self.visit_children(node)
+        argT, resT = vc
         # Verify T is a type
         if not _is_type(argT):
             raise TypeError(f"PiT argT must be a type, got {argT}")
         if not _is_type(resT):
             raise TypeError(f"PiT resT must be a type, got {resT}")
-        T = node.replace(argT, resT)
-        self.Tmap[node] = T
-        return T
-
-    @handles(ir.RefT)
-    def _(self, node: ir.RefT):
-        T, domT = self.visit_children(node)
-        if not _is_kind(T, ir.Type):
-            raise TypeError(f"RefT's underlying type must be a type, got {T}")
-        if not _is_kind(domT, ir.DomT):
-            raise TypeError(f"RefT's domain must be a domain, got {domT}")
-        # dom.T.carT must be T
-        if not _is_same_kind(domT.carT, T):
-            raise TypeError(f"Refinement Type's T, {T}, does not match domain carrier type {domT.carT}")
-        self.Tmap[node] = T
-        return T
-
-    @handles(ir.ViewWrapperT)
-    def _(self, node: ir.ViewWrapperT):
-        T = self.visit(node.T)
-        # TODO Finish type checking of views
-        #T, _ = self.visit_children(node)
+        T = node.replace(argT, resT, ref=node.ref, view=node.view, obl=node.obl)
         self.Tmap[node] = T
         return T
 
@@ -157,16 +164,6 @@ class TypeCheckingPass(Analysis):
     def _(self, node: ir.ViewT):
         self.Tmap[node] = node
         return node
-    #@handles(ir.IsoT)
-    #def _(self, node: ir.IsoT):
-    #    A, B = self.visit_children(node)
-    #    if not _is_kind(A, ir.Type):
-    #        raise TypeError(f"IsoT must have Type type, got {A}")
-    #    if not _is_kind(B, ir.Type):
-    #        raise TypeError(f"IsoT must have Type type, got {B}")
-    #    T = ir.IsoT(A, B)
-    #    self.Tmap[node] = T
-    #    return T
     
     ##############################
     ## Core-level IR Value nodes (Used throughout entire compiler flow)
@@ -182,6 +179,7 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.BoundVar)
     def _(self, node: ir.BoundVar):
+        self.check_node_attrs(node)
         if node.idx >= len(self.bctx):
             raise TypeError(f"BoundVar index {node.idx} out of bounds (bctx length: {len(self.bctx)})")
         T = self.bctx[-(node.idx+1)]
@@ -189,24 +187,6 @@ class TypeCheckingPass(Analysis):
             raise TypeError(f"BoundVar index {node.idx} has non-type type {T}")
         if not all(_is_type(t) for t in self.bctx):
             raise TypeError(f"Bound context must contain only types, got {self.bctx}")
-        self.Tmap[node] = T
-        return T
-
-    @handles(ir.Guard)
-    def _(self, node: ir.Guard):
-        T, valT, pT = self.visit_children(node)
-        if not _is_same_kind(valT, T):
-            raise TypeError(f"Guard value type {valT} does not match Guard type {T}")
-        if not _is_kind(pT, ir.BoolT):
-            raise TypeError(f"Guard predicate type {pT} is not a BoolT")
-        self.Tmap[node] = T
-        return T
-
-    @handles(ir.GuardT)
-    def _(self, node: ir.GuardT):
-        T, pT = self.visit_children(node)
-        if not _is_kind(pT, ir.BoolT):
-            raise TypeError(f"GuardT predicate type {pT} is not a BoolT")
         self.Tmap[node] = T
         return T
 
@@ -233,6 +213,7 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Lambda)
     def _(self, node: ir.Lambda):
+        self.check_node_attrs(node)
         # Verify type is LambdaT
         lamT, body = node._children
         argT, resT = self.visit(lamT)
@@ -410,7 +391,7 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Disj)
     def _(self, node: ir.Disj):
-        T, childTs = self.visit_children(node)
+        T, *childTs = self.visit_children(node)
         # Verify type is BoolT
         if not _is_kind(T, ir.BoolT):
             raise TypeError(f"Disj must have BoolT type, got {node.T}")
@@ -618,13 +599,7 @@ class TypeCheckingPass(Analysis):
 
     @handles(ir.Intersection)
     def _(self, node: ir.Intersection):
-        #T, *domTs = self.visit_children(node)
-        T, *doms = node._children
-        T = self.visit(T)
-        domTs = []
-        for dom in doms:
-            domT = self.visit(dom)
-            domTs.append(domT)
+        T, *domTs = self.visit_children(node)
         # Verify type is DomT
         if not _is_kind(T, ir.DomT):
             raise TypeError(f"Intersection must have DomT type, got {node.T}")
@@ -1087,15 +1062,13 @@ class TypeCheckingPass(Analysis):
         self.Tmap[node] = T
         return T
 
-    #@handles(ir.IndexView)
-    #def _(self, node: ir.IndexView):
-    #    T, idxT = self.visit_children(node)
-    #    if not _is_kind(T, ir.IsoT):
-    #        raise TypeError(f"IndexView must have IsoT type, got {T}")
-    #    if not _is_kind(idxT, ir._PiT):
-    #        raise TypeError(f"IndexView index must be PiT, got {idxT}")
-    #    self.Tmap[node] = T
-    #    return T
+    @handles(ir.View)
+    def _(self, node: ir.View):
+        T, *childTs = self.visit_children(node)
+        if not _is_kind(T, ir.ViewT):
+            raise TypeError(f"View must have ViewT type, got {T}")
+        self.Tmap[node] = T
+        return T
 
     #@handles(ir.EnumerableDomain)
     #def _(self, node: ir.EnumerableDomain):
@@ -1135,13 +1108,17 @@ class StripType(Analysis):
     requires = ()
     produces = (Stripped,)
     name = "strip_type"
-    
+
     def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
         t = self.visit(root)
         return Stripped(t)
 
+    def visit_children(self, node: ir.Node):
+        # Only recurse into _children (Type nodes), skip named children (ref/view/obl)
+        return tuple(self.visit(c) for c in node._children)
+
     ##############################
-    ## Core-level IR Type nodes 
+    ## Core-level IR Type nodes
     ##############################
 
     def visit(self, node: ir.Node):
@@ -1149,47 +1126,49 @@ class StripType(Analysis):
 
     @handles(ir.UnitT)
     def _(self, node: ir.UnitT):
-        return node
+        return node.replace(ref=None, view=None, obl=None)
 
     @handles(ir.BoolT)
     def _(self, node: ir.BoolT):
-        # BoolT has no children, nothing to check
-        return node
+        return node.replace(ref=None, view=None, obl=None)
 
     @handles(ir.IntT)
     def _(self, node: ir.IntT):
-        return node
+        return node.replace(ref=None, view=None, obl=None)
 
     @handles(ir.EnumT)
     def _(self, node: ir.EnumT):
-        return node
+        return node.replace(ref=None, view=None, obl=None)
 
     @handles(ir.TupleT)
     def _(self, node: ir.TupleT):
         childTs = self.visit_children(node)
-        return node.replace(*childTs)
+        return node.replace(*childTs, ref=None, view=None, obl=None)
 
     @handles(ir.SumT)
     def _(self, node: ir.SumT):
-        # Visit children to verify they are Types
         childTs = self.visit_children(node)
-        return node.replace(*childTs)
+        return node.replace(*childTs, ref=None, view=None, obl=None)
 
     @handles(ir.DomT)
     def _(self, node: ir.DomT):
-        # Visit children to verify they are Types
         carT, = self.visit_children(node)
-        return node.replace(carT)
+        return node.replace(carT, ref=None, view=None, obl=None)
 
     @handles(ir.PiT, ir.PiTHOAS)
     def _(self, node: ir._PiT):
         argT, resT = self.visit_children(node)
-        return node.replace(argT, resT)
+        return node.replace(argT, resT, ref=None, view=None, obl=None)
 
-    @handles(ir.RefT, ir.GuardT, ir.ViewWrapperT)
-    def _(self, node: ir.Type):
-        return self.visit(node.T)
- 
+    @handles(ir.ViewT)
+    def _(self, node: ir.ViewT):
+        return node.replace(ref=None, view=None, obl=None)
+
+    @handles(ir.ApplyT)
+    def _(self, node: ir.ApplyT):
+        childTs = self.visit_children(node)
+        return node.replace(*childTs, ref=None, view=None, obl=None)
+
 def stripT(node: ir.Type):
     _ST = StripType()
     assert isinstance(node, ir.Type)

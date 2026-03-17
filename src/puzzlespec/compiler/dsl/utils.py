@@ -8,14 +8,10 @@ def _is_type(T: ir.Type) -> bool:
     return isinstance(T, ir.Type)
 
 def _unrwap_ref(T: ir.Type) -> ir.Type:
-    if isinstance(T, ir.RefT):
-        return _unrwap_ref(T.T)
-    return T
+    return T.rawT
 
 def _is_kind(T: ir.Type, kind: tp.Type[ir.Type]) -> bool:
-    if isinstance(T, ir.RefT):
-        return _is_kind(T.T, kind)
-    return isinstance(T, kind)
+    return isinstance(T.rawT, kind)
 
 def _is_same_kind(T1: ir.Type, T2: ir.Type) -> bool:
     if not _is_type(T1) or not _is_type(T2):
@@ -32,14 +28,14 @@ def _is_domain(V: ir.Value) -> bool:
 def _has_bv(bv: ir.BoundVarHOAS, node: ir.Node):
     if node is bv:
         return True
-    return any(_has_bv(bv, c) for c in node._children)
+    return any(_has_bv(bv, c) for c in node.all_nodes)
     
 def _get_bvs(node: ir.Node) -> set[ir.BoundVarHOAS]:
     if isinstance(node, ir.BoundVarHOAS):
         return set((node,))
-    if len(node._children) == 0:
+    if not node.all_nodes:
         return set()
-    return set.union(*(_get_bvs(c) for c in node._children))
+    return set.union(*(_get_bvs(c) for c in node.all_nodes))
 
 def substitute(node: ir.Node, bv: ir.BoundVarHOAS, arg: ir.Value):
     cache = {bv: arg}
@@ -58,11 +54,18 @@ def _substitute(node: ir.Node, cache: tp.Mapping[ir.Node, ir.Node]):
     #        raise ValueError(f"Cannot substitute into lambda placeholder {node}")
     if node in cache:
         return cache[node]
-    new_children = []
-    for c in node._children:
-        new_children.append(_substitute(c, cache))
-    #new_children = [_substitute(c, bv, arg) for c in node._children]
-    new_node = node.replace(*new_children)
+    new_children = tuple(_substitute(c, cache) for c in node._children)
+    if isinstance(node, ir.Value):
+        new_T = _substitute(node.T, cache)
+        new_obl = _substitute(node.obl, cache) if node.obl is not None else None
+        new_node = node.replace(*new_children, T=new_T, obl=new_obl)
+    elif isinstance(node, ir.Type):
+        new_ref = _substitute(node.ref, cache) if node.ref is not None else None
+        new_view = _substitute(node.view, cache) if node.view is not None else None
+        new_obl = _substitute(node.obl, cache) if node.obl is not None else None
+        new_node = node.replace(*new_children, ref=new_ref, view=new_view, obl=new_obl)
+    else:
+        new_node = node.replace(*new_children)
     cache[node] = new_node
     return new_node
 
@@ -80,16 +83,16 @@ def _substitute(node: ir.Node, cache: tp.Mapping[ir.Node, ir.Node]):
 def _is_concrete(node: ir.Node):
     if isinstance(node, (ir.VarRef, ir.BoundVar, ir.VarHOAS, ir.BoundVarHOAS)):
         return False
-    return all(_is_concrete(c) for c in node._children)
+    return all(_is_concrete(c) for c in node.all_nodes)
 
 def _has_freevar(node: ir.Node):
     if isinstance(node, ir.VarRef):
         return True
-    return any(_has_freevar(c) for c in node._children)
+    return any(_has_freevar(c) for c in node.all_nodes)
 
 def _unpack(node: ir.Node):
     if isinstance(node, ir.TupleLit):
-        return tuple(_unpack(c) for c in node._children[1:])
+        return tuple(_unpack(c) for c in node._children)
     if isinstance(node, ir.Lit):
         return node.val
     raise NotImplementedError(f"Cannot unpack {node}")

@@ -9,7 +9,6 @@ from puzzlespec.compiler.passes.transforms.add_refinements import free_var_refin
 from . import ast, ir
 from .envs import SymTable, TypeEnv
 from ..passes.pass_base import Context, PassManager
-from ..passes.transforms.cse import CSE
 from ..passes.envobj import EnvsObj
 from .spec import PuzzleSpec
 from .utils import _substitute, _has_bv
@@ -57,8 +56,9 @@ class PuzzleSpecBuilder:
         pm = PassManager(TypeCheckingPass(), ResolveFreeVars(), verbose=True)
         new_rules_node = pm.run(new_rules_node, ctx=ctx)
         #new_rules_node = guard_opt(new_rules_node)
-        if isinstance(new_rules_node, ir.Guard):
-            T, new_rules_node, p = new_rules_node._children
+        if new_rules_node.obl is not None:
+            p = new_rules_node.obl
+            new_rules_node = new_rules_node.replace(*new_rules_node._children, T=new_rules_node.T, obl=None)
             obls = ast.TupleExpr.make((ast.wrap(p),)).node
         else:
             obls = ast.TupleExpr.make(()).node

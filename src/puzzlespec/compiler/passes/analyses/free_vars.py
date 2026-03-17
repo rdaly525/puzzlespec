@@ -27,7 +27,7 @@ class FreeVarsPass(Analysis):
         return FreeVars(vars)
 
     def add_fvars(self, node, fvars):
-        if not isinstance(node, ir.RefT):
+        if not (isinstance(node, ir.Type) and node.ref is not None):
             return
         if node in self.vmap:
             if self.vmap[node] != fvars:
@@ -38,33 +38,35 @@ class FreeVarsPass(Analysis):
             self.nmap[node] = node
 
     def visit(self, node: ir.Node):
-        child_fvars = self.visit_children(node)
+        # Visit all Node-valued parts (children + T + obl + ref + view)
         fvars = set()
-        for c in child_fvars:
-            fvars |= c
+        for c in node.all_nodes:
+            fvars |= self.visit(c)
         self.add_fvars(node, fvars)
         return fvars
 
     @handles(ir.LambdaHOAS)
-    def _(self, node: ir.Node):
-        T_vars, body_vars = self.visit_children(node)
-        body_vars = body_vars - set([node.bv_name])
-
-        fvars = T_vars | body_vars
+    def _(self, node: ir.LambdaHOAS):
+        fvars = set()
+        for c in node.all_nodes:
+            fvars |= self.visit(c)
+        fvars -= {node.bv_name}
         self.add_fvars(node, fvars)
         return fvars
 
     @handles(ir.PiTHOAS)
-    def _(self, node: ir.Node):
-        T_vars, body_vars = self.visit_children(node)
-        body_vars = body_vars - set([node.bv_name])
-        fvars = T_vars | body_vars
+    def _(self, node: ir.PiTHOAS):
+        fvars = set()
+        for c in node.all_nodes:
+            fvars |= self.visit(c)
+        fvars -= {node.bv_name}
         self.add_fvars(node, fvars)
         return fvars
 
     @handles(ir.BoundVarHOAS)
     def _(self, bv: ir.BoundVarHOAS):
-        cvars, = self.visit_children(bv)
-        fvars = set([bv.name]) | cvars
+        fvars = {bv.name}
+        for c in bv.all_nodes:
+            fvars |= self.visit(c)
         self.add_fvars(bv, fvars)
         return fvars

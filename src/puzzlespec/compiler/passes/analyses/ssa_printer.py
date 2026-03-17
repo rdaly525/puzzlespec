@@ -21,7 +21,7 @@ class Uses(Analysis):
 
     def visit(self, node: ir.Node) -> tp.Any:
         self.visit_children(node)
-        for c in node._children:
+        for c in node.all_nodes:
             if c in self.use_cnt:
                 self.use_cnt[c] += 1
             else:
@@ -67,99 +67,37 @@ class SSAPrinter(Analysis):
 
     def visit(self, node: ir.Node):
         if node not in self.vmap:
-            cvals= self.visit_children(node)
+            vc = self.visit_children(node)
             vname = self.new_var(node)
             fstr = ""
             if len(node.field_dict) > 0:
                 fstr = "[" + ", ".join(f"{k}={v}" for k,v in node.field_dict.items()) + "]"
-            cs = ", ".join(cvals)
-            decl = f"{vname} = {node.__class__.__name__}{fstr}({cs})"
-            decl += f" {ast.wrap(node)._freevars}"
-            #decl += f" {ast.wrap(node)}"
+            if isinstance(node, ir.Value):
+                T_str = self.visit(node.T) if node.T not in self.vmap else self.vmap[node.T]
+                cs = ", ".join(str(self.visit(c) if c not in self.vmap else self.vmap[c]) for c in node._children)
+                decl = f"{vname}: {T_str} = {node.__class__.__name__}{fstr}({cs})"
+                if vc.obl is not None:
+                    obl_str = self.visit(node.obl) if node.obl not in self.vmap else self.vmap[node.obl]
+                    decl += f" # obl={obl_str}"
+            elif isinstance(node, ir.Type):
+                cs = ", ".join(str(self.visit(c) if c not in self.vmap else self.vmap[c]) for c in node._children)
+                ref_str = ""
+                if vc.ref is not None:
+                    ref_v = self.visit(node.ref) if node.ref not in self.vmap else self.vmap[node.ref]
+                    ref_str = f": {ref_v}"
+                decl = f"{vname}{ref_str} = {node.__class__.__name__}{fstr}({cs})"
+                comment_parts = []
+                if vc.view is not None:
+                    view_v = self.visit(node.view) if node.view not in self.vmap else self.vmap[node.view]
+                    comment_parts.append(f"view={view_v}")
+                if vc.obl is not None:
+                    obl_v = self.visit(node.obl) if node.obl not in self.vmap else self.vmap[node.obl]
+                    comment_parts.append(f"obl={obl_v}")
+                if comment_parts:
+                    decl += " # " + ", ".join(comment_parts)
+            else:
+                cs = ", ".join(str(v) for v in vc)
+                decl = f"{vname} = {node.__class__.__name__}{fstr}({cs})"
             self.decls.append(decl)
             self.vmap[node] = vname
         return self.vmap[node]
-
-
- 
-class _SSAPrinter(Analysis):
-    """
-    Creates a python AST object that is a 'serialization' of a SpecObject
-    This will be in SSA form and will look something like:
-
-    """
-
-    requires = ()  
-    produces = (SSAResult,)  
-    name = "ssa_printer"
-
-    def run(self, root: ir.Node, ctx: Context) -> AnalysisObject:
-        self.decls = {}
-        self.var_names = set()
-        self.use_cnt = Uses()(root, ctx).use_cnt
-        self._var_cnt={}
-        constraints = [self.visit(c) for c in root._children]
-        c_str = ", \n    ".join(cs for cs in constraints)
-        text = "# Variables";
-        for name, (T, con) in self.decls.items():
-            if name in self.var_names:
-                text += f"\n{name}: {T} = {con}"
-        text += "\n# other vars"
-        for name, (T, con) in self.decls.items():
-            if name not in self.var_names:
-                text += f"\n{name}: {T} = {con}"
-        text += f"\nreturn ∩(\n    {c_str}\n)\n"
-        print(text)
-        return SSAResult(text)
-
-    def do_use(self, node, use_s, prefix='x'):
-        if node not in self.use_cnt:
-            raise ValueError(f"{node} not in use_cnt")
-        if self.use_cnt[node] > 1:
-            var = self._new_var_name('x')
-            self._add_new_decl(var, self.tenv[node], use_s)
-            return var
-        else:
-            return use_s
-
-    def visit(self, node: ir.Node) -> tp.Any:
-        strs = self.visit_children(node)
-        # Create use str
-        use_s = f"{node.__class__.__name__}({', '.join(strs)})"
-        return self.do_use(node, use_s)
-
-    def _new_var_name(self, prefix: str, is_var=False):
-        if is_var:
-            name = prefix
-            self.var_names.add(name)
-        else:
-            self._var_cnt.setdefault(prefix, 0)
-            name = f"{prefix}{self._var_cnt[prefix]}"
-            self._var_cnt[prefix] += 1
-        return name
-
-    def _add_new_decl(self, name: str, T: irT.Type_, constructor: str):
-        assert name not in self.decls
-        self.decls[name] = (T, constructor)
-
-    # Literals and basic nodes
-    @handles()
-    def _(self, node: ir.Lit) -> tp.Any:
-        """Analyze literal nodes."""
-        return str(node.val)
-
-    @handles()
-    def _(self, node: ir.VarRef) -> tp.Any:
-        """Analyze variable reference nodes."""
-        var = self._new_var_name(self.sym.get_name(node.sid), is_var=True)
-        self._add_new_decl(var, self.tenv[node], 'Var()')
-        return var
- 
-    @handles()
-    def _(self, node: ir.BoundVar) -> tp.Any:
-        """Analyze bound variable nodes."""
-        return f"#{node.idx}"
-    
-    @handles(ir.BoundVarHOAS, ir.LambdaHOAS, mark_invalid=True)
-    def _(self, node: ir.Node) -> tp.Any:
-        ...

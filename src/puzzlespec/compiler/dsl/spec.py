@@ -8,8 +8,6 @@ from .envs import SymTable
 from ..passes.pass_base import PassManager, Context, Pass
 from ..passes.transforms.beta_reduction import BetaReductionPass, BetaReductionHOAS
 from ..passes.transforms import CanonicalizePass, ConstFoldPass, AlgebraicSimplificationPass, DomainSimplificationPass
-from ..passes.transforms.cse import CSE
-from ..passes.transforms.ord import OrdSimplificationPass
 from ..passes.transforms.guard_opt import GuardOpt, GuardLift
 #from ..passes.analyses.constraint_categorizer import ConstraintCategorizer, ConstraintCategorizerVals
 from ..passes.analyses.getter import VarGetter, VarSet, get_vars
@@ -91,7 +89,7 @@ class PuzzleSpec:
             new_obls = new_spec_node.obls
         else:
             obls = obls.obls
-            raw_obls = new_spec_node.obls._children[1:] + tuple(obls.values())
+            raw_obls = new_spec_node.obls._children + tuple(obls.values())
             new_obls = ir.TupleLit(ir.TupleT(*(ir.BoolT() for _ in raw_obls)), *raw_obls)
         return PuzzleSpec(
             name=self.name,
@@ -117,7 +115,7 @@ class PuzzleSpec:
             ]
         ]
         opt_passes = base_opt
-        opt = self.transform(*opt_passes, ctx=ctx, analysis_map=analysis_map, max_iter=8, verbose=2)
+        opt = self.transform(*opt_passes, ctx=ctx, analysis_map=analysis_map, max_iter=8, verbose=0)
         return opt
     
     def pretty(self) -> str:

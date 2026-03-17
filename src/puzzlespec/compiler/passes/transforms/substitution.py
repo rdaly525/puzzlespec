@@ -32,5 +32,9 @@ class SubstitutionPass(Transform):
         for submap in self.sub_mapping:
             if submap.match(node):
                 return submap.replace(node)
-        new_children = self.visit_children(node)
-        return node.replace(*new_children)
+        vc = self.visit_children(node)
+        if isinstance(node, ir.Value):
+            return node.replace(*vc.children, T=vc.T, obl=vc.obl)
+        elif isinstance(node, ir.Type):
+            return node.replace(*vc.children, ref=vc.ref, view=vc.view, obl=vc.obl)
+        return node.replace(*vc)

@@ -20,8 +20,9 @@ class CurryPass(Transform):
 
     @handles(ir.LambdaHOAS)
     def _(self, node: ir.LambdaHOAS):
-        T, body = self.visit_children(node)
-        new_lam = node.replace(T, body)
+        vc = self.visit_children(node)
+        body, = vc.children
+        new_lam = node.replace(body, T=vc.T, obl=vc.obl)
         lam = tp.cast(ast.FuncExpr, ast.wrap(new_lam))
         if isinstance(lam.domain.node, ir.CartProd):
             N = len(lam.domain.T.carT)
@@ -46,18 +47,16 @@ class CurryPass(Transform):
 
     @handles(ir.Apply)
     def _(self, node: ir.Apply):
-        T, lam, arg = self.visit_children(node)
+        vc = self.visit_children(node)
+        T = vc.T
+        lam, arg = vc.children
         vals = self.cmap.get(lam, None)
         if vals is not None:
+            assert vc.obl is None, "Apply: dropping node with obl during curry"
             clam, N = vals
             a = ast.wrap(arg)
             for i in range(N):
                 ai = a[i]
                 clam = clam(ai)
             return clam.node
-        return node.replace(T, lam, arg)
-
-
-        
-
- 
+        return node.replace(lam, arg, T=T, obl=vc.obl)

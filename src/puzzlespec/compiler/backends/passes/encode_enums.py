@@ -27,39 +27,12 @@ class EncodeEnums(Transform):
         env = EnvsObj(self.sym)
         return new_root, env
 
-    #@handles(ir.VarRef)
-    #def _(self, node: ir.VarRef) -> ir.Node:
-    #    T, = self.visit_children(node)
-    #    if isinstance(T, ir.EnumT):
-    #        assert node.sid in self.sym
-    #        e = self.sym[node.sid]
-    #        n = len(T)
-    #        #Special case n==2
-    #        if n>2:
-    #            new_name = f"_E{e.name}_I{n}"
-    #            new_sid = self.sym.new_var(new_name, metadata=e._metadata)
-    #            T = ir.IntT()
-    #            new_var = ir.VarRef(new_sid)
-    #            obl = ir.IsMember(
-    #                ir.BoolT(),
-    #                ir.Fin(ir.DomT.make(ir.IntT(), fin=True, ord=True), ir.Lit(ir.IntT(), val=n)),
-    #                new_var
-    #            )
-    #            self.obls[new_sid] = obl
-    #        else:
-    #            assert n==2
-    #            new_name = f"_E{e.name}_B"
-    #            new_sid = self.sym.new_var(new_name, e.role, e.public)
-    #            T = ir.BoolT()
-    #            new_var = ir.VarRef(new_sid)
-    #        return new_var
-    #    return node.replace(T)
-    
     @handles(ir.Lit)
     def _(self, node: ir.Lit) -> ir.Node:
         if isinstance(node.T, ir.EnumT):
             enumT = node.T
-            T, = self.visit_children(node)
+            vc = self.visit_children(node)
+            T = vc.T
             assert isinstance(enumT, ir.EnumT)
             n = len(enumT)
             i = enumT.labels.index(node.label)
@@ -74,7 +47,4 @@ class EncodeEnums(Transform):
         if len(node)==2:
             return ir.BoolT()
         else:
-            return ir.RefT(
-                ir.IntT(),
-                std.fin(n).node
-            )
+            return ir.IntT(ref=std.fin(n).node)

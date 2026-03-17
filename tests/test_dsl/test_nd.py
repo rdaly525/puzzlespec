@@ -14,8 +14,6 @@ def check(v: ast.Expr):
         raise ValueError()
 
 # Current issues
-# For some reason enable memoization changes result of freevars
-# also image has a floating free var
 def test_basic():
     NDDomainExpr = ast_nd.NDDomainExpr
     NDArrayExpr  = ast_nd.NDArrayExpr
@@ -37,7 +35,7 @@ def test_basic():
     v = img[1].simplify()
     print(v)
 
-#test_basic()
+test_basic()
 
 def test_vars():
     fin = nd.fin
@@ -52,7 +50,7 @@ def test_vars():
     assert isinstance(f3, ast_nd.NDArrayExpr)
     assert isinstance(f2(m), ast_nd.NDArrayExpr)
 
-#test_vars()
+test_vars()
 
 def test_3d():
     fin = nd.fin
@@ -71,7 +69,7 @@ def test_3d():
     check(img)
     assert isinstance(img, ast_nd.NDDomainExpr) and img.rank==2
 
-#test_nd()
+test_3d()
 
 def test_windows():
     n = var(Int, name='n')
@@ -89,7 +87,7 @@ def test_windows():
         assert isinstance(win1, ast_nd.NDDomainExpr)
         print(win1.simplify())
 
-#test_windows()
+test_windows()
 
 def test_nd():
     n = var(Int, name='n')
@@ -127,7 +125,7 @@ def test_nd():
     print(asimp)
 #323 27766616
 #206 642460
-#test_nd()
+test_nd()
 
 def test_bug():
     B = param(std.Nat, name='B')

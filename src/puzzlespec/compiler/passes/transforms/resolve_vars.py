@@ -26,12 +26,14 @@ class ResolveBoundVars(Transform):
     def _check_no_hoas(self, node):
         if isinstance(node, (ir.BoundVarHOAS, ir.LambdaHOAS, ir.PiTHOAS)):
             raise ValueError(f"Failed resolve bound, found {node}")
-        for c in node._children:
+        for c in node.all_nodes:
             self._check_no_hoas(c)
 
     @handles(ir.LambdaHOAS)
     def _(self, node):
-        T, bv, body = node._children
+        body, = node._children
+        T = node.T  # PiTHOAS
+        bv = T._children[0]  # BoundVarHOAS from PiTHOAS's argT
         new_T = self.visit(T)
         self.stack.append(bv)
         new_body = self.visit(body)
@@ -40,8 +42,8 @@ class ResolveBoundVars(Transform):
 
     @handles(ir.Lambda)
     def _(self, node):
-        T, body = node._children
-        new_T = self.visit(T)
+        body, = node._children
+        new_T = self.visit(node.T)
         self.stack.append(None)
         new_body = self.visit(body)
         self.stack.pop()
@@ -79,22 +81,13 @@ class VarMap(AnalysisObject):
     def __init__(self, sid_to_T):
         self.sid_to_T = sid_to_T
 
-#class FreeVarRefine(Analysis):
-#    requires = ()
-#    produces = (VarMap,)
-#    name = "free_var_refine"
-#
-#    def run(self, root: ir.Node, ctx: Context):
-#        self.n_to_doms = {}
-#        self.ru
-
 # This will replace _VarPlaceHolder
 class ResolveFreeVars(Transform):
     requires = (EnvsObj,)
     produces = (EnvsObj,)
     name = "resolve_free_vars"
     #_debug=True
-    
+
     def run(self, root: ir.Node, ctx: Context):
         self.sym: SymTable = ctx.get(EnvsObj).sym
         new_root = self.visit(root)
@@ -102,7 +95,8 @@ class ResolveFreeVars(Transform):
 
     @handles(ir.VarHOAS)
     def _(self, v: ir.VarHOAS):
-        new_T, = self.visit_children(v)
+        vc = self.visit_children(v)
+        new_T = vc.T
         sid = self.sym.new_or_get(v.name, v.kind, v.metadata)
         return ir.VarRef(new_T, sid)
 
@@ -128,12 +122,12 @@ class CloseBoundVars(Transform):
 
     @handles(ir.BoundVarHOAS)
     def _(self, node: ir.BoundVarHOAS):
-        T, = self.visit_children(node)
+        vc = self.visit_children(node)
         if node._key == self.bv._key:
             if node.closed:
                 raise ValueError("Closed binder in scope")
-            return ir.BoundVarHOAS(T, closed=True, name=node.name)
-        return node.replace(*self.visit_children(node))
+            return ir.BoundVarHOAS(vc.T, closed=True, name=node.name)
+        return node.replace(T=vc.T, obl=vc.obl)
 
     @handles(ir.Lambda, ir.PiT)
     def _(self, node: ir.Lambda | ir.PiT):
@@ -141,14 +135,16 @@ class CloseBoundVars(Transform):
 
     @handles(ir.LambdaHOAS)
     def _(self, node: ir.LambdaHOAS):
-        T, bv, body = node._children
+        bv = node.T._children[0]  # BoundVarHOAS from PiTHOAS's argT
         if bv._key == self.bv._key:
             raise ValueError("Same binder in scope")
-        return node.replace(*self.visit_children(node))
+        vc = self.visit_children(node)
+        return node.replace(*vc.children, T=vc.T, obl=vc.obl)
 
     @handles(ir.PiTHOAS)
     def _(self, node: ir.PiTHOAS):
-        bv, bodyT = node._children
+        bv = node._children[0]  # BoundVarHOAS argT
         if bv._key == self.bv._key:
             raise ValueError("Same binder in scope")
-        return node.replace(*self.visit_children(node))
+        vc = self.visit_children(node)
+        return node.replace(*vc.children, ref=vc.ref, view=vc.view, obl=vc.obl)
