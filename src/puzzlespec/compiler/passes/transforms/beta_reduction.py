@@ -55,18 +55,18 @@ class BetaReductionPass(Transform):
                 return t
 
         if isinstance(t, ir.Lambda):
-            body = t._children[0]
+            body = t.children[0]
             body2 = self.shift(body, d, cutoff + 1)
             return self._replace(t, body2)
 
         if isinstance(t, ir.PiT):
-            argT, resT = t._children
+            argT, resT = t.children
             argT2 = self.shift(argT, d, cutoff)
             resT2 = self.shift(resT, d, cutoff + 1)
             return t.replace(argT2, resT2, ref=t.ref, view=t.view, obl=t.obl)
 
         # generic n-ary node: no new binder
-        new_children = [self.shift(c, d, cutoff) for c in t._children]
+        new_children = [self.shift(c, d, cutoff) for c in t.children]
         return self._replace(t, *new_children)
 
     def subst(self, t: ir.Node, j: int, s: ir.Node, depth: int = 0) -> ir.Node:
@@ -83,17 +83,17 @@ class BetaReductionPass(Transform):
                 return t
 
         if isinstance(t, ir.Lambda):
-            body = t._children[0]
+            body = t.children[0]
             body2 = self.subst(body, j, s, depth + 1)
             return self._replace(t, body2)
 
         if isinstance(t, ir.PiT):
-            argT, resT = t._children
+            argT, resT = t.children
             argT2 = self.subst(argT, j, s, depth)
             resT2 = self.subst(resT, j, s, depth + 1)
             return t.replace(argT2, resT2, ref=t.ref, view=t.view, obl=t.obl)
 
-        new_children = [self.subst(c, j, s, depth) for c in t._children]
+        new_children = [self.subst(c, j, s, depth) for c in t.children]
         return self._replace(t, *new_children)
 
     # ---------- visitors ----------
@@ -108,7 +108,7 @@ class BetaReductionPass(Transform):
         # first recursively reduce inside
         T, lam, arg = self.visit_children(node)
         assert isinstance(lam, ir.Lambda)
-        body = lam._children[0]
+        body = lam.children[0]
 
         # 1. shift argument up by 1 for the binder we're eliminating
         arg_p1 = self.shift(arg, +1, cutoff=0)
@@ -139,11 +139,11 @@ class BetaReductionHOAS(Transform):
 
     @handles(ir.ApplyT)
     def _(self, node: ir.ApplyT):
-        lamT, arg = node._children
+        lamT, arg = node.children
         arg = self.visit(arg)
         assert isinstance(arg, ir.Value)
         assert isinstance(lamT, ir.PiTHOAS)
-        argT, resT = lamT._children
+        argT, resT = lamT.children
         bv_name = lamT.bv_name
         assert lamT.bv_name not in self.bv_map
         self.bv_map[bv_name] = arg
@@ -158,9 +158,9 @@ class BetaReductionHOAS(Transform):
 
     @handles(ir.Apply)
     def _(self, node: ir.Apply):
-        lam, arg = node._children
+        lam, arg = node.children
         if isinstance(lam, ir.LambdaHOAS):
-            body = lam._children[0]
+            body = lam.children[0]
             bv_name = lam.bv_name
             if bv_name in self.bv_map:
                 raise ValueError()

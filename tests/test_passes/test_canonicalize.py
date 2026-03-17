@@ -12,7 +12,7 @@ def test_sum_sorted():
     node = (x + y).node
     result = run_transform(CanonicalizePass, node)
     assert isinstance(result, ir.Sum)
-    children = list(result._children)
+    children = list(result.children)
     assert children == sorted(children)
 
 
@@ -24,7 +24,7 @@ def test_sum_flattened():
     node = ((x + y) + z).node
     result = run_transform(CanonicalizePass, node)
     assert isinstance(result, ir.Sum)
-    assert len(result._children) == 3
+    assert len(result.children) == 3
 
 
 def test_prod_sorted():
@@ -33,7 +33,7 @@ def test_prod_sorted():
     node = (x * y).node
     result = run_transform(CanonicalizePass, node)
     assert isinstance(result, ir.Prod)
-    children = list(result._children)
+    children = list(result.children)
     assert children == sorted(children)
 
 

@@ -16,7 +16,7 @@ def test_value_guard_conjoins():
     assert obl is not None
     # Must contain both p and q (as a Conj)
     assert isinstance(obl.node, ir.Conj)
-    children = set(obl.node._children)
+    children = set(obl.node.children)
     assert p.node in children
     assert q.node in children
 
@@ -33,7 +33,7 @@ def test_type_guard_conjoins():
     obl = guarded_twice.obl
     assert obl is not None
     assert isinstance(obl.node, ir.Conj)
-    children = set(obl.node._children)
+    children = set(obl.node.children)
     assert p.node in children
     assert q.node in children
 

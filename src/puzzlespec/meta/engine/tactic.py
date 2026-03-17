@@ -22,7 +22,7 @@ import typing as tp
 #        matches = []
 #        for wit in wits:
 #            if isinstance(wit, ir.Lt):
-#                T, a, b = wit._children
+#                T, a, b = wit.children
 #                if a == ir.Lit(ir.IntT(), val=0):
 #                    # Matched!
 #                    matches.append((b,))
@@ -44,7 +44,7 @@ def open_lambda(lam: ir.LambdaHOAS, mvar: ir.MetaVar) -> ir.Node:
     def _open(node: ir.Node):
         if isinstance(node, ir.BoundVarHOAS) and node.name==lam.bv_name:
             return mvar
-        children = [_open(c) for c in node._children]
+        children = [_open(c) for c in node.children]
         return node.replace(*children)
     return _open(lam.body)
 
@@ -52,7 +52,7 @@ def substitute(node: ir.Node, env: tp.Mapping[int, ir.Node]) -> ir.Node:
     if isinstance(node, ir.MetaVar):
         assert node.id in env
         return env[node.id]
-    new_children = [substitute(c, env) for c in node._children]
+    new_children = [substitute(c, env) for c in node.children]
     return node.replace(*new_children)
 
 class Tactic:
@@ -79,10 +79,10 @@ class Tactic:
         fall = ast.wrap(fall).simplify().node
         def _unwrap(_fall: ir.Node, id: int):
             if isinstance(_fall, ir.Implies):
-                _, p, q = _fall._children
+                _, p, q = _fall.children
                 return (), (p, q)
             elif isinstance(_fall, ir.Forall):
-                _, lam = _fall._children
+                _, lam = _fall.children
                 dom = ast.wrap(lam).domain.node
                 mvar = ir.MetaVar(id)
                 body = open_lambda(lam, mvar)
@@ -114,7 +114,7 @@ def match_template(val: ir.Node, template: ir.Node, env):
         return env
     if type(val) == type(template) and val.field_dict == template.field_dict:
     #if type(val) == type(template):
-        envs = [match_template(vc, tc, env) for vc, tc in zip(val._children, template._children)]
+        envs = [match_template(vc, tc, env) for vc, tc in zip(val.children, template.children)]
         env = {}
         for e in envs:
             if e is None:

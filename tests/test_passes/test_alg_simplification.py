@@ -18,7 +18,7 @@ def test_sum_cancel():
     x = var(Int, name='x')
     node = (x + (-x)).node
     result = run_transform(AlgebraicSimplificationPass, node)
-    assert isinstance(result, ir.Sum) and len(result._children) == 0
+    assert isinstance(result, ir.Sum) and len(result.children) == 0
 
 
 def test_prod_one():

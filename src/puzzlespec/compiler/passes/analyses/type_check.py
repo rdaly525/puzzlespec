@@ -56,7 +56,7 @@ class TypeCheckingPass(Analysis):
 
     def visit_children(self, node: ir.Node):
         self.check_node_attrs(node)
-        children = tuple(self.visit(c) for c in node._children)
+        children = tuple(self.visit(c) for c in node.children)
         if isinstance(node, ir.Value):
             T_result = self.visit(node.T)
             return (T_result, *children)
@@ -131,7 +131,7 @@ class TypeCheckingPass(Analysis):
     @handles(ir.PiT)
     def _(self, node: ir.PiT):
         self.check_node_attrs(node)
-        argT, resT = node._children
+        argT, resT = node.children
         # Verify T is a type
         if not _is_type(argT):
             raise TypeError(f"LambdaT argT must be a type, got {argT}")
@@ -215,7 +215,7 @@ class TypeCheckingPass(Analysis):
     def _(self, node: ir.Lambda):
         self.check_node_attrs(node)
         # Verify type is LambdaT
-        lamT, body = node._children
+        lamT, body = node.children
         argT, resT = self.visit(lamT)
         # Verify body is a Value
         if not _is_value(body):
@@ -898,7 +898,7 @@ class TypeCheckingPass(Analysis):
         for T in (consT, oblsT):
             if not _is_kind(T, ir.TupleT):
                 raise TypeError(f"Spec cons/obls must be a TupleT, got {type(T)}")
-            if not all(_is_kind(c, ir.BoolT) for c in T._children):
+            if not all(_is_kind(c, ir.BoolT) for c in T.children):
                 raise TypeError(f"Spec cons/obls must have BoolT children, got {T}")
         T = ir.BoolT()
         self.Tmap[node] = T
@@ -1115,7 +1115,7 @@ class StripType(Analysis):
 
     def visit_children(self, node: ir.Node):
         # Only recurse into _children (Type nodes), skip named children (ref/view/obl)
-        return tuple(self.visit(c) for c in node._children)
+        return tuple(self.visit(c) for c in node.children)
 
     ##############################
     ## Core-level IR Type nodes

@@ -40,7 +40,7 @@ class PuzzleSpec:
         def check(node: ir.Node):
             if isinstance(node, (ir.BoundVarHOAS, ir.LambdaHOAS, ir.LambdaTHOAS, ir.VarHOAS)):
                 raise ValueError(f"Found placeholder node {node} in rules")
-            for c in node._children:
+            for c in node.children:
                 check(c)
         check(self._spec)
 
@@ -89,7 +89,7 @@ class PuzzleSpec:
             new_obls = new_spec_node.obls
         else:
             obls = obls.obls
-            raw_obls = new_spec_node.obls._children + tuple(obls.values())
+            raw_obls = new_spec_node.obls.children + tuple(obls.values())
             new_obls = ir.TupleLit(ir.TupleT(*(ir.BoolT() for _ in raw_obls)), *raw_obls)
         return PuzzleSpec(
             name=self.name,
@@ -170,7 +170,7 @@ class PuzzleSpec:
     #    decision_rules = []
     #    constant_rules = []
 
-    #    for rule in self._rules._children:
+    #    for rule in self._rules.children:
     #        assert rule in ccmapping
     #        match (ccmapping[rule]):
     #            case "D":

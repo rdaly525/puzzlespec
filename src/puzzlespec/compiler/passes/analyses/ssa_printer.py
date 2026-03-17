@@ -74,13 +74,13 @@ class SSAPrinter(Analysis):
                 fstr = "[" + ", ".join(f"{k}={v}" for k,v in node.field_dict.items()) + "]"
             if isinstance(node, ir.Value):
                 T_str = self.visit(node.T) if node.T not in self.vmap else self.vmap[node.T]
-                cs = ", ".join(str(self.visit(c) if c not in self.vmap else self.vmap[c]) for c in node._children)
+                cs = ", ".join(str(self.visit(c) if c not in self.vmap else self.vmap[c]) for c in node.children)
                 decl = f"{vname}: {T_str} = {node.__class__.__name__}{fstr}({cs})"
                 if vc.obl is not None:
                     obl_str = self.visit(node.obl) if node.obl not in self.vmap else self.vmap[node.obl]
                     decl += f" # obl={obl_str}"
             elif isinstance(node, ir.Type):
-                cs = ", ".join(str(self.visit(c) if c not in self.vmap else self.vmap[c]) for c in node._children)
+                cs = ", ".join(str(self.visit(c) if c not in self.vmap else self.vmap[c]) for c in node.children)
                 ref_str = ""
                 if vc.ref is not None:
                     ref_v = self.visit(node.ref) if node.ref not in self.vmap else self.vmap[node.ref]

@@ -20,7 +20,7 @@ class CanonicalizePass(Transform):
         for c in children:
             if isinstance(c, vaOp):
                 assert c.obl is None, f"Flattened {vaOp.__name__} child has non-None obl"
-                new_children += list(c._children)
+                new_children += list(c.children)
             else:
                 new_children.append(c)
         # Sort by keys

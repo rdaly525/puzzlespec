@@ -66,6 +66,10 @@ class Node:
     # ---- Accessors ----
 
     @property
+    def children(self) -> tp.Tuple['Node', ...]:
+        return self._children
+
+    @property
     def num_children(self):
         return len(self._children)
 

@@ -106,7 +106,7 @@ class PrettyPrinterPass(Analysis):
         """Override to skip named children (ref/view/obl) - they are handled by the
         post-visit decorator in run(). For Value nodes, returns (T_str, *children_strs)
         to preserve backward compat with handler unpacking."""
-        children = tuple(self.visit(c) for c in node._children)
+        children = tuple(self.visit(c) for c in node.children)
         if isinstance(node, ir.Value):
             T_str = self.visit(node.T)
             return (T_str, *children)
@@ -183,7 +183,7 @@ class PrettyPrinterPass(Analysis):
     #@handles(ir.NDDomT)
     #def _(self, node: ir.NDDomT) -> str:
     #    #factors = self.visit_children(node)
-    #    factors = node._children
+    #    factors = node.children
     #    shape_Ts = [factors[a].carT for a in node.axes]
     #    shape_s = self.visit(ir.TupleT(*shape_Ts))
     #    base_s = self.visit(ir.TupleT(*(f.carT for f in factors)))
@@ -254,7 +254,7 @@ class PrettyPrinterPass(Analysis):
     
     @handles(ir.Choose)
     def _(self, node: ir.Choose) -> str:
-        func = node._children[0]
+        func = node.children[0]
         argT, var_name, body_expr = self._lambda(func)
         return f"⟨{var_name} : {argT} | {body_expr}⟩"
 
@@ -263,7 +263,7 @@ class PrettyPrinterPass(Analysis):
         return "tt"
 
     def _lambda(self, node: ir.LambdaHOAS | ir.Lambda) -> tp.Tuple[str, str, str]:
-        body = node._children[0]
+        body = node.children[0]
         T = node.T
         if isinstance(node, ir.LambdaHOAS):
             bv_name, body_txt = node.bv_name, self.visit(body)
@@ -562,7 +562,7 @@ class PrettyPrinterPass(Analysis):
 
     @handles(ir.Match)
     def _(self, node: ir.Match) -> str:
-        scrut_node, *branches = node._children
+        scrut_node, *branches = node.children
         scrut_expr = self.visit(scrut_node)
         assert all(isinstance(branch, (ir.Lambda, ir.LambdaHOAS)) for branch in branches)
         branch_exprs = [self._lambda(branch) for branch in branches]
@@ -576,7 +576,7 @@ class PrettyPrinterPass(Analysis):
 
     @handles(ir.Restrict)
     def _(self, node: ir.Restrict) -> str:
-        func = node._children[0]
+        func = node.children[0]
         argT, var_name, body_expr = self._lambda(func)
         return f"{{{var_name} | {body_expr}}}"
         #T, func = self.visit_children(node)
@@ -584,7 +584,7 @@ class PrettyPrinterPass(Analysis):
 
     @handles(ir.Forall)
     def _(self, node: ir.Forall) -> str:
-        func_node = node._children[0]
+        func_node = node.children[0]
         # Extract domain and lambda from func (typically a Map node)
         argT, var_name, body_expr = self._lambda(func_node)
         body_expr = self._indent_expr(body_expr)
@@ -592,7 +592,7 @@ class PrettyPrinterPass(Analysis):
 
     @handles(ir.Exists)
     def _(self, node: ir.Exists) -> str:
-        func_node = node._children[0]
+        func_node = node.children[0]
         # Extract domain and lambda from func (typically a Map node)
         argT, var_name, body_expr = self._lambda(func_node)
         body_expr = self._indent_expr(body_expr)

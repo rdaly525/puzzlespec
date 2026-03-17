@@ -34,7 +34,7 @@ class Scalarize(Transform):
             return ir.VarRef(new_sid)
         if isinstance(T, ir.TupleT):
             elems = []
-            for i, elemT in enumerate(T._children):
+            for i, elemT in enumerate(T.children):
                 elems.append(self.make_var(elemT, f"{prefix}_T{i}", e))
             return ir.TupleLit(T, *elems)
         if isinstance(T, ir.SumT):
@@ -53,7 +53,7 @@ class Scalarize(Transform):
                 elems.append(self.make_var(elemT, f"{prefix}_S{i}", e))
             return ir.SumLit(T, tag_var, *elems)
         if isinstance(T, ir.FuncT):
-            dom, lamT = T._children
+            dom, lamT = T.children
             dom_size = utils._dom_size(dom)
             if dom_size is None:
                 raise ValueError(f"Expected finite domain, got {dom}")
@@ -111,7 +111,7 @@ class Scalarize(Transform):
         func, = vc.children
         # Extract domain and lambda from func if it's a Map
         if isinstance(func, ir.FuncLit):
-            dom, *vals = func._children
+            dom, *vals = func.children
             dom_size = utils._dom_size(dom)
             if dom_size is not None and dom_size <= self.max_dom_size:
                 conj_vals = []
@@ -131,7 +131,7 @@ class Scalarize(Transform):
         func, = vc.children
         # Extract domain and lambda from func if it's a Map
         if isinstance(func, ir.FuncLit):
-            dom, *vals = func._children
+            dom, *vals = func.children
             disj_vals = []
             for v in utils._iterate(dom):
                 assert v is not None
@@ -148,7 +148,7 @@ class Scalarize(Transform):
         func, = vc.children
         # Extract domain and predicate values from func if it's a FuncLit
         if isinstance(func, ir.FuncLit):
-            dom, *vals = func._children
+            dom, *vals = func.children
             dom_size = utils._dom_size(dom)
             if dom_size is not None and dom_size <= self.max_dom_size:
                 # Early out: check that all predicate values are literals

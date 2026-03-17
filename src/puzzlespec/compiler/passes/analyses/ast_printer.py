@@ -48,14 +48,14 @@ class AstPrinterPass(Analysis):
             vc = self.visit_children(node)
             T_str = self.visit(node.T)
             parts.append(f"{indent}| T={T_str}")
-            for i, c in enumerate(node._children):
+            for i, c in enumerate(node.children):
                 parts.append(self.visit(c))
             if vc.obl is not None:
                 obl_str = self.visit(node.obl)
                 parts.append(f"{indent}| obl={obl_str}")
         elif isinstance(node, ir.Type):
             vc = self.visit_children(node)
-            for c in node._children:
+            for c in node.children:
                 parts.append(self.visit(c))
             if vc.ref is not None:
                 ref_str = self.visit(node.ref)
@@ -67,7 +67,7 @@ class AstPrinterPass(Analysis):
                 obl_str = self.visit(node.obl)
                 parts.append(f"{indent}| obl={obl_str}")
         else:
-            for c in node._children:
+            for c in node.children:
                 parts.append(self.visit(c))
 
         if parts:
