@@ -45,16 +45,16 @@ def substitute(node: ir.Node, bv: ir.BoundVarHOAS, arg: ir.Value):
 #def _substitute(node: ir.Node, bv: ir.BoundVarHOAS, arg: ir.Value, cache: tp.Mapping[ir.Node, ir.Node]):
 def _substitute(node: ir.Node, cache: tp.Mapping[ir.Node, ir.Node]):
     #if isinstance(node, ir.LambdaTHOAS):
-    #    lam_bv, lam_resT = node._children
+    #    lam_bv, lam_resT = node.children
     #    if lam_bv == bv:
     #        raise ValueError(f"Cannot substitute into lambda type {node}")
     #if isinstance(node, ir.LambdaHOAS):
-    #    lam_T, lam_bv, lam_body = node._children
+    #    lam_T, lam_bv, lam_body = node.children
     #    if lam_bv == bv:
     #        raise ValueError(f"Cannot substitute into lambda placeholder {node}")
     if node in cache:
         return cache[node]
-    new_children = tuple(_substitute(c, cache) for c in node._children)
+    new_children = tuple(_substitute(c, cache) for c in node.children)
     if isinstance(node, ir.Value):
         new_T = _substitute(node.T, cache)
         new_obl = _substitute(node.obl, cache) if node.obl is not None else None
@@ -72,7 +72,7 @@ def _substitute(node: ir.Node, cache: tp.Mapping[ir.Node, ir.Node]):
 #def _applyT(lamT: ir.LambdaT, arg: ir.Value):
 #    assert isinstance(arg, ir.Value)
 #    assert isinstance(lamT, ir.LambdaTHOAS)
-#    bv, resT = lamT._children
+#    bv, resT = lamT.children
 #    #print(f"Applying {arg} to {lamT}")
 #    if bv is arg:
 #        return resT
@@ -92,7 +92,7 @@ def _has_freevar(node: ir.Node):
 
 def _unpack(node: ir.Node):
     if isinstance(node, ir.TupleLit):
-        return tuple(_unpack(c) for c in node._children)
+        return tuple(_unpack(c) for c in node.children)
     if isinstance(node, ir.Lit):
         return node.val
     raise NotImplementedError(f"Cannot unpack {node}")

@@ -73,7 +73,7 @@ class TExpr(Expr):
 
     def forget_view(self):
         if self.has_view:
-            return wrapT(self.node.replace(*self.node._children, ref=self.node.ref, view=None, obl=self.node.obl))
+            return wrapT(self.node.replace(*self.node.children, ref=self.node.ref, view=None, obl=self.node.obl))
         return self
 
     @property
@@ -84,7 +84,7 @@ class TExpr(Expr):
 
     def with_view(self, view: ViewExpr):
         assert not self.has_view
-        node = self.node.replace(*self.node._children, ref=self.node.ref, view=view.node, obl=self.node.obl)
+        node = self.node.replace(*self.node.children, ref=self.node.ref, view=view.node, obl=self.node.obl)
         return wrapT(node)
 
     @property
@@ -115,7 +115,7 @@ class TExpr(Expr):
     def guard(self, p: BoolExpr):
         p = BoolExpr.make(p)
         new_obl = (self.obl & p).node if self.obl is not None else p.node
-        node = self.node.replace(*self.node._children, ref=self.node.ref, view=self.node.view, obl=new_obl)
+        node = self.node.replace(*self.node.children, ref=self.node.ref, view=self.node.view, obl=new_obl)
         return wrapT(node)
 
     def choose(self, plam: tp.Callable) -> VExpr:
@@ -231,7 +231,7 @@ class DomainType(TExpr):
             return set((self.ref_dom.node,))
         if isinstance(self.ref_dom.node, ir.Intersection):
             caps = set()
-            for dom in self.ref_dom.node._children:
+            for dom in self.ref_dom.node.children:
                 if isinstance(dom, ir.DomainCapability):
                     caps.add(dom)
             return caps
@@ -364,13 +364,13 @@ class VExpr(Expr):
         else:
             dom = self.T.U.restrict(v)
         new_T = self.T.refine(dom)
-        new_node = self.node.replace(*self.node._children, T=new_T.node, obl=self.node.obl)
+        new_node = self.node.replace(*self.node.children, T=new_T.node, obl=self.node.obl)
         return type(self)(new_node)
 
     def guard(self, p: BoolExpr):
         p = BoolExpr.make(p)
         new_obl = (self.obl & p).node if self.obl is not None else p.node
-        node = self.node.replace(*self.node._children, T=self.node.T, obl=new_obl)
+        node = self.node.replace(*self.node.children, T=self.node.T, obl=new_obl)
         return wrap(node)
 
     @property
@@ -380,13 +380,13 @@ class VExpr(Expr):
     def with_view(self, view: ViewExpr):
         assert isinstance(view, ViewExpr)
         T = self.T.with_view(view)
-        node = self.node.replace(*self.node._children, T=T.node, obl=self.node.obl)
+        node = self.node.replace(*self.node.children, T=T.node, obl=self.node.obl)
         return wrap(node)
 
     def forget_view(self):
         if self.T.has_view:
             newT = self.T.forget_view().node
-            node = self.node.replace(*self.node._children, T=newT, obl=self.node.obl)
+            node = self.node.replace(*self.node.children, T=newT, obl=self.node.obl)
             return wrap(node)
         return self
 
@@ -738,7 +738,7 @@ class DomainExpr(VExpr):
 
     def as_refT(self) -> TExpr:
         baseT = self.T.carT.node
-        return wrapT(baseT.replace(*baseT._children, ref=self.node, view=baseT.view, obl=baseT.obl))
+        return wrapT(baseT.replace(*baseT.children, ref=self.node, view=baseT.view, obl=baseT.obl))
 
     def as_nd(self) -> DomainExpr:
         if self.T.has_view:

@@ -69,8 +69,8 @@ class AlgebraicSimplificationPass(Transform):
         neg_children, non_neg_children = _partition(children, lambda c: isinstance(c, ir.Neg))
         children = non_neg_children
         for neg_child in neg_children:
-            if neg_child._children[0] in children:
-                children.remove(neg_child._children[0])
+            if neg_child.children[0] in children:
+                children.remove(neg_child.children[0])
             else:
                 children.append(neg_child)
 
@@ -99,8 +99,8 @@ class AlgebraicSimplificationPass(Transform):
         # TODO All this needs guards
         div_children, non_div_children = _partition(children, lambda c: isinstance(c, ir.TrueDiv))
         if len(div_children)>0:
-            tops = [c._children[0] for c in div_children] + non_div_children
-            bots = [c._children[1] for c in div_children]
+            tops = [c.children[0] for c in div_children] + non_div_children
+            bots = [c.children[1] for c in div_children]
             result = (std.prod(ast.wrap(t) for t in tops) / std.prod(ast.wrap(b) for b in bots)).node
             return _with_obl(result, vc.obl)
 
@@ -108,7 +108,7 @@ class AlgebraicSimplificationPass(Transform):
         sqrt_children, non_sqrt_children = _partition(children, lambda c: isinstance(c, ir.Isqrt))
         # If there are multiple sqrt children, we can simplify them to a single sqrt
         if len(sqrt_children)>1:
-            sqrt = std.isqrt(std.prod(ast.wrap(c._children[0]) for c in sqrt_children)).node
+            sqrt = std.isqrt(std.prod(ast.wrap(c.children[0]) for c in sqrt_children)).node
             children = non_sqrt_children + [sqrt]
         children.sort()
         return node.replace(*children, T=T, obl=vc.obl)
@@ -120,7 +120,7 @@ class AlgebraicSimplificationPass(Transform):
         T = vc.T
         a, = vc.children
         if isinstance(a, ir.Prod):
-            terms = list(a._children)
+            terms = list(a.children)
             outs = []
             ins = []
             i=0
@@ -149,24 +149,24 @@ class AlgebraicSimplificationPass(Transform):
             case (ir.Lit(val=0), _):
                 return _with_obl(ir.Lit(T, 0), vc.obl)
         if isinstance(a, ir.TrueDiv):
-            c, d = a._children
+            c, d = a.children
             result = ((ast.wrap(b)*ast.wrap(c))/ast.wrap(d)).node
             return _with_obl(result, vc.obl)
         if isinstance(b, ir.TrueDiv):
-            c, d = b._children
+            c, d = b.children
             result = ((ast.wrap(a)*ast.wrap(d))/ast.wrap(c)).node
             return _with_obl(result, vc.obl)
         if isinstance(b, ir.Isqrt):
-            result = ((ast.wrap(a)*ast.wrap(b))/ast.wrap(b._children[0])).node
+            result = ((ast.wrap(a)*ast.wrap(b))/ast.wrap(b.children[0])).node
             return _with_obl(result, vc.obl)
 
         if isinstance(a, ir.Prod) or isinstance(b, ir.Prod):
             if isinstance(a, ir.Prod):
-                tops = list(a._children)
+                tops = list(a.children)
             else:
                 tops = [a]
             if isinstance(b, ir.Prod):
-                bots = list(b._children)
+                bots = list(b.children)
             else:
                 bots = [b]
             new_tops = []
@@ -299,13 +299,13 @@ class AlgebraicSimplificationPass(Transform):
         if isinstance(scrut, ir.Inj):
             idx = scrut.idx
             assert isinstance(idx, int)
-            val, = scrut._children
+            val, = scrut.children
             assert idx < len(cases)
             result = ir.Apply(T, cases[idx], val)
             return _with_obl(result, vc.obl)
         if isinstance(scrut, ir.SumLit):
             # Match(SumLit(tag, *elems), *branch_lams) -> ApplyFunc(FuncLit(...), tag)
-            tag, *elems = scrut._children
+            tag, *elems = scrut.children
             # Create Fin domain for indices
             n = len(elems)
             fin_domT = ir.DomT.make(carT=ir.IntT(), fin=True, ord=True)
@@ -337,7 +337,7 @@ class AlgebraicSimplificationPass(Transform):
         T = vc.T
         tup, = vc.children
         if isinstance(tup, ir.TupleLit):
-            elems = list(tup._children)
+            elems = list(tup.children)
             assert node.idx < len(elems)
             return _with_obl(elems[node.idx], vc.obl)
         return node.replace(tup, T=T, obl=vc.obl)
@@ -349,8 +349,8 @@ class AlgebraicSimplificationPass(Transform):
         T = vc.T
         elems = list(vc.children)
         if len(elems)>0 and all(isinstance(e, ir.Proj) and e.idx==i for i, e in enumerate(elems)):
-            v0 = elems[0]._children[0]
-            if all(v0==e._children[0] for e in elems):
+            v0 = elems[0].children[0]
+            if all(v0==e.children[0] for e in elems):
                 #Make sure that the proj value has the correct size
                 if len(ast.wrap(v0).T)==len(elems):
                     return _with_obl(v0, vc.obl)
@@ -382,9 +382,9 @@ class AlgebraicSimplificationPass(Transform):
         if a == b:
             return _with_obl(ast.BoolExpr.make(True).node, vc.obl)
         if isinstance(a, ir.CartProd) and isinstance(b, ir.CartProd):
-            assert len(a._children) == len(b._children)
+            assert len(a.children) == len(b.children)
             ps = []
-            for ca, cb in zip(a._children, b._children):
+            for ca, cb in zip(a.children, b.children):
                 ps.append(ast.wrap(ca)<= ast.wrap(cb))
             return _with_obl(std.all(ps).node, vc.obl)
         if isinstance(a, ir.Singleton):

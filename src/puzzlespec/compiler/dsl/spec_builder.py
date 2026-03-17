@@ -58,7 +58,7 @@ class PuzzleSpecBuilder:
         #new_rules_node = guard_opt(new_rules_node)
         if new_rules_node.obl is not None:
             p = new_rules_node.obl
-            new_rules_node = new_rules_node.replace(*new_rules_node._children, T=new_rules_node.T, obl=None)
+            new_rules_node = new_rules_node.replace(*new_rules_node.children, T=new_rules_node.T, obl=None)
             obls = ast.TupleExpr.make((ast.wrap(p),)).node
         else:
             obls = ast.TupleExpr.make(()).node

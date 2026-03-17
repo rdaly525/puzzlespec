@@ -88,7 +88,7 @@ class DischargeEngine(Engine):
         elif goal in goalN.facts:
             goalN.status = "Proven"
         elif isinstance(goal, ir.Conj):
-            children = [self.build_goal(c) for c in goal._children[1:]]
+            children = [self.build_goal(c) for c in goal.children[1:]]
             goalN.status = "Expanded"
             goalN.kind = "and"
             for c in children:
@@ -97,7 +97,7 @@ class DischargeEngine(Engine):
             just = Justification('And', 'and', tuple(children), goalN)
             goalN.add_justification(just)
         elif isinstance(goal, ir.Disj):
-            children = [self.build_goal(c) for c in goal._children[1:]]
+            children = [self.build_goal(c) for c in goal.children[1:]]
             goalN.status = "Expanded"
             goalN.kind = "or"
             # Only add 1st branch

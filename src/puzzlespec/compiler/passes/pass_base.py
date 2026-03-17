@@ -196,7 +196,7 @@ class Analysis(Pass):
 
     def visit_children(self, node: ir.Node):
         from ..dsl import ir
-        children = tuple(self.visit(c) for c in node._children)
+        children = tuple(self.visit(c) for c in node.children)
         if isinstance(node, ir.Value):
             T_result = self.visit(node.T)
             obl_result = self.visit(node.obl) if node.obl is not None else None
@@ -306,7 +306,7 @@ class Transform(Pass):
 
     def visit_children(self, node: ir.Node):
         from ..dsl import ir
-        children = tuple(self.visit(c) for c in node._children)
+        children = tuple(self.visit(c) for c in node.children)
         if isinstance(node, ir.Value):
             new_T = self.visit(node.T)
             new_obl = self.visit(node.obl) if node.obl is not None else None

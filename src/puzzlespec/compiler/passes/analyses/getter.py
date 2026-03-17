@@ -65,7 +65,7 @@ class ClosedVarGetter(Analysis):
         vc = self.visit_children(node)
         T_vars = vc.T
         body_vars, = vc.children
-        bv = node.T._children[0]  # BoundVarHOAS from PiTHOAS
+        bv = node.T.children[0]  # BoundVarHOAS from PiTHOAS
         vars = (T_vars | body_vars) | {bv}
         return vars
 

@@ -26,7 +26,7 @@ class IRIndexView(ir.View):
 
     @property
     def idx_lam(self):
-        return self._children[0]
+        return self.children[0]
 ir.NODE_PRIORITY[IRIdxViewT] = 0
 
 class IdxView(ast.ViewExpr):
@@ -61,7 +61,7 @@ class IdxView(ast.ViewExpr):
         dom = self.idx_lam.domain
         if isinstance(dom.node, ir.CartProd):
             doms = []
-            for d in dom.node._children:
+            for d in dom.node.children:
                 assert isinstance(d, ir.Fin)
                 doms.append(ast.wrap(d))
         else:

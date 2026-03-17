@@ -53,7 +53,7 @@ class DomainSimplificationPass(Transform):
         T = vc.T
         dom, = vc.children
         if isinstance(dom, ir.CartProd):
-            cart_doms = list(dom._children)
+            cart_doms = list(dom.children)
             assert node.idx < len(cart_doms)
             new_dom = cart_doms[node.idx]
             assert ast.wrapT(T)==ast.wrapT(new_dom.T)
@@ -66,33 +66,33 @@ class DomainSimplificationPass(Transform):
         T = vc.T
         dom, = vc.children
         if isinstance(dom, ir.Fin):
-            N, = dom._children
+            N, = dom.children
             return _with_obl(N, vc.obl)
         if isinstance(dom, ir.Singleton):
             return _with_obl(ir.Lit(ir.IntT(), val=1), vc.obl)
         if isinstance(dom, ir.DomLit) and dom.is_set:
-            num_elems = len(dom._children)
+            num_elems = len(dom.children)
             return _with_obl(ir.Lit(ir.IntT(), val=num_elems), vc.obl)
         if isinstance(dom, ir.Slice):
-            dom_inner, lo, hi, step = dom._children
+            dom_inner, lo, hi, step = dom.children
             lo, hi, step = ast.IntExpr(lo), ast.IntExpr(hi), ast.IntExpr(step)
             size = (hi-lo)//step
             return _with_obl(size.node, vc.obl)
         if isinstance(dom, ir.Range):
-            lo, hi, step = dom._children
+            lo, hi, step = dom.children
             lo, hi, step = ast.IntExpr(lo), ast.IntExpr(hi), ast.IntExpr(step)
             size = (hi-lo)//step
             return _with_obl(size.node, vc.obl)
         if isinstance(dom, ir.CartProd):
-            cart_doms = list(dom._children)
+            cart_doms = list(dom.children)
             result = ir.Prod(ir.IntT(), *(ir.Card(ir.IntT(), d) for d in cart_doms))
             return _with_obl(result, vc.obl)
         if isinstance(dom, ir.DisjUnion):
-            union_doms = list(dom._children)
+            union_doms = list(dom.children)
             result = ir.Sum(ir.IntT(), *(ir.Card(ir.IntT(), d) for d in union_doms))
             return _with_obl(result, vc.obl)
         if isinstance(dom, ir.Image):
-            func, = dom._children
+            func, = dom.children
             func_ast = ast.wrap(func)
             if func_ast.known_inj:
                 return _with_obl(func_ast.domain.size.node, vc.obl)
@@ -104,7 +104,7 @@ class DomainSimplificationPass(Transform):
         T = vc.T
         dom, = vc.children
         if isinstance(dom, ir.Singleton):
-            val, = dom._children
+            val, = dom.children
             return _with_obl(val, vc.obl)
         return node.replace(dom, T=T, obl=vc.obl)
 
@@ -121,7 +121,7 @@ class DomainSimplificationPass(Transform):
             if isinstance(dom, ir.Singleton):
                 return _with_obl(func_ast.apply(func_ast.domain.unique_elem).as_singleton.node, vc.obl)
             if isinstance(dom, ir.Image):
-                func2, = dom._children
+                func2, = dom.children
                 if isinstance(func2, ir._Lambda):
                     func2_ast = ast.wrap(func2)
                     return _with_obl((func_ast @ func2_ast).image.node, vc.obl)
@@ -142,13 +142,13 @@ class DomainSimplificationPass(Transform):
         T = vc.T
         func, = vc.children
         if isinstance(func, ir._Lambda):
-            body, = func._children
+            body, = func.children
             piT = func.T
-            argT, resT = piT._children
+            argT, resT = piT.children
             if argT.ref is not None:
                 dom = argT.ref
                 if isinstance(dom, ir.Restrict):
-                    func_i, = dom._children
+                    func_i, = dom.children
                     new_func = ast.wrap(func_i).imap(lambda i, v: ast.wrap(func)(i) & v)
                     return _with_obl(ir.Restrict(T, new_func.node), vc.obl)
         return node.replace(func, T=T, obl=vc.obl)
@@ -169,7 +169,7 @@ class DomainSimplificationPass(Transform):
             if isinstance(dom, ir.Universe) and dom.T.ref is None:
                 continue
             elif isinstance(dom, ir.Intersection):
-                new_doms.extend(dom._children)
+                new_doms.extend(dom.children)
             else:
                 new_doms.append(dom)
         _new_doms = []
@@ -188,7 +188,7 @@ class DomainSimplificationPass(Transform):
             doms = []
             funcs = []
             for rdom in rdoms:
-                func, = rdom._children
+                func, = rdom.children
                 func_ast = ast.wrap(func)
                 dom = func_ast.domain
                 doms.append(dom)
@@ -208,7 +208,7 @@ class DomainSimplificationPass(Transform):
         T = vc.T
         dom, val = vc.children
         if isinstance(dom, ir.Restrict):
-            func, = dom._children
+            func, = dom.children
             f = ast.wrap(func)
             v = ast.wrap(val)
             return _with_obl((f.domain.contains(v) & f(v)).node, vc.obl)
@@ -225,7 +225,7 @@ class DomainSimplificationPass(Transform):
         lam, arg = vc.children
         if isinstance(lam, ir.Compose):
             ret = ast.wrap(arg)
-            for clam in reversed(list(lam._children)):
+            for clam in reversed(list(lam.children)):
                 ret = ast.wrap(clam)(ret)
             return _with_obl(ret.node, vc.obl)
         return node.replace(lam, arg, T=T, obl=vc.obl)

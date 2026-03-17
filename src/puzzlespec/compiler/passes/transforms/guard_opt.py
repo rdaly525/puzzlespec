@@ -17,7 +17,7 @@ def _get_bvs(node: ir.Node):
         return {node.name}
     ret = set()
     if isinstance(node, (ir.LambdaHOAS, ir.PiTHOAS)):
-        body = node._children[0] if isinstance(node, ir.LambdaHOAS) else node._children[1]
+        body = node.children[0] if isinstance(node, ir.LambdaHOAS) else node.children[1]
         for c in node.all_nodes:
             ret |= _get_bvs(c)
         ret -= {node.bv_name}
@@ -66,7 +66,7 @@ class GuardLift(Transform):
 
     def handle_pre(self, pre: ir.Node):
         if isinstance(pre, ir.Conj):
-            for c in pre._children:
+            for c in pre.children:
                 self.preds.add(c)
         else:
             self.preds.add(pre)
@@ -98,7 +98,7 @@ class GuardLift(Transform):
 
     @handles(ir.LambdaHOAS)
     def _(self, node: ir.LambdaHOAS):
-        body = node._children[0]
+        body = node.children[0]
         newT = self.visit(node.T)
         cur_preds = self.preds
         self.preds = set()
@@ -112,7 +112,7 @@ class GuardLift(Transform):
 
     @handles(ir.PiTHOAS)
     def _(self, node: ir.PiTHOAS):
-        argT, resT = node._children
+        argT, resT = node.children
         new_argT = self.visit(argT)
         cur_preds = self.preds
         self.preds = set()
@@ -128,7 +128,7 @@ class GuardLift(Transform):
         cons, obs = self.visit_children(node)
         if cons.obl is not None:
             p = cons.obl
-            cons = cons.replace(*cons._children, T=cons.T, obl=None)
+            cons = cons.replace(*cons.children, T=cons.T, obl=None)
             obs = ast.TupleExpr.make((ast.wrap(p),)).node
             return ir.Spec(cons, obs)
         return node.replace(cons, obs)

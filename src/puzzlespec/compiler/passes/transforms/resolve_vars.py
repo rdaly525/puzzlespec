@@ -31,9 +31,9 @@ class ResolveBoundVars(Transform):
 
     @handles(ir.LambdaHOAS)
     def _(self, node):
-        body, = node._children
+        body, = node.children
         T = node.T  # PiTHOAS
-        bv = T._children[0]  # BoundVarHOAS from PiTHOAS's argT
+        bv = T.children[0]  # BoundVarHOAS from PiTHOAS's argT
         new_T = self.visit(T)
         self.stack.append(bv)
         new_body = self.visit(body)
@@ -42,7 +42,7 @@ class ResolveBoundVars(Transform):
 
     @handles(ir.Lambda)
     def _(self, node):
-        body, = node._children
+        body, = node.children
         new_T = self.visit(node.T)
         self.stack.append(None)
         new_body = self.visit(body)
@@ -51,7 +51,7 @@ class ResolveBoundVars(Transform):
 
     @handles(ir.PiTHOAS)
     def _(self, node):
-        bv, bodyT = node._children
+        bv, bodyT = node.children
         bv_T = self.visit(bv.T)
         self.stack.append(bv)
         new_bodyT = self.visit(bodyT)
@@ -60,7 +60,7 @@ class ResolveBoundVars(Transform):
 
     @handles(ir.PiT)
     def _(self, node):
-        argT, bodyT = node._children
+        argT, bodyT = node.children
         new_argT = self.visit(argT)
         self.stack.append(None)
         new_bodyT = self.visit(bodyT)
@@ -135,7 +135,7 @@ class CloseBoundVars(Transform):
 
     @handles(ir.LambdaHOAS)
     def _(self, node: ir.LambdaHOAS):
-        bv = node.T._children[0]  # BoundVarHOAS from PiTHOAS's argT
+        bv = node.T.children[0]  # BoundVarHOAS from PiTHOAS's argT
         if bv._key == self.bv._key:
             raise ValueError("Same binder in scope")
         vc = self.visit_children(node)
@@ -143,7 +143,7 @@ class CloseBoundVars(Transform):
 
     @handles(ir.PiTHOAS)
     def _(self, node: ir.PiTHOAS):
-        bv = node._children[0]  # BoundVarHOAS argT
+        bv = node.children[0]  # BoundVarHOAS argT
         if bv._key == self.bv._key:
             raise ValueError("Same binder in scope")
         vc = self.visit_children(node)
