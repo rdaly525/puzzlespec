@@ -15,17 +15,18 @@ class IRIdxViewT(ir.ViewT):
 ir.NODE_PRIORITY[IRIdxViewT] = 0
 
 class IRIndexView(ir.View):
-    _numc=2
-    def __init__(self, T: IRIdxViewT, idx_lam: ir.Value):
-        super().__init__(T, idx_lam)
+    _numc=1
+    def __init__(self, T: IRIdxViewT, idx_lam: ir.Value, obl=None):
+        super().__init__(T, idx_lam, obl=obl)
 
     def pretty(self, pp):
-        Ts, ridx = pp.visit_children(self)
+        vc = pp.visit_children(self)
+        ridx = vc.children[0]
         return f"IdxView[{ridx}]"
 
     @property
     def idx_lam(self):
-        return self._children[1]
+        return self._children[0]
 ir.NODE_PRIORITY[IRIdxViewT] = 0
 
 class IdxView(ast.ViewExpr):
@@ -60,7 +61,7 @@ class IdxView(ast.ViewExpr):
         dom = self.idx_lam.domain
         if isinstance(dom.node, ir.CartProd):
             doms = []
-            for d in dom.node._children[1:]:
+            for d in dom.node._children:
                 assert isinstance(d, ir.Fin)
                 doms.append(ast.wrap(d))
         else:

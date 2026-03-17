@@ -57,7 +57,7 @@ p += Cells.forall(
 )
 
 spec = p.build("Sudoku")
-print(spec.optimize())
+#print(spec.optimize())
 exit()
 #print("SETTING B = 3")
 #setter = VarSetter(spec)

@@ -34,6 +34,14 @@ class BetaReductionPass(Transform):
 
     # ---------- helpers ----------
 
+    def _replace(self, t: ir.Node, *new_children) -> ir.Node:
+        """Helper to call replace with the correct kwargs depending on node kind."""
+        if isinstance(t, ir.Value):
+            return t.replace(*new_children, T=t.T, obl=t.obl)
+        elif isinstance(t, ir.Type):
+            return t.replace(*new_children, ref=t.ref, view=t.view, obl=t.obl)
+        return t.replace(*new_children)
+
     def shift(self, t: ir.Node, d: int, cutoff: int = 0) -> ir.Node:
         """
         shift(d, cutoff, t): add d to all BoundVar indices >= cutoff
@@ -42,27 +50,24 @@ class BetaReductionPass(Transform):
         if isinstance(t, ir.BoundVar):
             k = t.idx
             if k >= cutoff:
-                return ir.BoundVar(k + d)
+                return ir.BoundVar(t.T, k + d)
             else:
                 return t
 
         if isinstance(t, ir.Lambda):
-            argT, body = t._children
-            # binder does *not* apply inside argT
-            argT2 = self.shift(argT, d, cutoff)
+            body = t._children[0]
             body2 = self.shift(body, d, cutoff + 1)
-            return t.replace(argT2, body2)
+            return self._replace(t, body2)
 
         if isinstance(t, ir.PiT):
-            argT, body = t._children
-            # binder does *not* apply inside argT
+            argT, resT = t._children
             argT2 = self.shift(argT, d, cutoff)
-            body2 = self.shift(body, d, cutoff + 1)
-            return t.replace(argT2, body2)
+            resT2 = self.shift(resT, d, cutoff + 1)
+            return t.replace(argT2, resT2, ref=t.ref, view=t.view, obl=t.obl)
 
         # generic n-ary node: no new binder
         new_children = [self.shift(c, d, cutoff) for c in t._children]
-        return t.replace(*new_children) 
+        return self._replace(t, *new_children)
 
     def subst(self, t: ir.Node, j: int, s: ir.Node, depth: int = 0) -> ir.Node:
         """
@@ -73,25 +78,23 @@ class BetaReductionPass(Transform):
         if isinstance(t, ir.BoundVar):
             k = t.idx
             if k == j + depth:
-                # found the var to replace; shift s by depth to account for binders
                 return self.shift(s, depth)
             else:
                 return t
 
         if isinstance(t, ir.Lambda):
-            argT, body = t._children
-            argT2 = self.subst(argT, j, s, depth)        # no new binder in argT
-            body2 = self.subst(body, j, s, depth + 1)    # binder in body
-            return t.replace(argT2, body2)
+            body = t._children[0]
+            body2 = self.subst(body, j, s, depth + 1)
+            return self._replace(t, body2)
 
         if isinstance(t, ir.PiT):
-            argT, body = t._children
-            argT2 = self.subst(argT, j, s, depth)        # no new binder in argT
-            body2 = self.subst(body, j, s, depth + 1)
-            return t.replace(argT2, body2)
+            argT, resT = t._children
+            argT2 = self.subst(argT, j, s, depth)
+            resT2 = self.subst(resT, j, s, depth + 1)
+            return t.replace(argT2, resT2, ref=t.ref, view=t.view, obl=t.obl)
 
         new_children = [self.subst(c, j, s, depth) for c in t._children]
-        return t.replace(*new_children)
+        return self._replace(t, *new_children)
 
     # ---------- visitors ----------
 
@@ -105,9 +108,9 @@ class BetaReductionPass(Transform):
         # first recursively reduce inside
         T, lam, arg = self.visit_children(node)
         assert isinstance(lam, ir.Lambda)
-        lamT, body = lam._children
+        body = lam._children[0]
 
-        # 1. shift argument up by 1 for the binder we’re eliminating
+        # 1. shift argument up by 1 for the binder we're eliminating
         arg_p1 = self.shift(arg, +1, cutoff=0)
 
         # 2. substitute for "0" (j=0) in body
@@ -131,7 +134,6 @@ class BetaReductionHOAS(Transform):
     @handles(ir.BoundVarHOAS)
     def _(self, node: ir.BoundVarHOAS):
         if node.name in self.bv_map:
-            #print(f"  BV: {node.name} -> {self.bv_map[node.name]}")
             return self.bv_map[node.name]
         return super().visit(node)
 
@@ -156,10 +158,9 @@ class BetaReductionHOAS(Transform):
 
     @handles(ir.Apply)
     def _(self, node: ir.Apply):
-        #T, lam, arg = self.visit_children(node)
-        T, lam, arg = node._children
+        lam, arg = node._children
         if isinstance(lam, ir.LambdaHOAS):
-            T, body = lam._children
+            body = lam._children[0]
             bv_name = lam.bv_name
             if bv_name in self.bv_map:
                 raise ValueError()
@@ -169,4 +170,3 @@ class BetaReductionHOAS(Transform):
             del self.bv_map[bv_name]
             return new_body
         return super().visit(node)
-            

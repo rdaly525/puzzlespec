@@ -6,7 +6,6 @@ from .transforms.beta_reduction import BetaReductionHOAS, BetaReductionPass
 #from .transforms.refine import RefineSimplify
 from .transforms import ConstFoldPass, AlgebraicSimplificationPass
 from .transforms.resolve_vars import ResolveBoundVars
-from .transforms.ord import OrdSimplificationPass
 from .transforms.guard_opt import GuardLift, GuardOpt, GuardStrip
 from .transforms.curry import CurryPass
 from .transforms.nd_simplification import NDSimplificationPass

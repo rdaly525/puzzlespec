@@ -33,6 +33,13 @@ class Expr:
     def _size(self, unique=True):
         return count(self.node, unique)
 
+    @property
+    def obl(self) -> tp.Optional[BoolExpr]:
+        raw = self.node.obl
+        if raw is None:
+            return None
+        return BoolExpr(raw)
+
 class TExpr(Expr):
     node: ir.Type
 
@@ -45,43 +52,39 @@ class TExpr(Expr):
     def __repr__(self):
         return pretty(self.node)
 
-    # no refinement node
+    # Strip named children (ref, view, obl) to get the raw base type
     @property
     def _node(self):
-        def get(node: ir.Type):
-            if isinstance(node, (ir.RefT, ir.GuardT, ir.ViewWrapperT)):
-                return get(node.T)
-            return node
-        return get(self.node)
+        return self.node.rawT
 
     @property
     def is_ref(self):
-        return isinstance(self.node, ir.RefT)
-    
+        return self.node.ref is not None
+
     @property
     def ref_dom(self) -> tp.Optional[DomainExpr]:
         if self.is_ref:
-            return wrap(self.node.dom)
+            return wrap(self.node.ref)
         return None
 
     @property
     def has_view(self):
-        return isinstance(self.node, ir.ViewWrapperT)
+        return self.node.view is not None
 
     def forget_view(self):
         if self.has_view:
-            return wrapT(self.node._children[0])
+            return wrapT(self.node.replace(*self.node._children, ref=self.node.ref, view=None, obl=self.node.obl))
         return self
-    
+
     @property
     def view(self) -> tp.Optional[ViewExpr]:
         if self.has_view:
-            return wrap(self.node._children[1])
+            return wrap(self.node.view)
         return None
 
     def with_view(self, view: ViewExpr):
         assert not self.has_view
-        node = ir.ViewWrapperT(self.node, view.node)
+        node = self.node.replace(*self.node._children, ref=self.node.ref, view=view.node, obl=self.node.obl)
         return wrapT(node)
 
     @property
@@ -111,12 +114,9 @@ class TExpr(Expr):
 
     def guard(self, p: BoolExpr):
         p = BoolExpr.make(p)
-        raw = self.forget_view().node
-        node = ir.GuardT(raw, p.node)
-        T = wrapT(node)
-        if self.has_view:
-            return T.with_view(self.view)
-        return T
+        new_obl = (self.obl & p).node if self.obl is not None else p.node
+        node = self.node.replace(*self.node._children, ref=self.node.ref, view=self.node.view, obl=new_obl)
+        return wrapT(node)
 
     def choose(self, plam: tp.Callable) -> VExpr:
         lam = FuncExpr.make(self, plam)
@@ -231,7 +231,7 @@ class DomainType(TExpr):
             return set((self.ref_dom.node,))
         if isinstance(self.ref_dom.node, ir.Intersection):
             caps = set()
-            for dom in self.ref_dom.node._children[1:]:
+            for dom in self.ref_dom.node._children:
                 if isinstance(dom, ir.DomainCapability):
                     caps.add(dom)
             return caps
@@ -246,11 +246,11 @@ class FuncType(TExpr):
     
     @property
     def argT(self) -> TExpr:
-        return wrapT(self._node.argT)
+        return wrapT(self.node.argT)
 
     def resT(self, arg: VExpr):
         from ..passes.transforms.beta_reduction import applyT
-        rT_node = applyT(self._node, arg.node)
+        rT_node = applyT(self.node, arg.node)
         rT = wrapT(rT_node)
         return rT
 
@@ -280,11 +280,7 @@ class ViewType(TExpr):
     
 def wrapT(T: ir.Type):
     assert isinstance(T, ir.Type)
-    def get(T: ir.Type):
-        if isinstance(T, (ir.RefT, ir.GuardT, ir.ViewWrapperT)):
-            return get(T.T)
-        return T
-    _T = get(T)
+    _T = T.rawT
     if isinstance(_T, ir.ViewT):
         return ViewType(T)
     match type(_T):
@@ -330,14 +326,10 @@ class VExpr(Expr):
     def _T(self) -> TExpr:
         return wrapT(self.T._node)
     
-    # raw node, no guards
+    # raw node, no obligations
     @property
     def _node(self) -> ir.Node:
-        def strip(node):
-            if isinstance(node, ir.Guard):
-                return strip(node._children[1])
-            return node
-        return strip(self.node)
+        return self.node
 
     @classmethod
     def make(cls, val: tp.Any) -> VExpr:
@@ -372,13 +364,13 @@ class VExpr(Expr):
         else:
             dom = self.T.U.restrict(v)
         new_T = self.T.refine(dom)
-        new_node = self.node.replace(new_T.node, *self.node._children[1:])
+        new_node = self.node.replace(*self.node._children, T=new_T.node, obl=self.node.obl)
         return type(self)(new_node)
 
     def guard(self, p: BoolExpr):
-        return self
         p = BoolExpr.make(p)
-        node = ir.Guard(self.T.node, self.node, p.node)
+        new_obl = (self.obl & p).node if self.obl is not None else p.node
+        node = self.node.replace(*self.node._children, T=self.node.T, obl=new_obl)
         return wrap(node)
 
     @property
@@ -388,13 +380,13 @@ class VExpr(Expr):
     def with_view(self, view: ViewExpr):
         assert isinstance(view, ViewExpr)
         T = self.T.with_view(view)
-        node = self.node.replace(T.node, *self.node._children[1:])
+        node = self.node.replace(*self.node._children, T=T.node, obl=self.node.obl)
         return wrap(node)
 
     def forget_view(self):
         if self.T.has_view:
             newT = self.T.forget_view().node
-            node = self.node.replace(newT, *self.node._children[1:])
+            node = self.node.replace(*self.node._children, T=newT, obl=self.node.obl)
             return wrap(node)
         return self
 
@@ -745,7 +737,8 @@ class DomainExpr(VExpr):
         return tp.cast(DomainType, super().T)
 
     def as_refT(self) -> TExpr:
-        return wrapT(ir.RefT(self.T.carT.node, self.node))
+        baseT = self.T.carT.node
+        return wrapT(baseT.replace(*baseT._children, ref=self.node, view=baseT.view, obl=baseT.obl))
 
     def as_nd(self) -> DomainExpr:
         if self.T.has_view:
@@ -906,7 +899,7 @@ def _make_lambda(argT: TExpr, body: VExpr, bv_name, inj=False) -> FuncExpr:
     lamT = ir.PiTHOAS(argT.node, retT, bv_name=bv_name)
     lambda_node = ir.LambdaHOAS(lamT, body.node, bv_name=bv_name)
     if inj:
-        lambda_node._attrs['inj'] = BoolLat.T
+        lambda_node._metadata['inj'] = BoolLat.T
     return lambda_node
 
 class FuncExpr(VExpr):
@@ -939,7 +932,7 @@ class FuncExpr(VExpr):
 
     @property
     def known_inj(self) -> bool:
-        inj = self.node._attrs.get('inj', None)
+        inj = self.node._metadata.get('inj', None)
         if inj is not None:
             return inj == BoolLat.T
         # TODO maybe try to infer?
@@ -1090,7 +1083,7 @@ class EmptyFuncExpr(FuncExpr):
         if (isinstance(k, VExpr) and isinstance(k.node, ir.BoundVarHOAS)):
             # verify it came from correct dom
             T = k.node.T
-            if isinstance(T, ir.RefT) and T.dom._key == self.dom.node._key:
+            if T.ref is not None and T.ref._key == self.dom.node._key:
                 lam_e = _make_lambda(k, val)
                 funcT = ir.FuncT(self.dom.node, lam_e.T._node)
                 func_node = ir.Map(funcT, self.dom.node, lam_e.node)

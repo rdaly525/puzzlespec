@@ -62,8 +62,11 @@ class ClosedVarGetter(Analysis):
 
     @handles(ir.LambdaHOAS)
     def _(self, node: ir.LambdaHOAS):
-        T_vars, bv_vars, body_vars = self.visit_children(node)
-        vars = (T_vars | body_vars | bv_vars) | set((node._children[1]))
+        vc = self.visit_children(node)
+        T_vars = vc.T
+        body_vars, = vc.children
+        bv = node.T._children[0]  # BoundVarHOAS from PiTHOAS
+        vars = (T_vars | body_vars) | {bv}
         return vars
 
 

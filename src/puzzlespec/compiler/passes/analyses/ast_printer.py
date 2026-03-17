@@ -36,16 +36,42 @@ class AstPrinterPass(Analysis):
         return PrintedAST(rendered)
     
     def visit(self, node: ir.Node):
-        indent = "| "*self.depth
-        fstr = ", ".join([f"{k}={v}" for k,v in node.field_dict.items()])
+        indent = "| " * self.depth
+        fstr = ", ".join([f"{k}={v}" for k, v in node.field_dict.items()])
         if fstr:
             fstr = f"[{fstr}]"
         node_prefix = indent + f"{node.__class__.__name__}{fstr}: {str(node._hash)[-5:]}"
         self.depth += 1
-        children_strs = self.visit_children(node)
 
-        if node.num_children > 0:
-            s = node_prefix + "(\n" + "\n".join(cs for cs in children_strs) + f"\n{indent})"
+        parts = []
+        if isinstance(node, ir.Value):
+            vc = self.visit_children(node)
+            T_str = self.visit(node.T)
+            parts.append(f"{indent}| T={T_str}")
+            for i, c in enumerate(node._children):
+                parts.append(self.visit(c))
+            if vc.obl is not None:
+                obl_str = self.visit(node.obl)
+                parts.append(f"{indent}| obl={obl_str}")
+        elif isinstance(node, ir.Type):
+            vc = self.visit_children(node)
+            for c in node._children:
+                parts.append(self.visit(c))
+            if vc.ref is not None:
+                ref_str = self.visit(node.ref)
+                parts.append(f"{indent}| ref={ref_str}")
+            if vc.view is not None:
+                view_str = self.visit(node.view)
+                parts.append(f"{indent}| view={view_str}")
+            if vc.obl is not None:
+                obl_str = self.visit(node.obl)
+                parts.append(f"{indent}| obl={obl_str}")
+        else:
+            for c in node._children:
+                parts.append(self.visit(c))
+
+        if parts:
+            s = node_prefix + "(\n" + "\n".join(parts) + f"\n{indent})"
         else:
             s = node_prefix + "()"
         self.depth -= 1

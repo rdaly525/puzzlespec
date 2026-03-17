@@ -30,26 +30,12 @@ class RefineBottomUp(Transform):
     def _(self, node: ir.Not):
         a, = self.visit_children(node)
 
-    #(a: (N > M) & b : domB)
-    # a in ()
-    #Eq: 101,
-    #Lt: 102,
-    #LtEq: 103,
-    #Implies: 104,
-    #IsMember: 110,
-    #Subset: 111,
-    #ProperSubset: 112,
-    #Conj: 120,
-    #Disj: 121,   
-    #AllDistinct: 130,
-    #AllSame: 131,   
-    #Forall: 140,
-    #Exists: 141,
     @handles(ir.Sum)
     def _(self, node: ir.Sum):
-        T, *vals = self.visit_children(node)
-        assert all(isinstance(val.T, ir.RefT) for val in vals)
+        vc = self.visit_children(node)
+        T = vc.T
+        vals = list(vc.children)
+        assert all(val.T.ref is not None for val in vals)
         doms = [ast.wrap(val).T.ref_dom for val in vals]
         ref_dom = ast.cartprod(*doms).map(lambda indices: sum(indices, ast.IntExpr.make(0))).image
         return ast.wrap(node).refine(ref_dom).node
- 

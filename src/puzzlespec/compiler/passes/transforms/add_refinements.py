@@ -41,7 +41,8 @@ class FreeVarRefineA(Analysis):
             if len(doms)==0:
                 continue
             dom = ir.Intersection(doms[0].T, *doms)
-            refT = ir.RefT(dom.T.rawT.carT, dom)
+            carT = dom.T.rawT.carT
+            refT = carT.replace(ref=dom, view=None, obl=None)
             sid_to_rvar[sid] = ir.VarRef(refT, sid)
 
         return RefineMap(sid_to_rvar)
@@ -51,8 +52,8 @@ class FreeVarRefineA(Analysis):
         self.visit_children(node)
         if node.sid not in self.sid_to_rdoms:
             self.sid_to_rdoms[node.sid] = []
-        if isinstance(node.T, ir.RefT):
-            T, dom = node.T._children
+        if node.T.ref is not None:
+            dom = node.T.ref
             self.sid_to_rdoms[node.sid].append(dom)
 
 def add_refinements(node: ir.Node):
@@ -76,12 +77,16 @@ class RefineAdd(Transform):
 
     @handles(ir.Fin)
     def _(self, node: ir.Fin):
-        T, N = self.visit_children(node)
+        vc = self.visit_children(node)
+        T = vc.T
+        N, = vc.children
         return ast.wrap(node).refine(lambda _: ast.wrap(N) >=0).node
 
     @handles(ir.Mod, ir.FloorDiv)
     def _(self, node: ir.Value):
-        T, a, b = self.visit_children(node)
+        vc = self.visit_children(node)
+        T = vc.T
+        a, b = vc.children
         return ast.wrap(node).refine(lambda _: ast.wrap(b)!=0).node
 
 
@@ -96,19 +101,5 @@ class RefineCombine(Transform):
 
     def run(self, root: ir.Node, ctx: Context) -> ir.Node:
         new_root = self.visit(root)
-        self.tmap: tp.Mapping[ir.Node, ir.RefT] = {}
+        self.tmap: tp.Mapping[ir.Node, ir.Type] = {}
         return new_root
-
-    #@handles(ir.Add)
-    #def _(self, node: ir.Add):
-    #    T, left, right = self.visit_children(node)
-    #    assert isinstance(left.T, ir.RefT) and isinstance(right.T, ir.RefT)
-    #    refT_l = self.tmap[left]
-    #    refT_r = self.tmap[right]
-    #    ldom = ast.DomainExpr(refT_l.dom)
-    #    rdom = ast.DomainExpr(refT_r.dom)
-    #    new_dom = (ldom * rdom).map(lambda l, r: l+r).image
-    #    refT = ir.RefT(T, new_dom.node)
-    #    self.tmap[node] = refT
-    #    return node.replace(refT, left, right)
- 

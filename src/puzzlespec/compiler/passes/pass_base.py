@@ -4,11 +4,54 @@ import typing as tp
 from typing import TYPE_CHECKING
 from abc import ABC, abstractmethod
 import inspect
+from dataclasses import dataclass
 
 from puzzlespec.compiler.dsl.ir import LambdaHOAS, Node
 
 if TYPE_CHECKING:
     from ..dsl import ir
+
+
+@dataclass
+class VCValue:
+    """Returned by visit_children on a Value node."""
+    children: tuple          # visited definitional children
+    T: 'ir.Type'             # visited type
+    obl: tp.Optional['ir.Value']  # visited obligation; None if absent
+
+    # Backward compat: iterate as (T, *children) like the old flat tuple
+    def __iter__(self):
+        yield self.T
+        yield from self.children
+
+    def __getitem__(self, idx):
+        if isinstance(idx, slice):
+            return (self.T, *self.children)[idx]
+        if idx == 0:
+            return self.T
+        return self.children[idx - 1]
+
+    def __len__(self):
+        return 1 + len(self.children)
+
+
+@dataclass
+class VCType:
+    """Returned by visit_children on a Type node."""
+    children: tuple          # visited definitional children
+    ref: tp.Optional['ir.Value']     # visited refinement; None if absent
+    view: tp.Optional['ir.Node']     # visited view; None if absent
+    obl: tp.Optional['ir.Value']     # visited obligation; None if absent
+
+    # Backward compat: iterate as (*children,) like the old flat tuple
+    def __iter__(self):
+        yield from self.children
+
+    def __getitem__(self, idx):
+        return self.children[idx]
+
+    def __len__(self):
+        return len(self.children)
 
 class AnalysisObject(ABC):
     persistent = False
@@ -151,8 +194,19 @@ class Analysis(Pass):
     def run(self, root: ir.Node, ctx: 'Context'):
         raise NotImplementedError()
 
-    def visit_children(self, node: ir.Node) -> tp.Tuple[tp.Any]:
-        return tuple(self.visit(c) for c in node._children)
+    def visit_children(self, node: ir.Node):
+        from ..dsl import ir
+        children = tuple(self.visit(c) for c in node._children)
+        if isinstance(node, ir.Value):
+            T_result = self.visit(node.T)
+            obl_result = self.visit(node.obl) if node.obl is not None else None
+            return VCValue(children=children, T=T_result, obl=obl_result)
+        elif isinstance(node, ir.Type):
+            ref_result = self.visit(node.ref) if node.ref is not None else None
+            view_result = self.visit(node.view) if node.view is not None else None
+            obl_result = self.visit(node.obl) if node.obl is not None else None
+            return VCType(children=children, ref=ref_result, view=view_result, obl=obl_result)
+        return children
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -235,16 +289,34 @@ class Transform(Pass):
         return new_root, aobjs
 
     def visit(self, node: ir.Node) -> ir.Node:
-        # Fallback: recurse
-        new_children = self.visit_children(node)
-        result = node.replace(*new_children)
-        return result
+        from ..dsl import ir
+        # Fallback: recurse with structured result
+        if isinstance(node, ir.Value):
+            vc = self.visit_children(node)
+            return node.replace(*vc.children, T=vc.T, obl=vc.obl)
+        elif isinstance(node, ir.Type):
+            vc = self.visit_children(node)
+            return node.replace(*vc.children, ref=vc.ref, view=vc.view, obl=vc.obl)
+        else:
+            new_children = self.visit_children(node)
+            return node.replace(*new_children)
 
     def run(self, root: ir.Node, ctx: 'Context') -> ir.Node:
         return self.visit(root)
 
-    def visit_children(self, node: ir.Node) -> tp.Tuple[ir.Node]:
-        return tuple(self.visit(c) for c in node._children)
+    def visit_children(self, node: ir.Node):
+        from ..dsl import ir
+        children = tuple(self.visit(c) for c in node._children)
+        if isinstance(node, ir.Value):
+            new_T = self.visit(node.T)
+            new_obl = self.visit(node.obl) if node.obl is not None else None
+            return VCValue(children=children, T=new_T, obl=new_obl)
+        elif isinstance(node, ir.Type):
+            new_ref = self.visit(node.ref) if node.ref is not None else None
+            new_view = self.visit(node.view) if node.view is not None else None
+            new_obl = self.visit(node.obl) if node.obl is not None else None
+            return VCType(children=children, ref=new_ref, view=new_view, obl=new_obl)
+        return children
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
